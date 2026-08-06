@@ -2,8 +2,8 @@
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: draft
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-07
+version: v0.2
 ---
 
 # 01 · Agent 运行时
@@ -115,7 +115,7 @@ trait AgentBackend {
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | agent 单次任务的硬超时默认值——太短会砍掉正常的长截图解析，太长会让失败态卡住 UI | 本文 §3.4 | M0 实测一张真实澳洲银行截图的耗时后定，**结果回流本文** |
+| R1 | agent 单次任务的硬超时默认值——太短会砍掉正常的长截图解析，太长会让失败态卡住 UI | 本文 §3.4 | M0 实测一张真实银行流水截图的耗时后定（dogfooding 样本：CBA 网银），**结果回流本文** |
 | R2 | 解析失败/超时的重试策略放在 launcher 还是 domain（[`docs/architecture.md` §8](../architecture.md) 未决 A2） | 本文 §3.4、[02 导入](./02-ingest.md) | M0 实现时就近决定并回流两处 |
 | R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定 |
 | R4 | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效 | 全产品 | 对策已定（可插拔接口），**不需要额外决策**；登记以免被当成新问题重新讨论 |
@@ -150,3 +150,4 @@ trait AgentBackend {
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
+| v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：待决 R1 的实测样本描述从「真实澳洲银行截图」改为「真实银行流水截图」，具名组合降为 dogfooding 样本标注。决定与验收标准未变 |

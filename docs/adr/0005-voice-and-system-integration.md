@@ -54,7 +54,7 @@
 
 ## 理由
 
-**为什么 v1 零 Swift**：M0 要验的最大未知数是「视觉模型读澳洲银行截图到底准不准」（[`docs/PRD.md` §9.1](../PRD.md)）。系统听写与拖拽导入都能零成本满足 v1 需求，写 sidecar 只会推迟撞上那个真问题的时间。
+**为什么 v1 零 Swift**：M0 要验的最大未知数是「视觉模型读真实银行与支付账单截图到底准不准」（[`docs/PRD.md` §9.1](../PRD.md)）。系统听写与拖拽导入都能零成本满足 v1 需求，写 sidecar 只会推迟撞上那个真问题的时间。
 
 **为什么 sidecar 而不是 Rust FFI 直调 Objective-C**：PhotoKit 与 SpeechAnalyzer 的 API 都重度依赖 Swift 并发与回调，从 Rust 通过 `objc` crate 桥接的代码量与脆弱度远高于写 150 行 Swift。
 

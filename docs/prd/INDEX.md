@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-07
+version: v0.2
 ---
 
 # sub-PRD 索引
@@ -17,10 +17,10 @@ version: v0.1
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型 | `draft` | v0.1 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、可插拔后端接口 | `draft` | v0.1 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图导入、`sources` 落库、解析编排 | `draft` | v0.1 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、可插拔后端接口 | `draft` | v0.2 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图导入、`sources` 落库、解析编排 | `draft` | v0.2 |
 | 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、总额校验、审核界面 | `draft` | v0.1 |
-| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、分类、回顾 | `draft` | v0.1 |
+| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、分类、回顾 | `draft` | v0.2 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.1 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.1 |
 
@@ -73,3 +73,4 @@ version: v0.1
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：七份 sub-PRD 索引、状态总览、里程碑映射、依赖关系图、共享决定出处表 |
+| v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步 01/02/04 的版本号至 v0.2（去窄化：多币种与多渠道是能力而非定位，具名银行/支付平台降为 dogfooding 样本） |
