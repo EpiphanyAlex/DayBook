@@ -3,7 +3,7 @@ title: 04 交易 Transactions — 交易实体、多币种三元组、分类与�
 status: draft
 owner: "@alex"
 date: 2026-08-07
-version: v0.2
+version: v0.3
 ---
 
 # 04 · 交易 Transactions
@@ -40,6 +40,7 @@ version: v0.2
 | `occurred_on` | 交易发生的**本地日历日**（`YYYY-MM-DD`，不带时区）——用户说「8 月 3 号那笔」指的是这个 |
 | `amount_minor` + `currency` | **原币三元组之一**：用户实际付出的数字，与截图上完全一致 |
 | `base_amount_minor` | 折算到本位币的金额 |
+| `base_currency` | **本次折算所用的本位币**——逐笔存储、确认时冻结。本位币可切换，切换只影响新交易（[00 地基 §3.4](./00-foundation.md)「本位币切换语义」） |
 | `rate_ppm` | 折算所用汇率 × 1_000_000 |
 | `direction` | `expense` / `income` / `transfer` |
 | `merchant` | 商户原文（**保留 agent 从截图读到的原始文本**，不做归一化覆盖） |
@@ -56,8 +57,9 @@ version: v0.2
 
 依据 [ADR-0004 §3](../adr/0004-data-model-sqlite-integer-money.md)、[00 地基 §3.4](./00-foundation.md)。
 
-- **三个字段全部非空**，写入时校验自洽：`base_amount_minor == round_half_even(amount_minor × rate_ppm / 1_000_000)`
-- **单币种交易走同一套**，`rate_ppm = 1_000_000`，**不设特例分支**
+- **全部非空**，写入时校验自洽：`base_amount_minor == round_half_even(amount_minor × rate_ppm / 1_000_000)`
+- **原币与本位币相同时走同一套**，`rate_ppm = 1_000_000`，**不设特例分支**
+- **`base_currency` 逐笔冻结**：本位币可切换，但切换只影响新交易，已确认的行永不改动（[00 地基 §3.4](./00-foundation.md)）
 - **不得只存换算后的结果**——证据链会断（回不到「截图上写的到底是多少」）
 - **不得在录入时要求用户手算**——汇率折算是产品的活
 
@@ -100,6 +102,8 @@ v1 只回答少数几个问题，**不做通用 BI**：
 
 **回顾一律以本位币汇总**，但明细行同时显示原币——这是多币种场景的核心体验。
 
+**若查询区间跨越了本位币切换点**，汇总按 `base_currency` **分组呈现，不静默相加**——把两种本位币的金额加在一起会得到一个无意义的数字（[00 地基 §3.4](./00-foundation.md)「本位币切换语义」规则 3）。UI 在这种情况下显式标注「此区间含两种本位币」。
+
 ## 4. 否决的替代方案
 
 | 方案 | 否决原因 |
@@ -116,7 +120,7 @@ v1 只回答少数几个问题，**不做通用 BI**：
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | 本位币是固定单一（AUD）还是可切换（[`docs/PRD.md` §13](../PRD.md) P2、[00 地基 §5](./00-foundation.md) R1） | 本文 §3.1 字段、§3.6 回顾 | @alex，**M2 开工前必须决** |
+| ~~R1~~ **已关闭（2026-08-07）** | 本位币是固定单一还是可切换（[`docs/PRD.md` §13](../PRD.md) P2、[00 地基 §5](./00-foundation.md) R1 同步关闭） | 本文 §3.1 字段、§3.6 回顾 | **结论：可切换**（@alex 拍板）。`base_currency` 逐笔冻结，切换只影响新交易；跨切换点的回顾按本位币分组不相加。语义见 [00 地基 §3.4](./00-foundation.md) |
 | R2 | 历史汇率来源（[`docs/PRD.md` §13](../PRD.md) P1）——§3.2 的三条路径在真实数据上覆盖率未知 | 本文 §3.2 | M2 实测真实 10 天数据，**覆盖率结果回流本文** |
 | R3 | `transfer` 方向的双边表示——转账在两个渠道各出现一次，是记两条还是一条带双渠道 | 本文 §3.1 | M2 遇到真实转账数据时决 |
 | R4 | 退款/冲正怎么表示——负金额，还是独立的关联关系 | 本文 §3.1、[03 审核与草稿区](./03-review.md) 的去重 | M2，**与 [02 导入 §5](./02-ingest.md) R2 一并决**（退款会干扰跨图去重） |
@@ -133,7 +137,9 @@ v1 只回答少数几个问题，**不做通用 BI**：
 - [ ] `cargo test transactions::merchant_raw_never_overwritten` 通过——归一化只写 `merchant_normalized`
 - [ ] `cargo test transactions::manual_entry_requires_human` 通过——工具面中不存在创建无 `source_id` 交易的工具
 - [ ] `cargo test transactions::delete_is_soft_and_audited` 通过
-- [ ] `cargo test transactions::rollup_uses_base_currency` 通过——多币种混合数据的汇总结果等于各笔 `base_amount_minor` 之和（整数精确相等）
+- [ ] `cargo test transactions::rollup_uses_base_currency` 通过——同一本位币下，多**原币**混合数据的汇总结果等于各笔 `base_amount_minor` 之和（整数精确相等）
+- [ ] `cargo test transactions::base_currency_frozen_on_switch` 通过——切换本位币后新建一笔，旧行的 `base_currency` / `base_amount_minor` 逐行不变
+- [ ] `cargo test transactions::rollup_splits_across_base_switch` 通过——区间跨越本位币切换点时，汇总按 `base_currency` 分组返回，**不出现单一合计**
 - [ ] `rg -n 'f32|f64' src-tauri/src/transactions` 无命中
 - [ ] **M2 判定**：`node scripts/verify-m2.mjs`（**待建**）退出码 0——用真实 10 天数据跑完整导入→审核→入库→回顾
 
@@ -153,4 +159,5 @@ v1 只回答少数几个问题，**不做通用 BI**：
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：交易字段语义（含 `merchant` 原文与归一化分存）、三元组读写规则与三条汇率路径、扁平分类、渠道独立于币种、手工录入的唯一无来源路径、基础回顾五项；否决方案七条；待决 R1–R5；验收标准 12 条可执行 + 2 条人工 |
+| v0.3 | 2026-08-07 | **待决 R1 关闭：本位币可切换**（@alex 拍板，[`docs/PRD.md` §13](../PRD.md) P2 与 [00 地基 §5](./00-foundation.md) R1 同步关闭）。§3.1 字段表新增 `base_currency`（逐笔冻结）；§3.2 「三个字段全部非空」改为「全部非空」并补冻结规则，「单币种交易」改述为「原币与本位币相同时」；§3.6 新增跨切换点的分组呈现规则；§6 新增 2 条验收（切换后逐行不变、跨切换点分组不合计），并修正 `rollup_uses_base_currency` 的表述——原文「多币种混合数据」有歧义，应为「同一本位币下的多原币混合」 |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：§1 问题陈述重写——去掉「跨境双币种是第一优先场景/市场夹缝」的窄定位，改为「多币种是 [PRD §3.1](../PRD.md) 解析能力的自然结果，不是边缘情况也不是定位」；§3.4 渠道明确「不预设任何国家的银行或支付平台清单」；§3.6 与验收标准中的地域化措辞（澳洲/人民币换澳元）改为币种无关表述，具体组合降为 dogfooding 样本 |

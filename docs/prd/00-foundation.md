@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: draft
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-07
+version: v0.2
 ---
 
 # 00 · 地基 Foundation
@@ -79,11 +79,22 @@ version: v0.1
 |---|---|
 | 金额 | **整数最小货币单位**（分 / cent）。SQLite `INTEGER`，Rust `i64`，TS `number` |
 | 币种 | ISO 4217 三字母大写码，`TEXT`（`AUD` / `CNY` / …） |
+| **本位币** | **可切换**，逐笔存 `base_currency`（同为 ISO 4217 码）——见下方「本位币切换语义」 |
 | 汇率 | **定点整数**：存 `rate_ppm`，即「1 单位原币 = 多少本位币」× 1_000_000，`INTEGER` |
 | 舍入 | 本位币金额 = `round_half_even(原币金额 × rate_ppm / 1_000_000)`。**舍入在写入前完成一次，结果落库**，不在读取时重算 |
 | 浮点 | **任何位置禁止**——包括中间计算、IPC 传输、测试夹具 |
 
-**自洽约束**：写入交易时校验 `本位币金额 == round_half_even(原币金额 × rate_ppm / 1_000_000)`，不满足则拒绝写入并返回 `data.money_inconsistent`。单币种交易 `rate_ppm = 1_000_000`，**不设特例分支**。
+**自洽约束**：写入交易时校验 `本位币金额 == round_half_even(原币金额 × rate_ppm / 1_000_000)`，不满足则拒绝写入并返回 `data.money_inconsistent`。原币与本位币相同时 `rate_ppm = 1_000_000`，**不设特例分支**。
+
+#### 本位币切换语义（2026-08-07 拍板，[`docs/PRD.md` §13](../PRD.md) P2 已关闭）
+
+本位币**可切换**——固定单一本位币等于在 schema 层重新引入地域假设，与 [`docs/PRD.md` §3.1](../PRD.md) 矛盾。三条规则，均由 [ADR-0004](../adr/0004-data-model-sqlite-integer-money.md)「折算冻结在交易发生那一刻」直接推导：
+
+1. **`base_currency` 逐笔存储在交易行上，确认时冻结**——不是只存一个全局设置。全局设置只决定「新交易默认用哪个本位币」。
+2. **切换本位币不改动任何历史行。** 追溯换算需要历史汇率，而历史汇率没有可靠来源（[`docs/PRD.md` §13](../PRD.md) P1）；即便有，改写已确认的事实数据也违反 [ADR-0002](../adr/0002-ai-never-writes-directly.md)（事实表只由人工确认动作写入）。
+3. **跨越切换点的汇总按 `base_currency` 分组呈现，不静默相加。** 把两种本位币的金额加在一起会得到一个无意义的数字——与总额校验的 `unavailable` 不伪装成通过是同一条原则。
+
+> **给实现者**：不要写「假设全库只有一个本位币」的查询。任何汇总类 SQL 必须 `GROUP BY base_currency` 或显式断言结果集只含一种本位币。
 
 ### 3.5 迁移
 
@@ -101,7 +112,7 @@ version: v0.1
 |---|---|---|
 | `sources` | 一份被导入的原始材料 | `content_hash` 唯一（导入幂等，见 [02 导入](./02-ingest.md)）；`declared_total_minor` 可空（来源自己声明的合计，供总额校验） |
 | `draft_transactions` | AI 起草的待确认交易 | **`source_id` 非空**、**`evidence_text` 非空**（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 2，数据层强制） |
-| `transactions` | 已确认交易（事实表） | 三元组三字段均非空；`confirmed_at` 非空 |
+| `transactions` | 已确认交易（事实表） | `amount_minor` / `currency` / `base_amount_minor` / **`base_currency`** / `rate_ppm` 均非空；`confirmed_at` 非空 |
 | `audit_log` | append-only 变更记录 | 字段：`actor`（`agent` / `human`）、`at`、`entity_type`、`entity_id`、`action`、`before_json`、`after_json` |
 
 **完整表清单**（v1 终态，各表的详细字段由对应 sub-PRD 在开工前补进本文 §3.6）：
@@ -155,7 +166,7 @@ memory_rules · audit_log
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | 本位币是固定单一（AUD）还是可切换——影响 `transactions` 是否需要 `base_currency` 字段（[`docs/PRD.md` §13](../PRD.md) 开放问题 P2） | 本文 §3.6、[04 交易](./04-transactions.md) | @alex，**M2 批量与多币种开工前必须决**；M0 期间按「固定 AUD 但字段留着」实现 |
+| ~~R1~~ **已关闭（2026-08-07）** | 本位币是固定单一还是可切换 | 本文 §3.4/§3.6、[04 交易](./04-transactions.md) | **结论：可切换**（@alex 拍板，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。`base_currency` 逐笔存储并在确认时冻结，切换不改历史行，汇总按本位币分组——三条规则与推导见 §3.4「本位币切换语义」 |
 | R2 | Rust↔TS 类型漂移；是否引入 `tauri-specta` 之类 codegen | 本文 §3.8 | 漂移造成第一个真实 bug 时开 spike，@alex 决 |
 | R3 | 舍入规则选 half-even 尚未经真实对账验证——若某来源自身用 half-up，总额校验会系统性差几分 | 本文 §3.4、[03 审核与草稿区](./03-review.md) 的总额校验 | M2 处理真实 10 天数据时实测，**结果必须回流本文** |
 | R4 | 证据目录长期累积到 GB 级后的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.2、[02 导入](./02-ingest.md) | 真实使用出现容量问题时 |
@@ -173,6 +184,9 @@ memory_rules · audit_log
 - [ ] `cargo test foundation::migration_drift_rejected` 通过——把 `user_version` 手工调高一号后打开，返回 `data.migration_drift` 且不写入任何数据
 - [ ] `cargo test foundation::money_roundtrip_is_integer` 通过——金额经「写入 → 读出 → IPC 序列化 → 反序列化」四步后逐位相等
 - [ ] `cargo test foundation::money_inconsistent_rejected` 通过——三元组不自洽时写入被拒并返回 `data.money_inconsistent`
+- [ ] `cargo test foundation::base_currency_frozen_per_row` 通过——切换全局本位币后，已确认交易的 `base_currency` 与 `base_amount_minor` 逐行不变
+- [ ] `cargo test foundation::rollup_groups_by_base_currency` 通过——含两种本位币的数据集，汇总按本位币分组返回，**不产生跨本位币的单一合计**
+- [ ] `rg -n 'SUM\(base_amount_minor\)' src-tauri/src` 的每处命中都伴随 `GROUP BY base_currency` 或单本位币断言
 - [ ] `cargo test foundation::draft_requires_evidence` 通过——`source_id` 或 `evidence_text` 为空时插入 `draft_transactions` 失败
 - [ ] `cargo test foundation::icloud_path_rejected` 通过——数据目录指向 iCloud 容器路径时返回 `data.icloud_path_rejected`
 - [ ] `rg -n 'f32|f64' src-tauri/src` 在金额相关模块无命中（浮点禁令，见 [`.claude/rules/money-and-data.md`](../../.claude/rules/money-and-data.md)）
@@ -193,3 +207,4 @@ memory_rules · audit_log
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：存储引擎与数据目录、标识/时间/金额/汇率约定、迁移策略、M0 四表与 v1 全表清单、命令契约与 `AppError` 形状、TS 桥；否决方案六条；待决 R1–R5；验收标准 11 条可执行 + 1 条人工 |
+| v0.2 | 2026-08-07 | **待决 R1 关闭：本位币可切换**（@alex 拍板，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。§3.4 新增 `base_currency` 约定行与「本位币切换语义」小节（逐笔冻结 / 切换不改历史 / 汇总按本位币分组，三条均由 [ADR-0004](../adr/0004-data-model-sqlite-integer-money.md) 折算冻结原则推导）；§3.4 自洽约束的「单币种交易」改述为「原币与本位币相同时」（本位币不再固定，原措辞会有歧义）；§3.6 `transactions` 关键约束逐字段列出并加入 `base_currency`；§6 新增 3 条验收（逐行冻结、汇总分组、`SUM` 必带 `GROUP BY`） |

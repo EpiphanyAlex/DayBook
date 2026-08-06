@@ -12,8 +12,9 @@
 // ✅ 正确
 struct Transaction {
     amount_minor: i64,        // 分 / cent
-    currency: String,         // "AUD" / "CNY"
+    currency: String,         // 原币，ISO 4217："AUD" / "CNY"
     base_amount_minor: i64,
+    base_currency: String,    // 本位币可切换 ⇒ 逐笔冻结，不能只靠全局设置
     rate_ppm: i64,            // 汇率 × 1_000_000
 }
 
@@ -58,11 +59,11 @@ fn to_base(amount: f64, rate: f64) -> f64 { amount * rate }   // 浮点
 fn to_base(a: i64, rate_ppm: i64) -> i64 { a * rate_ppm / 1_000_000 }  // 截断而非舍入，且 i64 可能溢出
 ```
 
-**单币种交易 `rate_ppm = 1_000_000`，走同一条代码路径，不设特例分支。**
+**原币与本位币相同时 `rate_ppm = 1_000_000`，走同一条代码路径，不设特例分支。**
 
 ```rust
 // ❌ 错误 —— 特例分支迟早会漏
-if tx.currency == base_currency {
+if tx.currency == tx.base_currency {
     tx.base_amount_minor = tx.amount_minor;   // 绕过了自洽校验
 } else {
     tx.base_amount_minor = to_base(tx.amount_minor, tx.rate_ppm);
@@ -71,6 +72,21 @@ if tx.currency == base_currency {
 // ✅ 正确 —— 一条路
 tx.base_amount_minor = to_base(tx.amount_minor, tx.rate_ppm);  // rate_ppm 为 1_000_000 时结果相同
 ```
+
+## 2.1 本位币可切换 ⇒ 汇总必须分组
+
+本位币**逐笔冻结**（[`docs/prd/00-foundation.md` §3.4](../../docs/prd/00-foundation.md)「本位币切换语义」）。用户切换本位币后，库里会同时存在两种 `base_currency` 的历史行。
+
+```rust
+// ❌ 错误 —— 把两种本位币的金额加在一起，得到一个无意义的数字
+"SELECT SUM(base_amount_minor) FROM transactions WHERE occurred_on BETWEEN ?1 AND ?2"
+
+// ✅ 正确 —— 按本位币分组，由上层决定怎么呈现
+"SELECT base_currency, SUM(base_amount_minor) FROM transactions
+   WHERE occurred_on BETWEEN ?1 AND ?2 GROUP BY base_currency"
+```
+
+**任何 `SUM(base_amount_minor)` 都必须伴随 `GROUP BY base_currency`，或伴随「结果集只含一种本位币」的显式断言。** 切换本位币**不改动任何历史行**——追溯换算需要历史汇率（无可靠来源），且改写已确认的事实数据违反 [ADR-0002](../../docs/adr/0002-ai-never-writes-directly.md)。
 
 ## 3. 三元组必须自洽
 
@@ -185,6 +201,7 @@ occurred_on: DateTime<Utc>,        // 业务日期不该带时区：「8 月 3 �
 
 ```bash
 rg -n 'f32|f64' src-tauri/src                                    # 金额模块应无命中
+rg -n 'SUM\(base_amount_minor\)' src-tauri/src                   # 每处都应带 GROUP BY base_currency
 rg -n 'UPDATE\s+audit_log|DELETE\s+FROM\s+audit_log' src-tauri/src   # 应无命中
 rg -n 'execute_sql|raw_query|write_file' src-tauri/src/mcp        # 应无命中
 rg -n '/ 100|\* 100' src/                                         # 前端只应命中格式化函数
