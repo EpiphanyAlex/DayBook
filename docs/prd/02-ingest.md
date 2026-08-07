@@ -1,9 +1,9 @@
 ---
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
-status: draft
+status: ready
 owner: "@alex"
 date: 2026-08-07
-version: v0.2
+version: v0.3
 ---
 
 # 02 · 导入 Ingest
@@ -38,15 +38,32 @@ version: v0.2
 ### 3.1 v1 的导入方式：拖拽
 
 - 拖文件进应用窗口，支持一次拖多个
-- 支持格式：PNG / JPEG / HEIC / PDF
 - **不做**「自动监听某个文件夹」——那会引入「用户不知道应用在读什么」的信任问题，与产品的隐私姿态相悖
 - **不做**照片库直读（[ADR-0005](../adr/0005-voice-and-system-integration.md) v1 零 Swift）
+
+**支持格式按里程碑分层**（2026-08-07 M0 开工评审细化）：
+
+| 格式 | 里程碑 | 说明 |
+|---|---|---|
+| PNG · JPEG | **M0** | iPhone / macOS 截图的默认格式，覆盖 M0 的全部验证场景 |
+| HEIC | M2 | 相机照片格式；是否需 Rust 侧解码取决于后端 CLI 支持，见 §5 R3 |
+| PDF | M2 | 多页切分策略未定，见 §5 R1——**策略未定就支持等于让实现者自己发明** |
+
+格式不在当前里程碑支持集内 → 返回 `ingest.unsupported_format`，UI 明确告知，**不静默忽略**。
 
 ### 3.2 来源身份与幂等
 
 - 导入时计算文件内容的 **SHA-256**，存 `sources.content_hash`，该列**唯一**
-- 重复导入同一内容 → **返回已存在的 `source_id`，不新建记录、不重复触发解析**，并在 UI 明确告知「这张已经导入过」
 - **幂等以内容为准，不以文件名为准**——用户从不同 app 导出的同一张图文件名会不同
+
+**重复导入的返回契约**（2026-08-07 M0 开工评审补定——原文只说「返回已存在的 `source_id` 并在 UI 告知」，没说是成功还是错误，前后端会各按各的理解写）：
+
+- **成功返回**，不是错误。命中重复不是失败，用户拖了一张已有的图是完全正常的操作
+- 返回体带 `{ source_id, deduplicated: true }`；新建时 `deduplicated: false`
+- **不新建记录、不重复触发解析、不重复落盘**
+- UI 依 `deduplicated` 字段提示「这张已经导入过」
+
+> `ingest.duplicate_source`（[00 地基 §3.7](./00-foundation.md)）**保留但不用于此路径**——它只在需要以错误形式表达重复的场景使用（如未来的严格导入模式）。M0 的拖拽导入走上面的成功返回。
 
 ### 3.3 证据文件落盘
 
@@ -68,17 +85,20 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | `imported` | 文件已落盘、已入库，尚未解析 |
 | `parsing` | agent 子进程正在处理 |
 | `parsed` | 解析完成，草稿已生成，等待人工审核 |
-| `failed` | 解析失败或超时；**关联草稿已全部作废**（[01 Agent 运行时 §3.4](./01-agent-runtime.md)） |
+| `failed` | 解析失败或超时；**该会话的草稿已全部作废**（[01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿性作废）。失败原因记在 `sources.parse_error_code` |
 | `reviewed` | 该来源的全部草稿都已被确认或丢弃 |
 
-**状态转移由 Rust 侧代码执行，agent 无法改状态**——工具面里没有改状态的工具（[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。
+**取值集与字段**：本表即 `sources.state` 的权威取值集，字段定义在 [00 地基 §3.6](./00-foundation.md)。
+
+**状态转移由 Rust 侧代码执行，agent 无法改状态**——工具面里没有改状态的工具，且 agent 对 `sources` 的写入权限在数据层收窄到 `declared_total_*` 三列（[00 地基 §3.6](./00-foundation.md)「列级写入权限」、[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。非法转移返回 `ingest.invalid_state_transition`。
 
 ### 3.5 解析编排
 
 - 一次导入 N 个文件 → 生成 N 个解析任务，**串行执行**（v1 同时只跑一个 agent 子进程，见 [01 Agent 运行时 §3.4](./01-agent-runtime.md)）
 - 解析前**注入记忆规则**到任务上下文（商户→分类映射等），来源是 [06 记忆](./06-memory.md)；注入点的具体形态见 [`docs/architecture.md` §8](../architecture.md) 未决 A3
 - 解析后由代码触发**总额交叉校验**（[03 审核与草稿区](./03-review.md) 的职责），结果落在 `sources` 上
-- **失败不静默**：`failed` 的来源在 UI 上显式列出，附失败原因，可一键重试
+- **失败不静默**：`failed` 的来源在 UI 上显式列出，附失败原因（`parse_error_code`），可一键重试
+- **v1 不做自动重试**（2026-08-07 评审，[01 Agent 运行时 §5](./01-agent-runtime.md) R2 关闭）：重试由用户在 UI 上显式触发。自动重试会在用户不知情时二次消耗 AI 额度，而额度是真实约束（[`docs/PRD.md` §12](../PRD.md)）
 
 ### 3.6 跨图去重（M2）
 
@@ -112,7 +132,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 |---|---|---|---|
 | R1 | PDF 多页账单怎么切——整份丢给 agent 还是按页切成多个来源 | 本文 §3.1/§3.5 | M2 拿到真实 PDF 账单后决，**回流本文** |
 | R2 | 跨图去重的窗口（±2 天）与判定维度是否够——退款、分期、外币重复入账都可能干扰 | 本文 §3.6 | M2 实测真实 10 天数据后调，**结果回流本文** |
-| R3 | HEIC 是否需要在 Rust 侧解码后再交给 agent（取决于后端 CLI 对 HEIC 的支持） | 本文 §3.1 | M0 用真实 iPhone 截图实测 |
+| R3 | HEIC 是否需要在 Rust 侧解码后再交给 agent（取决于后端 CLI 对 HEIC 的支持） | 本文 §3.1 | **改期至 M2，不阻塞 M0**（2026-08-07 评审）：HEIC 是相机照片格式，而 iPhone/macOS **截图默认是 PNG**——M0 的验证场景用不到它。M2 支持 HEIC 时实测决定 |
 | R4 | 长截图（60 笔以上）的上下文隔离切法（[`docs/architecture.md` §8](../architecture.md) 未决 A1、[01 Agent 运行时 §5](./01-agent-runtime.md) R3） | 本文 §3.5 | M2，实测决定 |
 | R5 | 证据目录容量增长的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.3、[00 地基](./00-foundation.md) | 真实使用出现容量问题时 |
 
@@ -120,12 +140,15 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 - [ ] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [ ] `cargo test ingest::idempotent_source` 通过——同一文件连导两次只产生一条 `sources` 记录，且第二次不触发解析
+- [ ] `cargo test ingest::idempotent_returns_ok_with_flag` 通过——重复导入是**成功返回**且 `deduplicated == true`，首次导入 `deduplicated == false`（§3.2 返回契约）
 - [ ] `cargo test ingest::idempotent_ignores_filename` 通过——同内容不同文件名视为同一来源
+- [ ] `cargo test ingest::unsupported_format_rejected` 通过——M0 支持集外的格式返回 `ingest.unsupported_format`，不落盘不写库
 - [ ] `cargo test ingest::evidence_written_before_row` 通过——注入「写库失败」后，不存在「有 `sources` 行但证据文件缺失」的状态
 - [ ] `cargo test ingest::original_bytes_preserved` 通过——落盘文件与输入文件的 SHA-256 相等
 - [ ] `cargo test ingest::state_machine_transitions` 通过——枚举全部合法/非法转移，非法转移被拒
 - [ ] `cargo test ingest::agent_cannot_change_source_state` 通过——工具面中不存在改 `sources.state` 的工具
-- [ ] `cargo test ingest::failed_source_has_no_drafts` 通过——解析失败后该来源关联草稿数为 0
+- [ ] `cargo test ingest::failed_source_has_no_drafts` 通过——解析失败后该来源关联草稿数为 0，且 `parse_error_code` 非空
+- [ ] `cargo test ingest::agent_cannot_write_source_columns` 通过——agent 经工具面只能写 `declared_total_*`，改 `state` / `evidence_relpath` 等列无路径可走
 - [ ] `cargo test ingest::batch_continues_after_failure` 通过——队列中一个文件失败，其余照常完成
 - [ ] `cargo test ingest::cross_image_dedup_candidates`（**M2**）通过——构造同金额同币种相差 1 天的两条草稿，被标为疑似重复且**未自动合并**
 - [ ] `node scripts/verify-m0.mjs`（**待建**）退出码 0
@@ -146,4 +169,5 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：v1 拖拽导入、SHA-256 内容幂等、证据先落盘后写库、来源五态状态机、解析编排（串行/记忆注入/失败不静默）、跨图去重候选判定（不自动合并）、批量导入；否决方案七条；待决 R1–R5；验收标准 11 条可执行 + 2 条人工 |
+| v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.1 支持格式**按里程碑分层**——M0 只收 PNG/JPEG，HEIC 与 PDF 推到 M2；原文把 PDF 列进支持集，而多页切分策略是 R1 待决，「策略未定就支持」等于让实现者自己发明。② §3.2 补定**重复导入的返回契约**——成功返回 + `deduplicated` 标志，原文只说「返回 source_id 并提示」，未说成功还是错误，前后端会各写各的。③ §3.4 补 `state` 取值集的权威归属、`parse_error_code`、非法转移错误码，并对齐 [01](./01-agent-runtime.md) 修正后的「按会话作废」措辞。④ §3.5 明确 **v1 不做自动重试**（[01](./01-agent-runtime.md) R2 关闭的落点）——自动重试会在用户不知情时二次消耗额度。⑤ §5 **R3 改期至 M2**：HEIC 是相机照片格式，iPhone/macOS 截图默认 PNG，M0 用不到。⑥ §6 新增 4 条验收 |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：§1 问题陈述去掉具名银行/支付平台（CBA、微信、支付宝）改为泛化来源，并显式声明「不为任何特定银行或支付平台写解析器」；§3.6 与人工验收中的具名样本降为 dogfooding 样本标注 |

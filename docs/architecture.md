@@ -126,7 +126,7 @@ version: v0.1
 | # | 问题 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
 | A1 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切 | [`docs/prd/02-ingest.md`](./prd/02-ingest.md) | M2 批量解析时，实测决定 |
-| A2 | agent 解析失败/超时的重试策略放在 launcher 还是 domain | [`docs/prd/01-agent-runtime.md`](./prd/01-agent-runtime.md) | M0 实现时就近决定并回流 |
+| ~~A2~~ **已关闭（2026-08-07）** | agent 解析失败/超时的重试策略放在 launcher 还是 domain | [`docs/prd/01-agent-runtime.md`](./prd/01-agent-runtime.md) | **结论：domain，且 v1 不做自动重试**——launcher 只管「起进程、看着它、超时就杀」，不知道失败是否值得重试；自动重试会在用户不知情时二次消耗 AI 额度。`failed` 的来源显式列在 UI 上由用户一键重试。见 [01 §5](./prd/01-agent-runtime.md) R2 |
 | A3 | 记忆规则在解析前注入 agent 上下文，还是在起草后由 domain 应用 | [`docs/prd/06-memory.md`](./prd/06-memory.md) | M3 前，两种都要能被审计日志覆盖 |
 | A4 | 前端状态管理选型（是否引入状态库） | 全部 UI 模块 | M1 审核界面开工前 |
 

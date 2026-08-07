@@ -3,7 +3,7 @@ title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑�
 status: ready
 owner: "@alex"
 date: 2026-08-07
-version: v0.3
+version: v0.4
 ---
 
 # Daybook 总 PRD
@@ -159,9 +159,32 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 | sub-PRD | M0 切片 | M0 **不**做 |
 |---|---|---|
 | [`00-foundation`](./prd/00-foundation.md) | SQLite 打开 + 迁移运行器 + `sources` / `draft_transactions` / `transactions` / `audit_log` 四张表 + 错误契约 | 完整 schema、事项相关表、记忆表 |
-| [`01-agent-runtime`](./prd/01-agent-runtime.md) | 起 MCP server（stdio）+ spawn `claude -p` + 两个工具（写草稿、查来源） | 可插拔后端的第二个实现、子 agent 上下文隔离 |
-| [`02-ingest`](./prd/02-ingest.md) | 拖入单张截图 → 落 `sources` + 证据文件 → 触发一次解析 | 多图批量、跨图去重、文件监听 |
-| [`03-review`](./prd/03-review.md) | 一个能看到草稿并逐条确认入库的最朴素列表 | 键盘流、原文并排、异常前置、虚拟滚动 |
+| [`01-agent-runtime`](./prd/01-agent-runtime.md) | 起 MCP server（stdio）+ spawn `claude -p` + **四个工具**：`list_pending_sources` · `read_source` · `draft_transaction` · `report_source_total`（清单见 [01 §3.2](./prd/01-agent-runtime.md)） | `draft_item` / `query_memory`（目标表 M0 未建，推 M3）、可插拔后端的第二个实现、子 agent 上下文隔离 |
+| [`02-ingest`](./prd/02-ingest.md) | 拖入单张 PNG/JPEG 截图 → 落 `sources` + 证据文件 → 触发一次解析 | HEIC / PDF（推 M2）、多图批量、跨图去重、文件监听 |
+| [`03-review`](./prd/03-review.md) | 一个能看到草稿、**看到每条的原文片段与声明合计**、并逐条/批量确认入库的最朴素列表；四道闸门全部生效 | 证据图面板与**区域高亮**、键盘流、异常前置排序、虚拟滚动 |
+
+> **`report_source_total` 为什么在 M0**：没有它就没有 `sources.declared_total_minor`，[总额交叉校验](./adr/0002-ai-never-writes-directly.md)（闸门 3）无从成立。M0 的目的是验证端到端链路**连同四道闸门**是否立得住，抽掉一道闸门的 M0 验不出该验的东西。
+>
+> **`03` 的「原文并排」M0 就要有**：`evidence_text` 是草稿表的一个字符串列，在列表里多渲染一列即可，成本近乎为零，而它是闸门 2 的最小兑现。**M0 推迟的是证据图面板与区域高亮**（[03 §5](./prd/03-review.md) R1 的 spike 对象），不是原文本身。
+
+### 9.3 M0 的端到端判定：`scripts/verify-m0.mjs`（**待建**）
+
+[`01`](./prd/01-agent-runtime.md)、[`02`](./prd/02-ingest.md)、[`03`](./prd/03-review.md) 三份 sub-PRD 都把这个脚本列为验收标准，因此**它验什么必须在这里定义**——否则 M0 的判定标准就是个黑盒（2026-08-07 M0 开工评审补定）。
+
+脚本在一个**临时数据目录**上跑完整链路，退出码非零即失败：
+
+| # | 检查 | 判据 |
+|---|---|---|
+| 1 | 迁移 | 空目录启动后四张 M0 表存在，`user_version` 等于最大迁移号 |
+| 2 | 导入 | 投入一张固定的测试截图 → `sources` 恰好一行，`state = imported`，证据文件存在且 SHA-256 与输入相等 |
+| 3 | 幂等 | 同一文件再投一次 → 仍是一行，返回 `deduplicated: true` |
+| 4 | 解析 | 触发解析 → `state` 走到 `parsed`，`draft_transactions` 行数 > 0，**每行 `source_id` 与 `evidence_text` 非空** |
+| 5 | 审计 | 每条草稿对应一条 `actor = "agent"` 的 `audit_log` |
+| 6 | 闸门 | 篡改一条草稿金额使合计不符 → 批量确认返回 `review.total_mismatch`，`transactions` 仍为空 |
+| 7 | 确认 | 改回正确金额 → 批量确认成功，`transactions` 行数等于草稿数，每行 `source_draft_id` 指回原草稿且草稿 `consumed_at` 非空 |
+| 8 | 隔离 | 全程 `transactions` 的写入只发生在第 7 步（确认动作），MCP 工具调用期间恒为空 |
+
+**第 4 步依赖真实 agent CLI**：脚本在检测不到可用后端时**跳过 4–8 并以非零退出**，明确报「M0 端到端需要已安装并登录的 agent CLI」——**不静默降级为通过**。
 
 ## 10. 竞争格局（调研于 2026-08-06）
 
@@ -216,5 +239,6 @@ Anthropic 对第三方 agent 使用订阅额度的政策反复过：2026-04-04 �
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：问题与洞察、用户与场景、三个支点、四道闸门、v1 范围（交易深 / 事项薄）、非目标、成功标准、sub-PRD 地图、M0–M4 里程碑与 M0 切片划分、竞品调研、开放问题 P1–P4 |
+| v0.4 | 2026-08-07 | **随 M0 四份 sub-PRD 开工评审同步。** ① 新增 **§9.3 `scripts/verify-m0.mjs` 的检查项定义**（8 步 + 无可用后端时非零退出、不静默降级）——[01](./prd/01-agent-runtime.md)、[02](./prd/02-ingest.md)、[03](./prd/03-review.md) 三份都把该脚本列为验收标准却无人定义它验什么，M0 的判定标准不能是黑盒。② **§9.2 M0 切片表修正三处**：`01` 的工具数从「两个」改为**四个**并列名（原文与 [01 §3.2](./prd/01-agent-runtime.md) 不一致；`report_source_total` 必须在 M0，否则闸门 3 无从成立）；`02` 明确 M0 只收 PNG/JPEG；`03` 的「M0 不做原文并排」**改为「M0 不做证据图面板与区域高亮」**——`evidence_text` 只是一个字符串列，多渲染一列成本近乎为零，而它是闸门 2 的最小兑现，推迟它等于让 M0 少验一道闸门 |
 | v0.3 | 2026-08-07 | **开放问题 P2 关闭：本位币可切换**（@alex 拍板）。理由：固定单一本位币等于在 schema 层重新引入地域假设，与 v0.2 确立的 §3.1「解析能力与国家/币种无关」矛盾。切换语义由 [ADR-0004](./adr/0004-data-model-sqlite-integer-money.md)「折算冻结在交易发生那一刻」推导，未引入新原则——`base_currency` 逐笔冻结 / 切换不改历史行 / 跨切换点汇总按本位币分组不相加。同步：§5.1、§13；[ADR-0004](./adr/0004-data-model-sqlite-integer-money.md)（三元组含本位币种，文末未决关闭）、[00 地基](./prd/00-foundation.md) v0.2、[04 交易](./prd/04-transactions.md) v0.3、[INDEX](./prd/INDEX.md) v0.3、[`docs/CONTEXT.md`](./CONTEXT.md)、`.claude/rules/money-and-data.md` |
 | v0.2 | 2026-08-07 | **定位修正**（@alex 提出，三条均成立）：① §2 主用户从「当场记不了只能事后补的人」改为「想记账但坚持不下来的人」——「事后补」是使用常态而非用户细分，原写法把问题写小了；② §1/§2/§3.1/§10 取消跨境双币种（澳洲 + 微信支付宝）作为「第一优先场景」的定位——多币种/多渠道是 §3.1 能力的自然结果而非市场边界，该组合改为 dogfooding 压力测试场景；「国内 app 读不懂澳洲对账单」由「市场夹缝」改述为「专用解析器路线的必然结果」；③ 全文移除立项讨论的叙述痕迹（「三个支点」「生死线」「需要清醒接受的三件事」等），改为产品文档语言 |

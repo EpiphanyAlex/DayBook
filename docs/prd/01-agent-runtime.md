@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: draft
+status: ready
 owner: "@alex"
 date: 2026-08-07
-version: v0.2
+version: v0.3
 ---
 
 # 01 · Agent 运行时
@@ -45,25 +45,40 @@ version: v0.2
 
 ### 3.2 工具面（权限边界即工具签名）
 
-**v1 工具清单**——**这份清单就是 agent 能做的全部事情**：
+**这份清单就是 agent 能做的全部事情。** 按里程碑分层——**M0 只注册 M0 那一组**，因为 `draft_items` / `memory_rules` 两张表在 M0 尚未建（[00 地基 §3.6](./00-foundation.md)），注册无表可写的工具会让验收无法通过：
 
-| 工具 | 能力 | 写入范围 |
-|---|---|---|
-| `list_pending_sources` | 列出待解析的来源 | 只读 |
-| `read_source` | 读一个来源的元数据与文件路径 | 只读 |
-| `draft_transaction` | 起草一笔交易 | **只能写 `draft_transactions`** |
-| `draft_item` | 起草一个事项 | **只能写 `draft_items`** |
-| `query_memory` | 查记忆规则（商户→分类映射等） | 只读 |
-| `report_source_total` | 回报「来源自己声明的合计」，供总额校验 | 只能写 `sources.declared_total_minor` |
+| 工具 | 里程碑 | 能力 | 写入目标表集合 |
+|---|---|---|---|
+| `list_pending_sources` | **M0** | 列出待解析的来源 | ∅（只读） |
+| `read_source` | **M0** | 读一个来源的元数据与文件路径 | ∅（只读） |
+| `draft_transaction` | **M0** | 起草一笔交易 | `{draft_transactions}` |
+| `report_source_total` | **M0** | 回报来源自身印着的合计，供总额校验 | `{sources.declared_total_*}`（列级） |
+| `query_memory` | M3 | 查记忆规则（商户→分类映射等） | ∅（只读） |
+| `draft_item` | M3 | 起草一个事项 | `{draft_items}` |
+
+> **「写入目标表集合」是工具注册时必须声明的元数据，不是文档里的说明文字。** 验收 `agent::tools_cannot_write_fact_tables` 遍历的正是这份声明——没有它，那条测试无法实现。
 
 **硬性禁令**（违反即缺陷，[ADR-0003 §3](../adr/0003-agent-runtime-and-pluggable-backend.md)）：
 
 1. **不提供通用「执行任意 SQL」类工具**
 2. **不提供通用「任意文件写入 / 任意命令执行」类工具**
 3. **工具集里不存在任何能触及事实表（`transactions` / `items`）的工具**
-4. **`domain::confirm`（确认动作）不被任何 MCP 工具调用**——它只能由 Tauri command 触发
+4. **`domain::confirm`（确认动作）不被任何 MCP 工具调用**——它只能由 Tauri command 触发。**实现手段是模块边界**：`mcp/` 只依赖 `domain::draft`，拿不到 `domain::confirm`（见 [`.claude/rules/rust-tauri.md` §4](../../.claude/rules/rust-tauri.md)），越权在编译期不可表达
 
-**`draft_transaction` 的参数强制**：`source_id` 与 `evidence_text` 是必填参数，缺任一 → 工具直接返回错误，不写库。**这是证据链在工具层的第一道闸**（数据层还有第二道，见 [00 地基 §3.6](./00-foundation.md)）。
+**`draft_transaction` 的参数强制**：`source_id` 与 `evidence_text` 是必填参数，缺任一 → 返回 `agent.tool_rejected`，不写库。**这是证据链在工具层的第一道闸**（数据层还有第二道，见 [00 地基 §3.6](./00-foundation.md)）。
+
+#### `report_source_total` 的可信性要求（2026-08-07 M0 开工评审新增）
+
+**问题**：总额交叉校验是 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 3——「唯一能在无人工介入下捕获错误的机制」。但校验的两边（逐笔草稿、声明合计）**都由同一个 agent 在同一次会话里产生**。若 agent 把逐笔读错后又用自己那批数的和当作「声明合计」，**校验永远通过，闸门完全失效**。
+
+**因此本工具的语义被收窄为**：
+
+1. 它回报的必须是**来源上原本印着的那个数字**（账单底部的 Total、余额行），**不是 agent 把逐笔加起来的结果**。
+2. 参数为 `(amount_minor, currency, evidence_text)` **三者齐全**，缺任一 → `agent.tool_rejected`。`evidence_text` 是该合计在来源上的原文片段。
+3. **来源上没有印合计时，agent 必须不调用本工具**——留空即 `unavailable`（[03 审核 §3.3](./03-review.md)），**不许自己算一个填进去**。
+4. `declared_total_*` 三列在数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)），漏填一项写不进去。
+
+**诚实说明这道闸门的边界**：它能捕获「逐笔读错但合计读对」，捕获不了「逐笔和合计一起读错」。后者只能靠**人扫一眼合计的原文**——这就是第 2 条强制 `evidence_text` 的理由：审核界面把声明合计与它的原文并排显示，让基准本身也可核对（[03 审核 §3.3](./03-review.md)）。**闸门 3 不是万能的，规格必须如实写明它挡不住什么。**
 
 ### 3.3 每次工具写入都记审计
 
@@ -73,9 +88,17 @@ version: v0.2
 
 - 通过 `std::process::Command` spawn 子进程，把 MCP server 的 stdio 端接上
 - **v1 后端**：Claude Code（`claude -p`）
-- **超时**：单次任务有硬超时（默认值待实测定，见 §5 风险 R1），超时后 kill 子进程并把该来源标记为解析失败，**不留半截草稿**——已写入的草稿随失败一并作废（同一事务）
 - **并发**：v1 **同时只跑一个 agent 子进程**。排队，不并发
 - **日志**：子进程 stdout/stderr 采集到内存环形缓冲，供 UI 排障显示；**不落盘**（可能含截图内容片段）
+
+**超时与失败的作废语义**（2026-08-07 M0 开工评审修正）：
+
+- 单次任务有硬超时（M0 默认值见 §5 R1），超时后 kill 子进程，把该来源置为 `failed` 并写 `parse_error_code = agent.timeout`
+- **不留半截草稿**：该来源下本次会话产生的草稿全部作废
+
+> **修正**：本节原文写「已写入的草稿随失败一并作废（**同一事务**）」，**这在物理上做不到**——§3.3 要求每次工具写入**各自**记一条审计，N 次独立的 MCP 调用不可能事后收进同一个事务。
+>
+> **正确语义是补偿动作**：作废是一次独立的删除，按 `(source_id, agent_session_id)` 定位本次会话的草稿，在**它自己的**事务里删除，并写一条 `audit_log`（`actor = "system"`、`action = "void"`、`entity_type = "source"`）。agent 此前那 N 条 `actor = "agent"` 的审计记录**保持不变**——`audit_log` 是 append-only，不回溯抹除。审计因此如实呈现「起草了 N 条 → 超时 → 系统作废」的完整过程。
 
 ### 3.5 可插拔后端接口
 
@@ -115,20 +138,24 @@ trait AgentBackend {
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | agent 单次任务的硬超时默认值——太短会砍掉正常的长截图解析，太长会让失败态卡住 UI | 本文 §3.4 | M0 实测一张真实银行流水截图的耗时后定（dogfooding 样本：CBA 网银），**结果回流本文** |
-| R2 | 解析失败/超时的重试策略放在 launcher 还是 domain（[`docs/architecture.md` §8](../architecture.md) 未决 A2） | 本文 §3.4、[02 导入](./02-ingest.md) | M0 实现时就近决定并回流两处 |
-| R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定 |
+| R1 | agent 单次任务的硬超时默认值——太短会砍掉正常的长截图解析，太长会让失败态卡住 UI | 本文 §3.4 | **M0 取 180 秒为初值**（2026-08-07 评审给定，避免「无值可用」阻塞开工）。M0 实测一张真实银行流水截图的耗时后校准（dogfooding 样本：CBA 网银），**结果回流本文** |
+| ~~R2~~ **已关闭（2026-08-07）** | 解析失败/超时的重试策略放在 launcher 还是 domain（[`docs/architecture.md` §8](../architecture.md) 未决 A2） | 本文 §3.4、[02 导入 §3.5](./02-ingest.md) | **结论：domain。** launcher 只负责「起进程、看着它、超时就杀」，不知道失败是否值得重试——那要看来源状态与用户意图。**v1 不做自动重试**：`failed` 的来源显式列在 UI 上由用户一键重试（[02 导入 §3.5](./02-ingest.md)），符合「控制流由代码决定、且不偷偷烧用户额度」。[`docs/architecture.md` §8](../architecture.md) A2 同步关闭 |
+| R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定，**不阻塞 M0**（M0 单张截图） |
 | R4 | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效 | 全产品 | 对策已定（可插拔接口），**不需要额外决策**；登记以免被当成新问题重新讨论 |
-| R5 | agent 会话 ID 与审计日志的关联粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[03 审核与草稿区](./03-review.md) 的溯源 UI | M0 实现时定并回流 |
+| ~~R5~~ **已关闭（2026-08-07）** | agent 会话 ID 的粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) schema | **结论：一个来源一个会话。** 理由是 §3.4 的作废语义按 `(source_id, agent_session_id)` 定位本次会话的草稿——若一次导入共用一个会话，批量导入时某一张超时会波及同批其他来源的草稿。已落进 [00 地基 §3.6](./00-foundation.md) 的 `sources.agent_session_id` 与 `draft_transactions.agent_session_id` 两列 |
 
 ## 6. 验收标准
 
 - [ ] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [ ] `cargo test agent::tool_surface_has_no_sql_tool` 通过——遍历已注册工具，断言无通用 SQL / 通用文件写入 / 通用命令执行类工具
-- [ ] `cargo test agent::tools_cannot_write_fact_tables` 通过——断言全部工具的写入目标表集合与 `{transactions, items}` 交集为空
-- [ ] `cargo test agent::draft_requires_evidence_args` 通过——`draft_transaction` 缺 `source_id` 或 `evidence_text` 时返回错误且未写库
+- [ ] `cargo test agent::tools_cannot_write_fact_tables` 通过——遍历每个工具**注册时声明的写入目标表集合**（§3.2），断言与 `{transactions, items}` 交集为空
+- [ ] `cargo test agent::m0_tool_surface_is_exactly_four` 通过——M0 注册的工具恰为 §3.2 的四个，不含目标表尚未建立的 `draft_item` / `query_memory`
+- [ ] `rg -n 'confirm' src-tauri/src/mcp` 无命中——`mcp/` 模块不引用确认动作（禁令 4 的可执行形式；原验收写作「静态断言调用方集合」，`cargo test` 做不了调用图分析）
+- [ ] `cargo test agent::draft_requires_evidence_args` 通过——`draft_transaction` 缺 `source_id` 或 `evidence_text` 时返回 `agent.tool_rejected` 且未写库
+- [ ] `cargo test agent::report_total_requires_evidence_and_currency` 通过——`report_source_total` 缺 `currency` 或 `evidence_text` 时返回 `agent.tool_rejected` 且未写库（§3.2 可信性要求第 2 条）
 - [ ] `cargo test agent::every_write_tool_writes_audit` 通过——每个写入类工具调用后 `audit_log` 恰好多一条且 `actor = "agent"`
-- [ ] `cargo test agent::timeout_leaves_no_partial_drafts` 通过——注入超时后，该来源关联的草稿数为 0
+- [ ] `cargo test agent::timeout_voids_only_own_session` 通过——两个来源各自解析，其一超时后，**只有该来源该会话的草稿被作废**，另一来源的草稿不受影响（§5 R5 的会话粒度结论）
+- [ ] `cargo test agent::void_is_audited_as_system` 通过——作废写一条 `actor = "system"` / `action = "void"` 的审计，且 agent 此前的 `actor = "agent"` 记录**仍在**（append-only，§3.4）
 - [ ] `cargo test agent::backend_absent_app_still_starts` 通过——`probe()` 失败时应用初始化仍成功，状态如实为不可用
 - [ ] `cargo test agent::single_concurrent_process` 通过——连续下达两个任务时第二个排队，同时存活的子进程数恒为 1
 - [ ] `rg -n 'sk-|api[_-]?key|Authorization' src-tauri/src` 无命中（不打包厂商凭证）
@@ -150,4 +177,5 @@ trait AgentBackend {
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
+| v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.2 工具面**按里程碑分层**——M0 只注册 4 个，`draft_item` / `query_memory` 推到 M3（其目标表 `draft_items` / `memory_rules` 在 M0 尚未建，注册即验收必挂）；工具须**注册时声明写入目标表集合**，否则 `tools_cannot_write_fact_tables` 无法实现。② §3.2 新增 **`report_source_total` 可信性要求**——修复闸门 3 的结构性失效：原规格允许 agent 自行填写总额校验的基准值，而校验两边同源等于没有闸门；现强制 `(amount_minor, currency, evidence_text)` 三者齐全、必须是来源上印着的数字、没印就不许调用，并如实写明这道闸门挡不住什么。③ §3.4 **修正「同一事务」**——N 次独立 MCP 调用各自记审计，不可能事后收进一个事务；改为按 `(source_id, agent_session_id)` 的补偿性作废 + `actor = "system"` 审计。④ §5 **R2、R5 关闭**（重试归 domain 且 v1 不自动重试；会话粒度 = 一个来源一个会话），**R1 给定 M0 初值 180 秒**避免无值阻塞。⑤ §6 验收从 10 条增至 14 条，并把无法实现的「静态断言调用图」改为 `rg` 检查 |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：待决 R1 的实测样本描述从「真实澳洲银行截图」改为「真实银行流水截图」，具名组合降为 dogfooding 样本标注。决定与验收标准未变 |

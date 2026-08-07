@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: draft
+status: ready
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-07
+version: v0.2
 ---
 
 # 03 · 审核与草稿区
@@ -44,9 +44,21 @@ version: v0.1
 路径 B（AI 不可达）：Tauri command → domain::confirm → 事实表
 ```
 
-**`domain::confirm` 不被任何 MCP 工具调用。** 确认动作只能由前端的 Tauri command 触发。
+**`domain::confirm` 不被任何 MCP 工具调用。** 确认动作只能由前端的 Tauri command 触发。实现手段是**模块边界**——`mcp/` 只依赖 `domain::draft`，拿不到 `domain::confirm`，越权在编译期不可表达（[`.claude/rules/rust-tauri.md` §4](../../.claude/rules/rust-tauri.md)）。
 
-草稿被确认后**标记为已消费而非删除**——保留是为了审计能回答「入库的这条当初 AI 起草成什么样」。
+草稿被确认后**标记为已消费而非删除**（`draft_transactions.consumed_at` 置非空，[00 地基 §3.6](./00-foundation.md)）。
+
+**溯源在 schema 层的落点**（2026-08-07 M0 开工评审补齐）：确认动作写出的 `transactions` 行带 **`source_draft_id`** 指回原草稿。此前本节承诺「审计能回答入库的这条当初 AI 起草成什么样」，但 schema 里没有任何字段兑现它——只靠 `audit_log` 的 `before_json` 做不到高效反查。
+
+**确认时的完整性校验**（服务端，不依赖 UI）：
+
+| 检查 | 不过时返回 |
+|---|---|
+| 草稿有 `source_id` 且 `evidence_text` 非空 | `review.missing_evidence` |
+| 草稿三元组齐全（`base_amount_minor` / `base_currency` / `rate_ppm` 均非空） | `review.incomplete_triple` |
+| 批量确认时该来源总额校验为 `passed` | `review.total_mismatch` / `review.total_unavailable` |
+
+三元组那条对应 [00 地基 §3.6](./00-foundation.md)「草稿可空、确认必填」与 [04 交易 §3.2](./04-transactions.md)「缺汇率不入库」。
 
 ### 3.2 证据链呈现
 
@@ -59,17 +71,42 @@ version: v0.1
 
 **这是唯一能在无人工介入下捕获错误的机制，优先级高于解析准确率本身**（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 3）。
 
-- 校验式：`SUM(该来源的草稿金额) == sources.declared_total_minor`
-- **整数精确相等**，无容差——这是禁用浮点的直接理由（[00 地基 §3.4](./00-foundation.md)）
-- 三种结果：
+#### 校验式（2026-08-07 M0 开工评审定死）
+
+原文只写「`SUM(该来源的草稿金额) == sources.declared_total_minor`」，**「草稿金额」是原币还是本位币没说**——外币账单的声明合计是外币，而逐笔折算后求和还会引入舍入误差。不定死则 M0/M1 必错。
+
+**校验在「来源声明合计的那个币种」（`declared_total_currency`）上做。** 对该来源下每条**未消费**草稿，取它在该币种下的金额：
+
+| 情形 | 取值 |
+|---|---|
+| 草稿原币 == `declared_total_currency` | `amount_minor` |
+| 草稿原币 != `declared_total_currency` | `base_amount_minor`，**且要求 `base_currency == declared_total_currency`** |
+
+求和后与 `declared_total_minor` **整数精确相等**，无容差（这是禁用浮点的直接理由，见 [00 地基 §3.4](./00-foundation.md)）。
+
+> **为什么这样取**：账单的合计必然以账单自身的币种印刷，而账单上的外币消费**同时印着折算后的本币金额**——这正是 [04 交易 §3.2](./04-transactions.md) 汇率路径 1「从截图反推」的适用场景。取 `base_amount_minor` 才能让外币行参与合计，取原币则永远对不上。
+
+#### 三种结果
 
 | 结果 | 条件 | 行为 |
 |---|---|---|
 | `passed` | 合计精确相等 | 允许批量确认 |
-| `failed` | 合计不等 | **显式报警并阻止批量入库**；用户仍可逐条确认（逐条是用户自己核对过的） |
-| `unavailable` | 来源未声明合计（`declared_total_minor` 为空） | UI 明确标注「此来源无合计可校验」，**不伪装成通过** |
+| `failed` | 合计不等 | **显式报警并阻止批量入库**（`review.total_mismatch`）；用户仍可逐条确认（逐条是用户自己核对过的） |
+| `unavailable` | ① 来源未声明合计（`declared_total_*` 为空）；**或** ② 存在草稿取不到该币种下的金额（缺三元组、或 `base_currency` 与声明币种不匹配） | UI 明确标注**无法校验**并**列出是哪几条导致的**；批量确认被拒（`review.total_unavailable`）。**不伪装成通过，也不谎报 failed**——「算不出来」和「算出来不对」是两回事 |
 
 - **不提供 `--force` / 「忽略警告继续」类旁路**（[ADR-0002](../adr/0002-ai-never-writes-directly.md)「对实现的硬性要求」第 3 条）
+
+#### 基准值本身必须可核对
+
+**这道闸门有一个结构性边界，规格必须写明。** 校验的两边——逐笔草稿与声明合计——**都由同一个 agent 在同一次会话里产生**（[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。它能捕获「逐笔读错但合计读对」，**捕获不了「逐笔和合计一起读错」**。
+
+对策是让基准值也接受人的检查：
+
+- `report_source_total` 强制携带 `declared_total_evidence_text`（合计在来源上的原文片段），数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)）
+- **审核界面把声明合计与它的原文片段并排显示在批量确认按钮附近**——用户按下批量确认前，最后看到的一眼就是「账单上印的合计是 1847.20，系统读到的也是 1847.20」
+- 来源上没印合计时 agent 不得自己算一个（[01 Agent 运行时 §3.2](./01-agent-runtime.md)），结果如实为 `unavailable`
+
+**一句话**：闸门 3 把「逐条核对 40 笔」压缩成「核对 1 个合计」，但压缩不到零。
 
 ### 3.4 异常前置
 
@@ -132,30 +169,43 @@ version: v0.1
 | R2 | 舍入规则若与来源自身不一致，总额校验会系统性失败（[00 地基 §5](./00-foundation.md) R3） | 本文 §3.3 | M2 实测真实对账数据 |
 | R3 | 前端状态管理选型（[`docs/architecture.md` §8](../architecture.md) 未决 A4） | 本文全部 UI | M1 开工前，@alex 决 |
 | R4 | 「40 笔 30 秒」如何客观测量——秒表人测的方差可能大于优化幅度 | 本文 §6 人工验收 | M1 开工前定测量协议，**写进本文 §6** |
-| R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 3 优先级 | M1 实测；不可靠则降权或去掉该维度 |
+| R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 3 优先级 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
+| R6（**新增 2026-08-07**） | §3.3 的舍入敏感性——逐笔 `base_amount_minor` 各自舍入后求和，与账单印刷的合计可能差几分（[00 地基 §5](./00-foundation.md) R3 的具体失败模式） | 本文 §3.3 校验式 | M2 实测真实外币账单；若系统性偏差成立，可能需要在**外币行参与合计**这条路径上另立规则，**结果回流本文与 [00 地基](./00-foundation.md)** |
 
 ## 6. 验收标准
 
+本模块横跨 M0（最朴素的确认列表）与 M1（审核界面做深），验收**按里程碑分层**——M0 只需闸门与确认逻辑成立，键盘流与排序属 M1。
+
+#### M0 必过
+
 - [ ] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [ ] `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 全绿
-- [ ] `cargo test review::confirm_not_reachable_from_mcp` 通过——静态断言 `domain::confirm` 的调用方集合中无 MCP 工具
-- [ ] `cargo test review::confirm_rejects_draft_without_evidence` 通过——服务端二次校验生效
+- [ ] `rg -n 'confirm' src-tauri/src/mcp` 无命中——`mcp/` 不引用确认动作（**替换原验收** `review::confirm_not_reachable_from_mcp`：`cargo test` 做不了静态调用图分析，那条写法无法实现）
+- [ ] `cargo test review::confirm_rejects_draft_without_evidence` 通过——服务端二次校验返回 `review.missing_evidence`
+- [ ] `cargo test review::confirm_rejects_incomplete_triple` 通过——三元组不齐时返回 `review.incomplete_triple`（§3.1 完整性校验）
 - [ ] `cargo test review::total_check_exact_equality` 通过——差 1 分即 `failed`
-- [ ] `cargo test review::total_check_unavailable_is_not_passed` 通过——来源未声明合计时结果为 `unavailable`，且批量确认路径不把它当 `passed`
-- [ ] `cargo test review::batch_confirm_blocked_when_total_failed` 通过——校验失败时批量确认返回错误
+- [ ] `cargo test review::total_check_uses_declared_currency` 通过——原币 == 声明币种时取 `amount_minor`、不等时取 `base_amount_minor`，混合币种来源能正确求和（§3.3 校验式）
+- [ ] `cargo test review::total_check_unavailable_when_not_declared` 通过——`declared_total_*` 为空时结果为 `unavailable`，批量确认路径不把它当 `passed`
+- [ ] `cargo test review::total_check_unavailable_when_amount_unobtainable` 通过——存在缺三元组或 `base_currency` 不匹配的草稿时结果为 `unavailable`（**不是 `failed`**），且返回体列出是哪几条
+- [ ] `cargo test review::batch_confirm_blocked_when_total_failed` 通过——返回 `review.total_mismatch`
+- [ ] `cargo test review::batch_confirm_blocked_when_total_unavailable` 通过——返回 `review.total_unavailable`
 - [ ] `cargo test review::no_force_bypass_exists` 通过——确认相关命令的参数里不存在 force/ignore 类旁路
 - [ ] `cargo test review::single_confirm_allowed_when_total_failed` 通过——逐条确认仍可用
 - [ ] `cargo test review::every_edit_writes_audit` 通过——每次修改后 `audit_log` 多一条且含 before/after
-- [ ] `cargo test review::confirmed_draft_is_marked_not_deleted` 通过
+- [ ] `cargo test review::confirmed_draft_is_marked_not_deleted` 通过——`consumed_at` 置非空，行仍在
+- [ ] `node scripts/verify-m0.mjs`（**待建**，检查项定义见 [`docs/PRD.md` §9.3](../PRD.md)）退出码 0
+
+**M0 人工验收**：
+
+- [ ] 每条草稿的原文片段与解析结果在同一屏可见，无需额外点击
+- [ ] 声明合计与它的原文片段显示在批量确认按钮附近（§3.3「基准值本身必须可核对」）
+- [ ] 总额不符或无法校验时，提示可见且批量确认按钮不可点
+
+#### M1 必过（在 M0 全部通过之上）
+
 - [ ] `npm test -- review/sorting` 通过——异常前置的五级排序按 §3.4 优先级
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
-- [ ] `node scripts/verify-m0.mjs`（**待建**）退出码 0
-
-**人工验收**（**M1 判定标准，测量协议见 §5 待决 R4**）：
-
-- [ ] 40 笔真实草稿，从打开审核界面到全部入库，**不碰鼠标**，≤ 30 秒
-- [ ] 每条草稿的原文片段与解析结果在同一屏可见，无需额外点击
-- [ ] 总额不符时，报警在批量确认按钮附近可见，且按钮不可点
+- [ ] **40 笔真实草稿，从打开审核界面到全部入库，不碰鼠标，≤ 30 秒**（测量协议见 §5 待决 R4，**M1 开工前必须先把协议写进本节**）
 
 ## 7. 回流记录
 
@@ -168,3 +218,4 @@ version: v0.1
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：两条写入路径的物理隔离、证据链呈现要求、总额校验三态（含 `unavailable` 不伪装成通过、无 force 旁路）、异常前置五级排序、键盘流键位表与默认全选、纠正留痕与记忆投递、虚拟滚动；否决方案八条；待决 R1–R5；验收标准 14 条可执行 + 3 条人工 |
+| v0.2 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.3 **校验式定死**——原文「`SUM(该来源的草稿金额)`」未说原币还是本位币，外币账单必错；现明确在 `declared_total_currency` 维度求和，原币同币种取 `amount_minor`、异币种取 `base_amount_minor`。② §3.3 `unavailable` 扩为两种触发条件（未声明合计 **或** 存在取不到该币种金额的草稿），并要求列出是哪几条——「算不出来」与「算出来不对」不可混为一谈。③ §3.3 新增**「基准值本身必须可核对」**：如实写明闸门 3 的结构性边界（校验两边同源，挡不住逐笔与合计一起读错），对策是强制 `declared_total_evidence_text` 并在批量确认按钮附近与合计并排显示。④ §3.1 补**溯源字段 `source_draft_id`**（原文承诺审计能回答「当初起草成什么样」，schema 无落点）与确认时的三项完整性校验及对应错误码。⑤ §6 验收**按 M0/M1 分层**，把无法实现的 `confirm_not_reachable_from_mcp` 改为 `rg` 检查，新增 5 条校验式相关用例。⑥ §5 新增 R6（外币行参与合计的舍入敏感性） |
