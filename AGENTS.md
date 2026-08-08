@@ -31,7 +31,7 @@ Daybook（日簿）是一个 **macOS 本地优先的桌面应用**，帮用户�
 
 ## 干完之后（缺一即视为未完成）
 
-1. **跑门禁**——前端 `npm run lint` · `npm run typecheck` · `npm test` · `npm run build`，Rust `cargo fmt --check` · `cargo clippy -- -D warnings` · `cargo test`，任一失败即红。改过 `docs/prd/` 还要跑 `node docs/prd/check-docs.mjs`。
+1. **跑门禁**——前端 `npm run lint` · `npm run typecheck` · `npm test` · `npm run build`，Rust `cargo fmt --check` · `cargo clippy -- -D warnings` · `cargo test`，任一失败即红。改过 `docs/prd/` 还要跑 `node docs/prd/check-docs.mjs`；改过任何 `.md` 还要跑 `node scripts/check-links.mjs`（两条文档门禁 CI 对所有 PR 强制）。
 2. **回流**——实现相对规格的偏离、澄清、新发现回写对应 sub-PRD 的「回流记录」，版本号 +0.1。**实现证伪规格时先回写文档再改代码。**
 3. **更新 status**——sub-PRD frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 同步；功能首次落地时补 `.claude/features/` 速查。
 

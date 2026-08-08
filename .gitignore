@@ -40,6 +40,14 @@ pnpm-debug.log*
 /evidence/
 /.daybook-dev/
 /samples/
+
+# 夹具（docs/prd/07-eval.md §3.6/§3.7）：本机集与 CI 集必须分离。
+#   fixtures/local/ — 随自用积累的真实截图与真实金额，绝不进 git
+#   fixtures/ci/    — 手工脱敏或合成的一小撮，进仓库，只用于重放回归
+# 因此这里只挡 local 一支；ci 一支需要能提交，故显式反挡。
+/fixtures/local/
+!/fixtures/ci/
+
 .env
 .env.*
 !.env.example

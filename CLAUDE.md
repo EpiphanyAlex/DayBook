@@ -19,8 +19,11 @@
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test`
 
-**文档门禁（现在就可用）**
-- `node docs/prd/check-docs.mjs` — frontmatter 必填字段 + 相对链接可达
+**文档门禁（现在就可用，CI 对所有 PR 强制）**
+- `node docs/prd/check-docs.mjs` — `docs/prd/` 的 frontmatter 必填字段 + 相对链接可达
+- `node scripts/check-links.mjs` — 全仓库 `.md` 相对链接可达（ADR、总 PRD、`CLAUDE.md`、`.claude/rules/` 等 `check-docs` 覆盖不到的部分），并禁止 `file://` 绝对路径
+
+两者由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
 
 ## 产品事实
 

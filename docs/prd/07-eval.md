@@ -3,7 +3,7 @@ title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与
 status: draft
 owner: "@alex"
 date: 2026-08-08
-version: v0.1
+version: v0.2
 ---
 
 # 07 · 评测 Eval
@@ -111,11 +111,13 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 **夹具导出器**：`node scripts/export-fixture.mjs <agent_session_id>`（**待建**）把散落三处的数据打包成一个自包含目录：
 
 ```
-fixtures/<date>-<slug>/
+fixtures/local/<date>-<slug>/
 ├── input.png | input.txt   ← 截图原件，或 utterance 的转写文本
 ├── tool-calls.json         ← agent 那次调了哪些工具、每次的完整参数
 └── expected.json           ← 人确认后的正确结果
 ```
+
+**导出器一律写进 `fixtures/local/`**，因为它导出的是真实数据。要进 CI 得先脱敏并移入 `fixtures/ci/`——目录划分见 §3.7。
 
 **重放时跳过 `claude -p`**，直接把 `tool-calls.json` 喂进系统。因此它测的**不是模型**，是——
 
@@ -136,9 +138,18 @@ fixtures/<date>-<slug>/
 
 夹具与 eval 集里是**真实截图和真实金额**。
 
-- **本机集**：随 dogfooding 增长，**不进 git**（`.gitignore` 已挡 `/samples/`，夹具目录同样处理）
+- **本机集**：随自用积累而增长，**不进 git**
 - **CI 集**：手工**脱敏或合成**的一小撮，进仓库，只用于重放回归
 - **两套不得混用。** 任何让真实账目进入 git 的路径都是缺陷
+
+**分离靠目录，不靠自觉**——两套数据放同一个目录、指望提交时挑，迟早会漏。`.gitignore` 里的对应物：
+
+```gitignore
+/fixtures/local/     ← 本机集，绝不进 git
+!/fixtures/ci/       ← CI 集，显式反挡，必须能提交
+```
+
+`/samples/` 同理已挡。**判据**：`git status` 里永远不该出现 `fixtures/local/` 下的任何文件；出现了就是 `.gitignore` 被改坏了。
 
 ## 4. 否决的替代方案
 
@@ -185,7 +196,9 @@ fixtures/<date>-<slug>/
 
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+- **2026-08-08 · 夹具目录定为 `fixtures/local/` 与 `fixtures/ci/` 两支**（§3.6、§3.7）。
+  起因是建 CI 门禁时要往 `.gitignore` 加夹具规则，发现 §3.7 只说了「本机集不进 git、CI 集进仓库」，**没说这两套怎么在文件系统上分开**——而一条 `.gitignore` 规则必须落到具体路径。
+  沿用 §3.7 原有的「两套不得混用」，把它实现为目录划分：`/fixtures/local/` 被 ignore，`!/fixtures/ci/` 显式反挡。§3.6 的导出器输出路径随之从 `fixtures/<date>-<slug>/` 改为 `fixtures/local/<date>-<slug>/`——导出器碰的一定是真实数据，默认落点就该在不进 git 的那一支。
 
 ---
 
@@ -194,3 +207,4 @@ fixtures/<date>-<slug>/
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-08 | 初版，出自 2026-08-08 设计评审（`/grill-with-docs` 会话）。此前七份 sub-PRD 里**没有任何一份负责「agent 读得准不准」**，而 [`docs/PRD.md` §9.1](../PRD.md) 认定它是生死线。确立：eval 走生产同一条路径（不直接调 API）· eval 集是现有三表 join 的视图（不新建数据）· outcome + transcript 两个维度、几乎全代码型评分器 · 20 用例起步 · 逐条 diff 而非百分比门槛 · 夹具重放把 eval（烧额度、不进 CI）与回归（零额度、进 CI）拆开 · 本机真实数据与 CI 脱敏数据严格分离。否决方案九条，待决 R1–R6 |
+| v0.2 | 2026-08-08 | 夹具目录落为 `fixtures/local/`（不进 git）与 `fixtures/ci/`（进仓库）两支，§3.7 补 `.gitignore` 对应写法与判据，§3.6 导出路径随之改到 `local/` 一支。起因见「7. 回流记录」——建 CI 门禁时发现 §3.7 只说了两套数据要分离、没说怎么分 |

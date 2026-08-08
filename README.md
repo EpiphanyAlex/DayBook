@@ -13,10 +13,11 @@
 **骨架阶段（2026-08-06 建立）。** 约束与文档已就位，`src/` 与 `src-tauri/` **尚未创建**。
 第一个里程碑是 **M0 端到端点亮**：拖一张截图 → agent 读 → 经 MCP 写入 SQLite → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
 
-现在唯一可跑的命令是文档门禁：
+现在唯一可跑的命令是文档门禁（CI 对所有 PR 强制，见 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
 
 ```bash
-node docs/prd/check-docs.mjs
+node docs/prd/check-docs.mjs   # docs/prd/ 的 frontmatter + 链接
+node scripts/check-links.mjs   # 全仓库 Markdown 链接
 ```
 
 前端与 Rust 的命令要等 [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) 落地后才存在，清单见 [`CLAUDE.md`](./CLAUDE.md)「常用命令」。
