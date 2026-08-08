@@ -2,8 +2,9 @@
 
 - **日期**：2026-08-06
 - **状态**：已接受
-- **决策者**：@alex（产品负责人）
+- **决策者**：@maintainer
 - **相关**：[ADR-0004 数据模型](./0004-data-model-sqlite-integer-money.md)、[`docs/PRD.md` §4](../PRD.md)、[`docs/prd/03-review.md`](../prd/03-review.md)
+- **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**四道闸门与决策内容未变。**
 
 ## 背景
 

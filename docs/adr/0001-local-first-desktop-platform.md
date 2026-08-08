@@ -2,8 +2,9 @@
 
 - **日期**：2026-08-06
 - **状态**：已接受
-- **决策者**：@alex（产品负责人）
+- **决策者**：@maintainer
 - **相关**：[ADR-0003 Agent 运行时与可插拔后端](./0003-agent-runtime-and-pluggable-backend.md)、[ADR-0005 语音与系统集成](./0005-voice-and-system-integration.md)、[`docs/PRD.md` §3](../PRD.md)
+- **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变。**
 
 ## 背景
 

@@ -1,9 +1,9 @@
 ---
 title: sub-PRD 索引与状态总览
 status: ready
-owner: "@alex"
+owner: "@maintainer"
 date: 2026-08-08
-version: v0.6
+version: v0.7
 ---
 
 # sub-PRD 索引
@@ -16,14 +16,14 @@ version: v0.6
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型 | **`ready`** | v0.4 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、可插拔后端接口 | **`ready`** | v0.4 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排 | **`ready`** | v0.4 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、总额校验、审核界面 | **`ready`** | v0.3 |
-| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、分类、回顾 | `draft` | v0.4 |
-| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.2 |
-| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.2 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.2 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型 | **`ready`** | v0.5 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、可插拔后端接口 | **`ready`** | v0.5 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排 | **`ready`** | v0.5 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、总额校验、审核界面 | **`ready`** | v0.4 |
+| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、分类、回顾 | `draft` | v0.5 |
+| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.3 |
+| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.3 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.3 |
 
 **M0 四份已于 2026-08-07 完成开工评审，进入 `ready`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。评审收敛了 5 处跨文档冲突与 8 处缺口，关闭待决 3 项、改期 2 项，各份变更记录有逐条说明。
 
@@ -94,5 +94,6 @@ version: v0.6
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步 01/02/04 的版本号至 v0.2（去窄化：多币种与多渠道是能力而非定位，具名银行/支付平台降为 dogfooding 样本） |
 | v0.3 | 2026-08-07 | 随**本位币可切换**拍板（[`docs/PRD.md` §13](../PRD.md) P2 关闭）同步：00 → v0.2、04 → v0.3；共享决定出处表新增「本位币切换语义」一行，指向 [00 地基 §3.4](./00-foundation.md) |
 | v0.4 | 2026-08-07 | **M0 四份完成开工评审并进入 `ready`**：00 → v0.3、01 → v0.3、02 → v0.3、03 → v0.2。状态总览与「下一步」改写为进 plan mode 开 M0；共享决定出处表新增 5 行（M0 逐列字段、权威错误码集、总额校验比哪个金额、闸门 3 的边界、M0 端到端脚本） |
-| v0.5 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）同步。** 新增 **[07 评测](./07-eval.md)**（此前没有任何 sub-PRD 负责「agent 读得准不准」，而 `PRD §9.1` 认定它是生死线）；版本同步 00→v0.4 · 01→v0.4 · 02→v0.4 · 03→v0.3 · 04→v0.4 · 05→v0.2 · 06→v0.2；里程碑映射补一段说明 07 不绑定单一里程碑；共享决定出处表新增 6 行（工具的智能边界、日志分级、口述来源语义、交易/事项边界、记忆应用、读对判据） |
+| v0.5 | 2026-08-08 | **设计评审同步。** 新增 **[07 评测](./07-eval.md)**（此前没有任何 sub-PRD 负责「agent 读得准不准」，而 `PRD §9.1` 认定它是生死线）；版本同步 00→v0.4 · 01→v0.4 · 02→v0.4 · 03→v0.3 · 04→v0.4 · 05→v0.2 · 06→v0.2；里程碑映射补一段说明 07 不绑定单一里程碑；共享决定出处表新增 6 行（工具的智能边界、日志分级、口述来源语义、交易/事项边界、记忆应用、读对判据） |
 | v0.6 | 2026-08-08 | 随文档门禁进 CI 同步：07 → v0.2（夹具目录拆为 `fixtures/local/` 与 `fixtures/ci/` 两支）。文档门禁自此为两条——`docs/prd/check-docs.mjs` 与 `scripts/check-links.mjs`，由 `.github/workflows/docs.yml` 对所有 PR 强制 |
+| v0.7 | 2026-08-08 | **公开仓库去个人化同步**：八份 sub-PRD 版本 +0.1（00→v0.5 · 01→v0.5 · 02→v0.5 · 03→v0.4 · 04→v0.5 · 05→v0.3 · 06→v0.3 · 07→v0.3）；全目录 `owner` 改为 `@maintainer`；本表去掉工具与会话指代。**状态、依赖关系与共享决定出处表未变** |

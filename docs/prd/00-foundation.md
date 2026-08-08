@@ -1,9 +1,9 @@
 ---
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: ready
-owner: "@alex"
+owner: "@maintainer"
 date: 2026-08-08
-version: v0.4
+version: v0.5
 ---
 
 # 00 · 地基 Foundation
@@ -283,8 +283,8 @@ memory_rules · audit_log
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| ~~R1~~ **已关闭（2026-08-07）** | 本位币是固定单一还是可切换 | 本文 §3.4/§3.6、[04 交易](./04-transactions.md) | **结论：可切换**（@alex 拍板，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。`base_currency` 逐笔存储并在确认时冻结，切换不改历史行，汇总按本位币分组——三条规则与推导见 §3.4「本位币切换语义」 |
-| R2 | Rust↔TS 类型漂移；是否引入 `tauri-specta` 之类 codegen | 本文 §3.8 | 漂移造成第一个真实 bug 时开 spike，@alex 决 |
+| ~~R1~~ **已关闭（2026-08-07）** | 本位币是固定单一还是可切换 | 本文 §3.4/§3.6、[04 交易](./04-transactions.md) | **结论：可切换**（产品决定，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。`base_currency` 逐笔存储并在确认时冻结，切换不改历史行，汇总按本位币分组——三条规则与推导见 §3.4「本位币切换语义」 |
+| R2 | Rust↔TS 类型漂移；是否引入 `tauri-specta` 之类 codegen | 本文 §3.8 | 漂移造成第一个真实 bug 时开 spike，产品决定 |
 | R3 | 舍入规则选 half-even 尚未经真实对账验证——若某来源自身用 half-up，总额校验会系统性差几分 | 本文 §3.4、[03 审核与草稿区](./03-review.md) 的总额校验 | M2 处理真实 10 天数据时实测，**结果必须回流本文** |
 | R4 | 证据目录长期累积到 GB 级后的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.2、[02 导入](./02-ingest.md) | 真实使用出现容量问题时 |
 | R5 | 数据库 at-rest 加密——v1 不做（数据不出本机 + macOS FileVault 已提供一层）。若未来需要，`rusqlite` 的 `bundled-sqlcipher` 是路径 | 全产品安全姿态 | v1 明确不做，登记以免被沉默填掉 |
@@ -333,6 +333,7 @@ memory_rules · audit_log
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：存储引擎与数据目录、标识/时间/金额/汇率约定、迁移策略、M0 四表与 v1 全表清单、命令契约与 `AppError` 形状、TS 桥；否决方案六条；待决 R1–R5；验收标准 11 条可执行 + 1 条人工 |
-| v0.4 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）回流。** ① `sources` 新增 **`kind`（`file` \| `utterance`）** 并加「来源不等于文件」小节：闸门 2 要的是「痕迹 + 原文」而非「文件」；此前的隐含假设造成硬墙——`draft_transactions.source_id` 非空而口述无文件，导致 [ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md) 自己举的跨实体口述例子**在结构上落不了地**。转写文本落盘成 `.txt` 与截图同等对待，`original_filename` 随之改为可空。② `draft_transactions` 新增 **`backend_id` / `model_id`**——[07 评测](./07-eval.md) 的 eval 集是「草稿 ← 交易」join，不记后端与模型则基线不可解释。③ §6 新增 3 条验收 |
+| v0.5 | 2026-08-08 | 公开仓库去个人化：§5 待决表与本表的决策署名统一为「产品决定」，去掉工具与会话指代；`owner` 改为 `@maintainer`。**决定、schema 与验收标准未变** |
+| v0.4 | 2026-08-08 | **设计评审回流。** ① `sources` 新增 **`kind`（`file` \| `utterance`）** 并加「来源不等于文件」小节：闸门 2 要的是「痕迹 + 原文」而非「文件」；此前的隐含假设造成硬墙——`draft_transactions.source_id` 非空而口述无文件，导致 [ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md) 自己举的跨实体口述例子**在结构上落不了地**。转写文本落盘成 `.txt` 与截图同等对待，`original_filename` 随之改为可空。② `draft_transactions` 新增 **`backend_id` / `model_id`**——[07 评测](./07-eval.md) 的 eval 集是「草稿 ← 交易」join，不记后端与模型则基线不可解释。③ §6 新增 3 条验收 |
 | v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.6 四张 M0 表**逐列定死**（此前只有「关键约束」，本节自己注明「详细字段开工前补」——现在补上）：`sources` 新增 `state` / `evidence_relpath` / `parse_error_code` / `agent_session_id` 与 **`declared_total_currency`+`declared_total_evidence_text`**（原设计只有金额没有币种，无法校验；且校验基准本身必须可核对）；`draft_transactions` 明确三元组**草稿可空、确认必填**；`transactions` 新增 **`source_draft_id` 溯源列**（兑现 [03 §3.1](./03-review.md) 的审计承诺，原先无落点）；`audit_log.actor` **新增 `system`**（超时作废等代码触发的动作原先无合法取值）；新增 agent 对 `sources` 的**列级写入权限**收窄。② §3.7 补全**权威错误码集** 18 条——此前只登记 `data.*`，而 `.claude/rules/` 已在示例中使用未登记的 `review.*` 码。③ §5 新增 R6（证据坐标字段，随 [03](./03-review.md) R1 决，不阻塞 M0）。④ §6 新增 6 条验收 |
-| v0.2 | 2026-08-07 | **待决 R1 关闭：本位币可切换**（@alex 拍板，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。§3.4 新增 `base_currency` 约定行与「本位币切换语义」小节（逐笔冻结 / 切换不改历史 / 汇总按本位币分组，三条均由 [ADR-0004](../adr/0004-data-model-sqlite-integer-money.md) 折算冻结原则推导）；§3.4 自洽约束的「单币种交易」改述为「原币与本位币相同时」（本位币不再固定，原措辞会有歧义）；§3.6 `transactions` 关键约束逐字段列出并加入 `base_currency`；§6 新增 3 条验收（逐行冻结、汇总分组、`SUM` 必带 `GROUP BY`） |
+| v0.2 | 2026-08-07 | **待决 R1 关闭：本位币可切换**（产品决定，[`docs/PRD.md` §13](../PRD.md) P2 同步关闭）。§3.4 新增 `base_currency` 约定行与「本位币切换语义」小节（逐笔冻结 / 切换不改历史 / 汇总按本位币分组，三条均由 [ADR-0004](../adr/0004-data-model-sqlite-integer-money.md) 折算冻结原则推导）；§3.4 自洽约束的「单币种交易」改述为「原币与本位币相同时」（本位币不再固定，原措辞会有歧义）；§3.6 `transactions` 关键约束逐字段列出并加入 `base_currency`；§6 新增 3 条验收（逐行冻结、汇总分组、`SUM` 必带 `GROUP BY`） |

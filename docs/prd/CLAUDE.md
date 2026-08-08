@@ -27,7 +27,7 @@ sub-PRD 只规格化**模块边界**（接口、schema、状态语义、错误�
 ---
 title:
 status: draft | ready | in-progress | review | done | blocked | archived
-owner: "@alex"
+owner: "@maintainer"
 date: 2026-08-06
 version: v0.1
 ---

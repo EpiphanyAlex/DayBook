@@ -2,8 +2,9 @@
 
 - **日期**：2026-08-06
 - **状态**：已接受
-- **决策者**：@alex（产品负责人）
+- **决策者**：@maintainer
 - **相关**：[ADR-0001 本地优先桌面平台](./0001-local-first-desktop-platform.md)、[ADR-0002 AI 永不直接写入](./0002-ai-never-writes-directly.md)、[`docs/prd/01-agent-runtime.md`](../prd/01-agent-runtime.md)
+- **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变**——§2 论证「不按业务领域拆 agent」的跨域例句保留，它是该决定的载重论据。
 
 ## 背景
 
