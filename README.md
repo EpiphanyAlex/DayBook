@@ -102,4 +102,6 @@ Daybook 的前提相反：**默认你是事后补的。**
 
 ## 许可
 
-尚未选定。开源意图见 [ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)「后果」一节（可参与性是选择 web 技术栈的理由之一）。
+[MIT](./LICENSE)。
+
+选 MIT 是为了让 [ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)「后果」里那条**「贡献者只需 Node + Rust 工具链，不需要 Xcode」**真的成立——工具链门槛降下来了，许可门槛就不该再立一道。决策记录见 [`docs/PRD.md` §13](./docs/PRD.md) P4。
