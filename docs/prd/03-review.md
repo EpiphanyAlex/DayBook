@@ -2,8 +2,8 @@
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
 status: ready
 owner: "@alex"
-date: 2026-08-07
-version: v0.2
+date: 2026-08-08
+version: v0.3
 ---
 
 # 03 · 审核与草稿区
@@ -113,10 +113,11 @@ version: v0.2
 排序优先级（高 → 低）：
 
 1. 总额校验 `failed` 的来源下的全部条目
-2. 跨图疑似重复（[02 导入 §3.6](./02-ingest.md)）
-3. agent 标注的低置信条目
-4. 与记忆规则冲突的条目（例：这家商户历史上一直归「餐饮」，这次被起草成「购物」）
-5. 其余，按交易日期
+2. **`kind = utterance` 来源的条目**（2026-08-08 新增）——闸门 3 对语音天然失效（无声明合计，恒为 `unavailable`），它们只受三道闸门保护。UI 明示「语音来源，无合计可校验」，**不让它们看起来和已校验过的截图草稿一样安全**
+3. 跨图疑似重复（[02 导入 §3.6](./02-ingest.md)）
+4. agent 标注的低置信条目
+5. 与记忆规则冲突的条目（例：这家商户历史上一直归「餐饮」，这次被起草成「购物」）。**这一档要求 domain 侧也能读 `memory_rules`**——但那是**标记冲突**，不是**覆盖分类**，不违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15（见 [06 记忆 §3.4](./06-memory.md)）
+6. 其余，按交易日期
 
 **理由**：用户的注意力应该花在可疑项上，而不是均匀分给 40 条。这是「40 笔 30 秒」在信息架构上的实现方式。
 
@@ -140,6 +141,10 @@ version: v0.2
 ### 3.6 每次纠正都留痕并投递记忆
 
 - 用户对草稿的任何修改 → 写 `audit_log`（`actor = "human"`，含 before/after，[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 4）
+- **必须支持「改实体类型」**（2026-08-08 新增，M3 起）：把一条交易草稿转成事项草稿，或反之。
+  理由：一句口述里的交易与事项由 agent 判断归属（[05 事项 §3.1](./05-items.md) 的「钱是否已流动」规则），**分类错是高可见、低损害的错误**——用户一眼就看出「这条不该在这」。但草稿分两张表，改类型物理上是「删一条 + 建一条」。若 UI 不提供一键转换，用户只能丢弃后重说一遍，**批处理省下的时间会在这一下被吃掉**。
+  转换写两条审计（原表 `discard` + 新表 `create`），并保留 `source_id` / `evidence_text` / `agent_session_id` 不变——证据链不因用户改分类而断。
+  M0 只有交易表，此项无从实现；`03` 的 M0 验收不含它
 - 同时投递一个**纠正事件**给 [06 记忆](./06-memory.md)：`(来源商户文本, 原分类, 改后分类)` 等
 - **记忆的写入不阻塞确认**——记忆失败不能挡住入库
 
@@ -169,7 +174,7 @@ version: v0.2
 | R2 | 舍入规则若与来源自身不一致，总额校验会系统性失败（[00 地基 §5](./00-foundation.md) R3） | 本文 §3.3 | M2 实测真实对账数据 |
 | R3 | 前端状态管理选型（[`docs/architecture.md` §8](../architecture.md) 未决 A4） | 本文全部 UI | M1 开工前，@alex 决 |
 | R4 | 「40 笔 30 秒」如何客观测量——秒表人测的方差可能大于优化幅度 | 本文 §6 人工验收 | M1 开工前定测量协议，**写进本文 §6** |
-| R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 3 优先级 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
+| R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 4 档 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
 | R6（**新增 2026-08-07**） | §3.3 的舍入敏感性——逐笔 `base_amount_minor` 各自舍入后求和，与账单印刷的合计可能差几分（[00 地基 §5](./00-foundation.md) R3 的具体失败模式） | 本文 §3.3 校验式 | M2 实测真实外币账单；若系统性偏差成立，可能需要在**外币行参与合计**这条路径上另立规则，**结果回流本文与 [00 地基](./00-foundation.md)** |
 
 ## 6. 验收标准
@@ -186,6 +191,8 @@ version: v0.2
 - [ ] `cargo test review::total_check_exact_equality` 通过——差 1 分即 `failed`
 - [ ] `cargo test review::total_check_uses_declared_currency` 通过——原币 == 声明币种时取 `amount_minor`、不等时取 `base_amount_minor`，混合币种来源能正确求和（§3.3 校验式）
 - [ ] `cargo test review::total_check_unavailable_when_not_declared` 通过——`declared_total_*` 为空时结果为 `unavailable`，批量确认路径不把它当 `passed`
+- [ ] `cargo test review::utterance_source_is_always_unavailable` 通过——`kind = utterance` 的来源，总额校验恒为 `unavailable`（**不是 `failed`**），批量确认被拒、逐条确认可用
+- [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `cargo test review::total_check_unavailable_when_amount_unobtainable` 通过——存在缺三元组或 `base_currency` 不匹配的草稿时结果为 `unavailable`（**不是 `failed`**），且返回体列出是哪几条
 - [ ] `cargo test review::batch_confirm_blocked_when_total_failed` 通过——返回 `review.total_mismatch`
 - [ ] `cargo test review::batch_confirm_blocked_when_total_unavailable` 通过——返回 `review.total_unavailable`
@@ -203,7 +210,8 @@ version: v0.2
 
 #### M1 必过（在 M0 全部通过之上）
 
-- [ ] `npm test -- review/sorting` 通过——异常前置的五级排序按 §3.4 优先级
+- [ ] `npm test -- review/sorting` 通过——异常前置的六级排序按 §3.4 优先级
+- [ ] `npm test -- review/entity-type-switch` 通过——一条交易草稿转成事项草稿后，`source_id` / `evidence_text` / `agent_session_id` 不变，且写了两条审计（§3.6）
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
 - [ ] **40 笔真实草稿，从打开审核界面到全部入库，不碰鼠标，≤ 30 秒**（测量协议见 §5 待决 R4，**M1 开工前必须先把协议写进本节**）
 
@@ -218,4 +226,5 @@ version: v0.2
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：两条写入路径的物理隔离、证据链呈现要求、总额校验三态（含 `unavailable` 不伪装成通过、无 force 旁路）、异常前置五级排序、键盘流键位表与默认全选、纠正留痕与记忆投递、虚拟滚动；否决方案八条；待决 R1–R5；验收标准 14 条可执行 + 3 条人工 |
+| v0.3 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）回流。** ① §3.4 异常前置**由五级扩为六级**，新增第 2 档「`kind = utterance` 来源」——闸门 3 对语音天然失效（无声明合计），UI 必须明示「无合计可校验」，**不让它们看起来和已校验的截图草稿一样安全**；第 5 档补注「domain 读 `memory_rules` 是为标记冲突、不是覆盖分类」（[06 §3.4](./06-memory.md) C′）。② §3.6 新增**「改实体类型」为硬要求**（M3 起）：一句口述里交易与事项的归属由 agent 判断，分类错是**高可见低损害**的错误，但草稿分两表、改类型物理上是删+建；无一键转换则用户只能重说一遍，**批处理省下的时间会在这一下被吃掉**。转换写两条审计且证据链字段不变。③ §6 新增 4 条验收 |
 | v0.2 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.3 **校验式定死**——原文「`SUM(该来源的草稿金额)`」未说原币还是本位币，外币账单必错；现明确在 `declared_total_currency` 维度求和，原币同币种取 `amount_minor`、异币种取 `base_amount_minor`。② §3.3 `unavailable` 扩为两种触发条件（未声明合计 **或** 存在取不到该币种金额的草稿），并要求列出是哪几条——「算不出来」与「算出来不对」不可混为一谈。③ §3.3 新增**「基准值本身必须可核对」**：如实写明闸门 3 的结构性边界（校验两边同源，挡不住逐笔与合计一起读错），对策是强制 `declared_total_evidence_text` 并在批量确认按钮附近与合计并排显示。④ §3.1 补**溯源字段 `source_draft_id`**（原文承诺审计能回答「当初起草成什么样」，schema 无落点）与确认时的三项完整性校验及对应错误码。⑤ §6 验收**按 M0/M1 分层**，把无法实现的 `confirm_not_reachable_from_mcp` 改为 `rg` 检查，新增 5 条校验式相关用例。⑥ §5 新增 R6（外币行参与合计的舍入敏感性） |

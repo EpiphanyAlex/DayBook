@@ -2,8 +2,8 @@
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
 status: ready
 owner: "@alex"
-date: 2026-08-07
-version: v0.3
+date: 2026-08-08
+version: v0.4
 ---
 
 # 02 · 导入 Ingest
@@ -51,6 +51,17 @@ version: v0.3
 
 格式不在当前里程碑支持集内 → 返回 `ingest.unsupported_format`，UI 明确告知，**不静默忽略**。
 
+#### 第二种来源：`utterance`（2026-08-08 设计评审，M0）
+
+除拖拽文件外，**一段口述或文字也是来源**（`sources.kind = utterance`，见 [00 地基 §3.6](./00-foundation.md)「来源不等于文件」）。依据 [`docs/PRD.md` §1.1](../PRD.md)：录入摩擦是痛点的另一半，而我们的解法是「说一段话 → agent 拆成多笔 → 一次批量确认」，不是「更快的表单」。
+
+- 输入是一个多行文本框。**语音由 macOS 系统听写完成**（用户在框内连按两下 `Fn`），应用零代码、音频不出本机（[ADR-0005 §1](../adr/0005-voice-and-system-integration.md)）
+- **转写文本落盘成 `.txt`**，与截图同等对待 → `evidence_relpath` 非空，闸门 2 的实现路径对两种来源完全一致
+- 每条草稿的 `evidence_text` 是**这段话里对应的那个片段**（「今天吃饭 180」这半句），不是整段
+- **幂等仍以内容哈希为准**：同一段话说两次判为重复，返回已存在的 `source_id`
+- **`declared_total_*` 恒为空** → 总额校验恒为 `unavailable`。**闸门 3 对语音天然失效**，`03` 会把这类草稿在异常前置里单独提一档
+- **M0 只记交易**：`draft_items` 是 M3 的表，所以 agent 遇到事项类内容（「明天交房租」）**必须明确回一句「这条我现在还记不了」**，不得静默丢弃（[`docs/PRD.md` §9.2](../PRD.md)）
+
 ### 3.2 来源身份与幂等
 
 - 导入时计算文件内容的 **SHA-256**，存 `sources.content_hash`，该列**唯一**
@@ -92,10 +103,22 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 **状态转移由 Rust 侧代码执行，agent 无法改状态**——工具面里没有改状态的工具，且 agent 对 `sources` 的写入权限在数据层收窄到 `declared_total_*` 三列（[00 地基 §3.6](./00-foundation.md)「列级写入权限」、[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。非法转移返回 `ingest.invalid_state_transition`。
 
+#### 启动时的崩溃恢复扫描（2026-08-08 设计评审新增）
+
+**缺口**：解析任务此前只活在内存里。应用在解析途中崩溃或被 Ctrl-C，`sources.state` 停在 `parsing`，而**重启后没有任何东西会去碰它**——那条来源永久卡死，UI 上既不是待解析也不是失败。**M0 就会遇到，Ctrl-C 一次即复现。**
+
+借自 MeritAI `design-harness.md` §2「应用重启后 Task Runner 从可执行队列恢复，**不依赖内存中的 Promise**」。我们不需要它那套持久化任务队列，只需要一次启动扫描：
+
+- 启动时扫描 `state = parsing` 的全部来源
+- **v1 同时只跑一个 agent 子进程**（§3.5），所以启动那一刻**不可能有活着的解析** —— 这些来源必然是上次崩溃的残留
+- 全部转 `failed`，`parse_error_code = agent.interrupted`
+- 按 [01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿逻辑作废其草稿，并写 `actor = "system"` / `action = "void"` 的审计
+- 扫描发生在**任何窗口出现之前**，用户看到的第一屏就已经是干净状态
+
 ### 3.5 解析编排
 
 - 一次导入 N 个文件 → 生成 N 个解析任务，**串行执行**（v1 同时只跑一个 agent 子进程，见 [01 Agent 运行时 §3.4](./01-agent-runtime.md)）
-- 解析前**注入记忆规则**到任务上下文（商户→分类映射等），来源是 [06 记忆](./06-memory.md)；注入点的具体形态见 [`docs/architecture.md` §8](../architecture.md) 未决 A3
+- **不预先注入记忆规则**（2026-08-08 改定，[06 记忆 §3.4](./06-memory.md) R1 关闭 · `architecture` A3 关闭）：agent 解析出商户后**自己调 `query_memory` 批量查**。代码侧不做上下文装配，也不在起草后改写分类
 - 解析后由代码触发**总额交叉校验**（[03 审核与草稿区](./03-review.md) 的职责），结果落在 `sources` 上
 - **失败不静默**：`failed` 的来源在 UI 上显式列出，附失败原因（`parse_error_code`），可一键重试
 - **v1 不做自动重试**（2026-08-07 评审，[01 Agent 运行时 §5](./01-agent-runtime.md) R2 关闭）：重试由用户在 UI 上显式触发。自动重试会在用户不知情时二次消耗 AI 额度，而额度是真实约束（[`docs/PRD.md` §12](../PRD.md)）
@@ -149,6 +172,9 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 - [ ] `cargo test ingest::agent_cannot_change_source_state` 通过——工具面中不存在改 `sources.state` 的工具
 - [ ] `cargo test ingest::failed_source_has_no_drafts` 通过——解析失败后该来源关联草稿数为 0，且 `parse_error_code` 非空
 - [ ] `cargo test ingest::agent_cannot_write_source_columns` 通过——agent 经工具面只能写 `declared_total_*`，改 `state` / `evidence_relpath` 等列无路径可走
+- [ ] `cargo test ingest::startup_scan_clears_stuck_parsing` 通过——预置一条 `state = parsing` 的来源后启动，扫描把它转 `failed` + `agent.interrupted` 并作废其草稿
+- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段文本 → `kind = utterance`、`ext = txt`、转写文本已落盘、`evidence_relpath` 非空、`declared_total_*` 全空
+- [ ] `cargo test ingest::utterance_idempotent_by_text` 通过——同一段文本投两次只产生一条 `sources`，第二次 `deduplicated == true`
 - [ ] `cargo test ingest::batch_continues_after_failure` 通过——队列中一个文件失败，其余照常完成
 - [ ] `cargo test ingest::cross_image_dedup_candidates`（**M2**）通过——构造同金额同币种相差 1 天的两条草稿，被标为疑似重复且**未自动合并**
 - [ ] `node scripts/verify-m0.mjs`（**待建**）退出码 0
@@ -169,5 +195,6 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：v1 拖拽导入、SHA-256 内容幂等、证据先落盘后写库、来源五态状态机、解析编排（串行/记忆注入/失败不静默）、跨图去重候选判定（不自动合并）、批量导入；否决方案七条；待决 R1–R5；验收标准 11 条可执行 + 2 条人工 |
+| v0.4 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）回流。** ① §3.1 新增**第二种来源 `utterance`**（M0）——依据 [`docs/PRD.md` §1.1](../PRD.md)「录入摩擦是痛点的另一半」；转写文本落盘成 `.txt` 与截图同等对待、`evidence_text` 取对应片段、闸门 3 对其天然失效、M0 只记交易且遇事项内容必须明说记不了。② §3.4 新增**启动时的崩溃恢复扫描**——此前解析任务只活在内存里，崩溃后 `state = parsing` 的来源**永久卡死**且重启后无人处理（M0 Ctrl-C 一次即复现）；借自 MeritAI `design-harness.md` §2「不依赖内存中的 Promise」。③ §6 新增 4 条验收 |
 | v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.1 支持格式**按里程碑分层**——M0 只收 PNG/JPEG，HEIC 与 PDF 推到 M2；原文把 PDF 列进支持集，而多页切分策略是 R1 待决，「策略未定就支持」等于让实现者自己发明。② §3.2 补定**重复导入的返回契约**——成功返回 + `deduplicated` 标志，原文只说「返回 source_id 并提示」，未说成功还是错误，前后端会各写各的。③ §3.4 补 `state` 取值集的权威归属、`parse_error_code`、非法转移错误码，并对齐 [01](./01-agent-runtime.md) 修正后的「按会话作废」措辞。④ §3.5 明确 **v1 不做自动重试**（[01](./01-agent-runtime.md) R2 关闭的落点）——自动重试会在用户不知情时二次消耗额度。⑤ §5 **R3 改期至 M2**：HEIC 是相机照片格式，iPhone/macOS 截图默认 PNG，M0 用不到。⑥ §6 新增 4 条验收 |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：§1 问题陈述去掉具名银行/支付平台（CBA、微信、支付宝）改为泛化来源，并显式声明「不为任何特定银行或支付平台写解析器」；§3.6 与人工验收中的具名样本降为 dogfooding 样本标注 |

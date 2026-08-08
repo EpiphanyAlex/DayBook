@@ -2,8 +2,8 @@
 title: 06 记忆 Memory — 商户映射、纠正沉淀与语境词表
 status: draft
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-08
+version: v0.2
 ---
 
 # 06 · 记忆 Memory
@@ -27,7 +27,7 @@ version: v0.1
 
 ## 2. 范围与非目标
 
-**范围**：记忆规则的存储结构 · 四类规则（商户映射、纠正、语境词表、语音专有名词表） · 规则的产生（从纠正事件）· 规则的应用（注入解析上下文 / 起草后应用）· 规则的可见与可编辑 · 冲突与失效。
+**范围**：记忆规则的存储结构 · 四类规则（商户映射、纠正、语境词表、语音专有名词表） · 规则的产生（从纠正事件）· 规则的应用（**agent 经 `query_memory` 主动查**，§3.4）· 规则的可见与可编辑 · 冲突与失效。
 
 **非目标**：
 
@@ -63,7 +63,22 @@ version: v0.1
 | `context_term` | 用户用语（「我妈」） | 语义（家庭支出） | 用户手工录入 |
 | `speech_term` | 易听错的词 | 正确写法（`Coles`） | 用户手工录入 + 听写纠正 |
 
-**统一存在 `memory_rules` 表**（结构见 [00 地基 §3.6](./00-foundation.md) 全表清单），字段含 `kind` · `pattern` · `value` · `hit_count` · `last_hit_at` · `created_by`（`human` / `derived`）。
+**统一存在 `memory_rules` 表**（列入 [00 地基 §3.6](./00-foundation.md) 全表清单，字段详情在此，M3 开工前补进 `00`）：
+
+| 列 | 说明 |
+|---|---|
+| `id` · `kind` · `pattern` · `value` | 规则本体 |
+| `hit_count` · `last_hit_at` | 命中统计，供 §3.6 冲突裁决与记忆页展示 |
+| `created_by` | `human`（手工录入）/ `derived`（从纠正升格） |
+| **`source_correction_ids`** | **来源引用**——这条规则是从哪几次纠正升格来的 |
+| **`approved_at`** | **审批时间**——用户点头同意「以后都这样」的那一刻 |
+| **`disabled_at` · `disabled_reason`** | **停用原因**——自动停用（§3.6）或用户手动停用 |
+
+后三组（2026-08-08 新增）借自 MeritAI `design-memory.md` §2.B 对「用户确认的知识」的字段要求（**适用范围、来源引用、理由、审批时间、状态和停用原因**）。补它们的理由是具体的：
+
+- **`source_correction_ids`**：§3.3 规定「同一纠正 ≥2 次才升格」，**却没存是哪两次**。用户在记忆页看到一条规则问「凭什么」，答不出来
+- **`approved_at`**：§3.3 要求「升格时通知用户、不静默学习」，那个确认动作此前没有落点
+- **`disabled_reason`**：§3.6 有「连续被推翻 3 次自动停用」，但停用后用户看到的是一条死规则，不知道为什么死的
 
 ### 3.3 规则的产生
 
@@ -75,23 +90,54 @@ version: v0.1
 
 ### 3.4 规则的应用
 
-两个可能的注入点，**尚未决定选哪个**（[`docs/architecture.md` §8](../architecture.md) 未决 A3、§5 风险 R1）：
+**决定（2026-08-08 拍板，关闭本文 R1 与 [`docs/architecture.md` §8](../architecture.md) A3）：agent 主动查，工具只回答被问到的键。**
 
-| 方案 | 做法 | 优点 | 缺点 |
-|---|---|---|---|
-| **A. 解析前注入** | 把相关规则塞进 agent 任务上下文 | agent 一次就起草对，无二次改写 | 吃上下文额度；规则多了塞不下 |
-| **B. 起草后应用** | agent 按原样起草，domain 层用规则改写 | 确定性、可审计、不吃额度 | 草稿与最终值不一致，审计要记两跳 |
+原先列了两个方案，**两个都不采纳**：
 
-**无论选哪个，两条硬要求不变**：
+| 方案 | 做法 | 否决原因 |
+|---|---|---|
+| A. 解析前注入 | 把相关规则塞进 agent 任务上下文 | 规则一多就撑不住；而且要在解析前猜哪些规则相关——鸡生蛋 |
+| B. 起草后由 domain 用规则改写分类 | agent 原样起草，代码改分类 | **代码在做分类**，直接违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15（「LLM 只做抽取、解析、分类与起草」）与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)（推理归 agent） |
 
-1. **规则的应用必须写审计**——不能出现「用户不知道是谁改的」这种状态
-2. **规则是建议，不是决定**——审核界面仍可改。用户改了就是新的纠正事件，反哺规则
+**采纳的方案**：agent 解析出商户后，**自己调 `query_memory` 批量查**这批商户的历史分类，再自己决定怎么起草。
+
+```
+query_memory(merchants: ["WOOLWORTHS 1234", "COLES 5678"])
+  → 只返回这些商户的规则
+```
+
+四条约束：
+
+1. **批量查，不逐条查** —— 一次调用带上本次解析出的全部商户，避免 30 个商户 30 次往返
+2. **工具只按键回答，不提供「列出全部规则」** —— 否则 agent 能把个人语境词表整个拉进上下文（[01 Agent 运行时 §3.2](./01-agent-runtime.md)「只读 ≠ 无限读」、[ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）
+3. **规则是建议，不是决定** —— 审核界面仍可改。用户改了就是新的纠正事件，反哺规则
+4. **agent 可能忘了查。** 这靠提示词与工具描述里的「什么时候该调」来提高命中率，**不靠强制**。若实测发现它经常不查，对策在提示词侧，不在给 domain 加覆盖逻辑
+
+**为什么这个方案与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md) 一致**：规则是**上下文**（「这家店历史上归日用」），分类才是**决定**。给 agent 上下文、让它决定，符合「推理归 agent」；由代码事后覆盖它的分类，则是把智能放错了层。
+
+#### domain 侧仍然读 `memory_rules`，但只为标记冲突
+
+[03 审核 §3.4](./03-review.md) 的异常前置有一档是「与记忆规则冲突的条目」。那需要 domain 侧也能读规则表——**但那是标记冲突，不是覆盖分类**，不违反约束 15。
+
+区别是硬的：**标记**只改变排序与提示，草稿的值不动；**覆盖**会改写 agent 的判断。前者允许，后者禁止。
 
 ### 3.5 可见与可编辑
 
-- 有一个**记忆页**，列出全部规则、命中次数、最后命中时间
-- 用户可以改、可以删、可以停用
+- 有一个**记忆页**，列出全部规则、命中次数、最后命中时间、**来源引用与审批时间**（§3.2）
+- 用户可以改、可以删、可以停用；停用的规则显示 `disabled_reason`
 - **删除规则不影响已入库的历史数据**（记忆不回溯，见 §2 非目标）
+
+#### 更强的表述：学出来的东西永不成为事实源
+
+「删除规则不影响历史」只是这条原则的一个推论。完整表述借自 MeritAI `design-memory.md` §0——**避免模型输出、缓存或派生数据反向污染事实源**：
+
+> **记忆规则是派生物，单向流向草稿，从不回流到 `transactions` / `items`。**
+
+具体禁止三件事：
+
+1. 规则**不得**改写已确认的事实行（哪怕规则「更对」）
+2. 规则**不得**成为查询时的隐式过滤或改写层——回顾读到的必须是库里存的值
+3. `merchant_normalized` 这类由规则产生的派生字段，改规则后**不追溯重算**；它记录的是「当时用规则算出来的值」
 
 ### 3.6 冲突与失效
 
@@ -114,7 +160,7 @@ version: v0.1
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | §3.4 的注入点选 A（解析前注入）还是 B（起草后应用）（[`docs/architecture.md` §8](../architecture.md) 未决 A3） | 本文 §3.4、[02 导入 §3.5](./02-ingest.md)、[01 Agent 运行时](./01-agent-runtime.md) | M3 开工前，@alex 决；**两种都必须能被审计日志覆盖** |
+| ~~R1~~ **已关闭（2026-08-08）** | 记忆规则怎么应用（原选项：解析前注入 / 起草后由 domain 改写） | 本文 §3.4、[02 导入 §3.5](./02-ingest.md)、[01 Agent 运行时](./01-agent-runtime.md) | **结论：两个原选项都不采纳。** agent 自己调 `query_memory` 批量查，工具只按键回答、不提供「列出全部规则」。B 被否是因为它让代码做分类，违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15 与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)。[`docs/architecture.md`](../architecture.md) A3 同步关闭 |
 | R2 | 商户模式的匹配方式——前缀、通配、还是正则。银行流水的商户文本常带随机后缀（门店号、流水号） | 本文 §3.2 | M3 拿真实商户文本样本后决，**回流本文** |
 | R3 | 升格门槛（2 次）与停用门槛（3 次推翻）都是拍脑袋的数——真实使用下可能过松或过紧 | 本文 §3.3/§3.6 | M3 用满两周后调，**结果回流本文** |
 | R4 | 语音专有名词表在 v1 无法接入——v1 用 macOS 系统听写，应用拿不到词表接口（[ADR-0005 §1](../adr/0005-voice-and-system-integration.md)） | 本文 §3.2 `speech_term` | v1 只存不用；v1.1 换 Swift sidecar 后接入，**届时回流本文** |
@@ -127,7 +173,10 @@ version: v0.1
 - [ ] `cargo test memory::no_conversation_persisted` 通过——扫描 `memory_rules` 的写入路径，断言无「原始对话 / 完整上下文」类字段被写入
 - [ ] `cargo test memory::rule_requires_two_corrections` 通过——一次纠正不产生规则，第二次才产生
 - [ ] `cargo test memory::promotion_requires_user_ack` 通过——升格为规则前有确认步骤，未确认则不写入
-- [ ] `cargo test memory::application_is_audited` 通过——规则改写草稿时写 `audit_log`
+- [ ] `cargo test memory::query_only_answers_given_keys` 通过——`query_memory` 只返回传入商户的规则；不存在「列出全部」的调用形式（§3.4、[01 §3.2](./01-agent-runtime.md)）
+- [ ] `cargo test memory::domain_never_overwrites_category` 通过——domain 侧读规则只产生冲突标记，草稿的 `category` 值不被改写（§3.4）
+- [ ] `cargo test memory::rules_never_touch_fact_tables` 通过——规则的任何应用路径都不写 `transactions` / `items`（§3.5「学出来的东西永不成为事实源」）
+- [ ] `cargo test memory::rule_records_provenance` 通过——升格产生的规则，`source_correction_ids` 非空且指向真实的纠正记录，`approved_at` 非空（§3.2）
 - [ ] `cargo test memory::most_recent_rule_wins` 通过——同键多规则时取最近命中的
 - [ ] `cargo test memory::rule_auto_disabled_after_three_overrides` 通过
 - [ ] `cargo test memory::delete_rule_does_not_touch_history` 通过——删规则后已入库交易的分类不变
@@ -149,4 +198,5 @@ version: v0.1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.2 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）回流。** ① **R1 关闭**：原列的两个注入点方案**都不采纳**——「起草后由 domain 改写分类」让代码做分类，违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15 与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)；改为 **agent 自己调 `query_memory` 批量查、工具只按键回答**，并补「domain 读规则只为标记冲突、不覆盖分类」的硬区分。[`architecture`](../architecture.md) A3 同步关闭。② §3.2 `memory_rules` 补三组字段 **`source_correction_ids` / `approved_at` / `disabled_at`+`disabled_reason`**（借自 MeritAI `design-memory.md` §2.B）——此前「≥2 次纠正才升格」没存是哪两次、「不静默学习」的确认动作没有落点、自动停用后没有原因可显示。③ §3.5 新增「**学出来的东西永不成为事实源**」（借自同文档 §0「反向污染」），把原先较弱的「删除规则不影响历史」升格为三条明确禁止。④ §6 新增 4 条验收 |
 | v0.1 | 2026-08-06 | 初版：「存规则不存对话」及其三条理由、四类规则与统一表、规则产生的两条路径与两次纠正门槛、不静默学习、两个注入点方案 A/B 及不变的两条硬要求、可见可编辑、冲突与自动停用；否决方案七条；待决 R1–R5；验收标准 11 条可执行 + 2 条人工 |

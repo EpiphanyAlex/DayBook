@@ -2,8 +2,8 @@
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: ready
 owner: "@alex"
-date: 2026-08-07
-version: v0.3
+date: 2026-08-08
+version: v0.4
 ---
 
 # 01 · Agent 运行时
@@ -47,16 +47,25 @@ version: v0.3
 
 **这份清单就是 agent 能做的全部事情。** 按里程碑分层——**M0 只注册 M0 那一组**，因为 `draft_items` / `memory_rules` 两张表在 M0 尚未建（[00 地基 §3.6](./00-foundation.md)），注册无表可写的工具会让验收无法通过：
 
-| 工具 | 里程碑 | 能力 | 写入目标表集合 |
-|---|---|---|---|
-| `list_pending_sources` | **M0** | 列出待解析的来源 | ∅（只读） |
-| `read_source` | **M0** | 读一个来源的元数据与文件路径 | ∅（只读） |
-| `draft_transaction` | **M0** | 起草一笔交易 | `{draft_transactions}` |
-| `report_source_total` | **M0** | 回报来源自身印着的合计，供总额校验 | `{sources.declared_total_*}`（列级） |
-| `query_memory` | M3 | 查记忆规则（商户→分类映射等） | ∅（只读） |
-| `draft_item` | M3 | 起草一个事项 | `{draft_items}` |
+| 工具 | 里程碑 | 能力 | 写入目标表集合 | **读取范围** |
+|---|---|---|---|---|
+| `list_pending_sources` | **M0** | 列出待解析的来源 | ∅ | **仅本次任务指派的来源**（M0 恒为 1 个）；不得遍历 `sources` 全表 |
+| `read_source` | **M0** | 读一个来源的元数据与证据文件 | ∅ | **仅本次任务指派的来源**；`source_id` 不在指派集合内 → `agent.tool_rejected` |
+| `draft_transaction` | **M0** | 起草一笔交易 | `{draft_transactions}` | ∅ |
+| `report_source_total` | **M0** | 回报来源自身印着的合计 | `{sources.declared_total_*}`（列级） | ∅ |
+| `query_memory` | M3 | 查记忆规则 | ∅ | **仅显式传入的键**（商户名等）；**不提供「列出全部规则」** |
+| `draft_item` | M3 | 起草一个事项 | `{draft_items}` | ∅ |
 
-> **「写入目标表集合」是工具注册时必须声明的元数据，不是文档里的说明文字。** 验收 `agent::tools_cannot_write_fact_tables` 遍历的正是这份声明——没有它，那条测试无法实现。
+> **两列都是工具注册时必须声明的元数据，不是文档里的说明文字。** 验收 `agent::tools_cannot_write_fact_tables` 与 `agent::tools_declare_read_scope` 遍历的正是这两份声明——没有它们，测试无法实现。
+
+#### 只读 ≠ 无限读（2026-08-08 设计评审新增）
+
+此前本表只声明**写入**目标表，只读工具一律标 `∅`。**但「只读」不等于「无限读」**，依据 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)「附带决定：读取范围也要收窄」，源头是 MeritAI `design-memory.md` 的**最小暴露**目标（「AI 只读取任务需要的内容」）。
+
+两个具体后果：
+
+- **`query_memory` 若能列举全部规则**，agent 就能把用户的**个人语境词表**整个拉进上下文（「我妈 = 家庭支出」这类）。它对解析一张超市小票毫无用处，却会随请求发往模型服务商。因此本工具**只按键回答**：`query_memory(merchants: [...])` 返回这些商户的规则，**没有「全部列出」这个能力**。
+- **`read_source` / `list_pending_sources` 收窄到「本次任务指派的来源」**。M0 的编排是代码侧串行下发（[02 导入 §3.5](./02-ingest.md)），agent 从不自己挑要解析什么，所以这个收窄不损失任何能力。M2 批量时一次任务可能指派多个来源，工具形态不变。
 
 **硬性禁令**（违反即缺陷，[ADR-0003 §3](../adr/0003-agent-runtime-and-pluggable-backend.md)）：
 
@@ -89,7 +98,7 @@ version: v0.3
 - 通过 `std::process::Command` spawn 子进程，把 MCP server 的 stdio 端接上
 - **v1 后端**：Claude Code（`claude -p`）
 - **并发**：v1 **同时只跑一个 agent 子进程**。排队，不并发
-- **日志**：子进程 stdout/stderr 采集到内存环形缓冲，供 UI 排障显示；**不落盘**（可能含截图内容片段）
+- **日志**：**落盘，分两级**——见下方「日志分级」。此前本条写「不落盘」，已由 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) 推翻
 
 **超时与失败的作废语义**（2026-08-07 M0 开工评审修正）：
 
@@ -99,6 +108,24 @@ version: v0.3
 > **修正**：本节原文写「已写入的草稿随失败一并作废（**同一事务**）」，**这在物理上做不到**——§3.3 要求每次工具写入**各自**记一条审计，N 次独立的 MCP 调用不可能事后收进同一个事务。
 >
 > **正确语义是补偿动作**：作废是一次独立的删除，按 `(source_id, agent_session_id)` 定位本次会话的草稿，在**它自己的**事务里删除，并写一条 `audit_log`（`actor = "system"`、`action = "void"`、`entity_type = "source"`）。agent 此前那 N 条 `actor = "agent"` 的审计记录**保持不变**——`audit_log` 是 append-only，不回溯抹除。审计因此如实呈现「起草了 N 条 → 超时 → 系统作废」的完整过程。
+
+#### 日志分级（2026-08-08，依据 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）
+
+**本条推翻了 v0.1–v0.3 的「不落盘」。** 原因：评审要求的「查日志 → 复现 bug → 变成回归测试」链条，前提就是日志落盘——进程一退内存缓冲就没了。
+
+| 级别 | 默认 | 内容 |
+|---|---|---|
+| `trace` | **开** | 工具调用的**名称与参数形状**、耗时、退出码、重试次数、状态机转移、`agent_session_id`、`backend_id`、usage 元数据。**不含金额、不含原文、不含 prompt** |
+| `debug` | **关** | `trace` 全部，外加完整提示词、agent 原始输出、**完整的 MCP 工具调用参数** |
+
+- 位置 `<数据目录>/logs/`，与 SQLite 和 `evidence/` 同级——**用户看得见、能自己删**
+- 一次会话一个 JSONL 文件，文件名含 `agent_session_id`
+- **默认保留期后自动清除**（具体天数实现时定，回流本文）
+- **绝不上传、绝不上报**。[ADR-0001](../adr/0001-local-first-desktop-platform.md) 禁的是「数据离开本机」，不是「写进本机磁盘」
+- **dogfooding 期间 `debug` 默认开** —— 夹具导出依赖它（[07 评测 §3.6](./07-eval.md)），关着等于没有飞轮
+- `debug` 开关**必须在 UI 上可见并注明「会记录完整账目细节」**，不是只能改配置文件的隐藏项
+
+`debug` 必须包含**完整**工具调用参数，因为 agent 是非确定性的：复现一个 bug 不能靠「重跑一次 agent」，只能靠**重放录下来的调用序列**。
 
 ### 3.5 可插拔后端接口
 
@@ -121,6 +148,7 @@ trait AgentBackend {
 
 - 应用给 agent 的是**任务级指令**（「有一个新来源 `<id>` 待解析，用工具读它，逐笔起草，最后回报合计」），不是「填这个 JSON」
 - 提示词模板存为**独立文件**，不硬编码在 Rust 字符串里——便于调整与 diff
+- **提示词模板是「程序记忆」，只能由应用版本或人工编辑更新，不得被模型修改。** 借自 MeritAI `design-memory.md` §2.E 对程序记忆的规定。事实上工具面里没有写文件的工具，所以 agent 现在改不了——**但那是巧合，不是设计**，因此在此明写。任何未来新增的工具都不得让 agent 触及提示词目录
 - **控制流由代码决定**（[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）：是否入库、是否重试、总额是否通过，全由 Rust 侧判断，不问 agent
 
 ## 4. 否决的替代方案
@@ -150,6 +178,12 @@ trait AgentBackend {
 - [ ] `cargo test agent::tool_surface_has_no_sql_tool` 通过——遍历已注册工具，断言无通用 SQL / 通用文件写入 / 通用命令执行类工具
 - [ ] `cargo test agent::tools_cannot_write_fact_tables` 通过——遍历每个工具**注册时声明的写入目标表集合**（§3.2），断言与 `{transactions, items}` 交集为空
 - [ ] `cargo test agent::m0_tool_surface_is_exactly_four` 通过——M0 注册的工具恰为 §3.2 的四个，不含目标表尚未建立的 `draft_item` / `query_memory`
+- [ ] `cargo test agent::tools_declare_read_scope` 通过——每个工具都声明了读取范围，遍历该声明可断言无「全表/全库」范围
+- [ ] `cargo test agent::read_source_rejects_unassigned` 通过——`read_source` 传入未指派的 `source_id` 时返回 `agent.tool_rejected`，不返回数据
+- [ ] `cargo test agent::query_memory_has_no_list_all` 通过（**M3**）——工具签名要求显式键，不存在「列出全部规则」的调用形式
+- [ ] `cargo test agent::trace_log_has_no_content` 通过——`trace` 级写入路径产生的记录中不含金额字段、`evidence_text` 或 prompt 文本
+- [ ] `cargo test agent::debug_log_is_replayable` 通过——`debug` 级记录的工具调用序列可被反序列化并原样重放（[07 评测 §3.6](./07-eval.md)）
+- [ ] `rg -n 'prompts/' src-tauri/src/mcp` 无命中——工具面不触及提示词目录（§3.6 程序记忆）
 - [ ] `rg -n 'confirm' src-tauri/src/mcp` 无命中——`mcp/` 模块不引用确认动作（禁令 4 的可执行形式；原验收写作「静态断言调用方集合」，`cargo test` 做不了调用图分析）
 - [ ] `cargo test agent::draft_requires_evidence_args` 通过——`draft_transaction` 缺 `source_id` 或 `evidence_text` 时返回 `agent.tool_rejected` 且未写库
 - [ ] `cargo test agent::report_total_requires_evidence_and_currency` 通过——`report_source_total` 缺 `currency` 或 `evidence_text` 时返回 `agent.tool_rejected` 且未写库（§3.2 可信性要求第 2 条）
@@ -177,5 +211,6 @@ trait AgentBackend {
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
+| v0.4 | 2026-08-08 | **设计评审（`/grill-with-docs` 会话）回流。** ① §3.2 工具表新增 **「读取范围」列** + 「只读 ≠ 无限读」小节（依据 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）：此前只锁写入，导致 `query_memory` 可列举全部规则、把用户的个人语境词表整个送进模型上下文；现改为只按键回答，`read_source` / `list_pending_sources` 收窄到本次任务指派的来源。② §3.4 **「不落盘」被推翻**（[ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）：改为 `trace` 常开（元数据，无金额原文）/ `debug` 默认关（含完整工具调用参数，供夹具重放），dogfooding 期 `debug` 默认开，开关必须在 UI 可见。③ §3.6 明写**提示词模板属程序记忆、不得被模型修改**（借自 MeritAI `design-memory.md` §2.E）——原先 agent 改不了只是巧合。④ §6 新增 6 条验收 |
 | v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.2 工具面**按里程碑分层**——M0 只注册 4 个，`draft_item` / `query_memory` 推到 M3（其目标表 `draft_items` / `memory_rules` 在 M0 尚未建，注册即验收必挂）；工具须**注册时声明写入目标表集合**，否则 `tools_cannot_write_fact_tables` 无法实现。② §3.2 新增 **`report_source_total` 可信性要求**——修复闸门 3 的结构性失效：原规格允许 agent 自行填写总额校验的基准值，而校验两边同源等于没有闸门；现强制 `(amount_minor, currency, evidence_text)` 三者齐全、必须是来源上印着的数字、没印就不许调用，并如实写明这道闸门挡不住什么。③ §3.4 **修正「同一事务」**——N 次独立 MCP 调用各自记审计，不可能事后收进一个事务；改为按 `(source_id, agent_session_id)` 的补偿性作废 + `actor = "system"` 审计。④ §5 **R2、R5 关闭**（重试归 domain 且 v1 不自动重试；会话粒度 = 一个来源一个会话），**R1 给定 M0 初值 180 秒**避免无值阻塞。⑤ §6 验收从 10 条增至 14 条，并把无法实现的「静态断言调用图」改为 `rg` 检查 |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步：待决 R1 的实测样本描述从「真实澳洲银行截图」改为「真实银行流水截图」，具名组合降为 dogfooding 样本标注。决定与验收标准未变 |

@@ -54,7 +54,7 @@
 ## 文档层级
 
 1. [`docs/PRD.md`](./docs/PRD.md)：产品范围、验收与非目标。
-2. [`docs/adr/`](./docs/adr/)：已接受的难逆决策 —— `0001` 本地优先桌面平台、`0002` AI 永不直接写入与证据链、`0003` Agent 运行时与可插拔后端、`0004` 数据模型；提议中 —— `0005` 语音与系统集成。
+2. [`docs/adr/`](./docs/adr/)：已接受的难逆决策 —— `0001` 本地优先桌面平台、`0002` AI 永不直接写入与证据链、`0003` Agent 运行时与可插拔后端、`0004` 数据模型、`0006` smart agent dumb tools、`0007` 本地可观测性与日志分级；提议中 —— `0005` 语音与系统集成。
 3. [`docs/architecture.md`](./docs/architecture.md)：系统架构基线。
 4. [`docs/CONTEXT.md`](./docs/CONTEXT.md)：当前术语。
 5. [`README.md`](./README.md)：导航与摘要。
@@ -79,7 +79,7 @@
 ```
 docs/PRD.md          总 PRD：范围、用户、成功标准、非目标、里程碑地图
 docs/prd/INDEX.md    sub-PRD 索引 + 状态总览
-docs/prd/NN-*.md     sub-PRD：一个能力一份，扁平文件
+docs/prd/NN-*.md     sub-PRD：一个能力一份，扁平文件（00–07）
 ```
 
 **工作流**：

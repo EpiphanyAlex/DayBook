@@ -2,8 +2,8 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@alex"
-date: 2026-08-06
-version: v0.1
+date: 2026-08-08
+version: v0.2
 ---
 
 # 系统架构基线
@@ -35,6 +35,8 @@ version: v0.1
 **唯一的出站流量**是 agent CLI 与模型服务商之间的通信。应用本身没有任何网络代码（[ADR-0001](./adr/0001-local-first-desktop-platform.md)）。
 
 ## 2. 组件职责
+
+> **「harness」在本项目指什么**（2026-08-08 澄清）：MeritAI 的 `design-harness.md` 把它定义为「**客户端内部的任务编排层**，不是自主 agent 平台，也不是远端服务」。Daybook 有同样的东西，但它**散在三处**：[01 §3.4](./prd/01-agent-runtime.md) 的 agent launcher、[02 §3.4](./prd/02-ingest.md) 的来源状态机、[02 §3.5](./prd/02-ingest.md) 的解析编排。本文的 §2/§3/§4 合起来就是它的规格；v1 规模下不再单立一份文档。
 
 | 组件 | 负责 | **不**负责 |
 |---|---|---|
@@ -127,7 +129,7 @@ version: v0.1
 |---|---|---|---|
 | A1 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切 | [`docs/prd/02-ingest.md`](./prd/02-ingest.md) | M2 批量解析时，实测决定 |
 | ~~A2~~ **已关闭（2026-08-07）** | agent 解析失败/超时的重试策略放在 launcher 还是 domain | [`docs/prd/01-agent-runtime.md`](./prd/01-agent-runtime.md) | **结论：domain，且 v1 不做自动重试**——launcher 只管「起进程、看着它、超时就杀」，不知道失败是否值得重试；自动重试会在用户不知情时二次消耗 AI 额度。`failed` 的来源显式列在 UI 上由用户一键重试。见 [01 §5](./prd/01-agent-runtime.md) R2 |
-| A3 | 记忆规则在解析前注入 agent 上下文，还是在起草后由 domain 应用 | [`docs/prd/06-memory.md`](./prd/06-memory.md) | M3 前，两种都要能被审计日志覆盖 |
+| ~~A3~~ **已关闭（2026-08-08）** | 记忆规则在解析前注入 agent 上下文，还是在起草后由 domain 应用 | [`docs/prd/06-memory.md`](./prd/06-memory.md) | **结论：两个原选项都不采纳。** agent 解析出商户后**自己调 `query_memory` 批量查**，工具只按键回答、不提供「列出全部规则」。「起草后由 domain 改写」被否是因为它让代码做分类，违反 [`CLAUDE.md`](../CLAUDE.md) 约束 15 与 [ADR-0006](./adr/0006-smart-agent-dumb-tools.md)。domain 侧仍读规则表，但**只为标记冲突、不覆盖分类**。见 [06 记忆 §3.4](./prd/06-memory.md) |
 | A4 | 前端状态管理选型（是否引入状态库） | 全部 UI 模块 | M1 审核界面开工前 |
 
 ---
@@ -136,4 +138,5 @@ version: v0.1
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.2 | 2026-08-08 | 设计评审（`/grill-with-docs` 会话）回流：**未决 A3 关闭**（记忆规则改由 agent 经 `query_memory` 主动查，domain 只标记冲突不覆盖分类，见 [06 §3.4](./prd/06-memory.md)）；§2 补一段澄清「harness」在本项目指什么及它的规格散落在哪三处 |
 | v0.1 | 2026-08-06 | 初版：全局结构图、组件职责表、两条写入路径的结构性保证、一次导入的完整数据流、存储布局、前后端与 agent 运行时边界、未决结构问题 A1–A4 |
