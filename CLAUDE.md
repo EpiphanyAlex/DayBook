@@ -22,8 +22,9 @@
 **文档门禁（现在就可用，CI 对所有 PR 强制）**
 - `node docs/prd/check-docs.mjs` — `docs/prd/` 的 frontmatter 必填字段 + 相对链接可达
 - `node scripts/check-links.mjs` — 全仓库 `.md` 相对链接可达（ADR、总 PRD、`CLAUDE.md`、`.claude/rules/` 等 `check-docs` 覆盖不到的部分），并禁止 `file://` 绝对路径
+- `node scripts/check-readme-sync.mjs` — [`README.en.md`](./README.en.md) 不落后于 [`README.md`](./README.md)（判据见「文档层级」的同步规则）
 
-两者由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
+三条都由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
 
 ## 产品事实
 
@@ -60,9 +61,13 @@
 2. [`docs/adr/`](./docs/adr/)：已接受的难逆决策 —— `0001` 本地优先桌面平台、`0002` AI 永不直接写入与证据链、`0003` Agent 运行时与可插拔后端、`0004` 数据模型、`0006` smart agent dumb tools、`0007` 本地可观测性与日志分级；提议中 —— `0005` 语音与系统集成。
 3. [`docs/architecture.md`](./docs/architecture.md)：系统架构基线。
 4. [`docs/CONTEXT.md`](./docs/CONTEXT.md)：当前术语。
-5. [`README.md`](./README.md)：导航与摘要。
+5. [`README.md`](./README.md)：导航与摘要；[`README.en.md`](./README.en.md) 是它的英文镜像。
 
-文档采用中文 Markdown。新增 ADR 使用 `docs/adr/NNNN-slug.md`，至少包含日期、状态、背景、决策、理由和后果。
+文档采用中文 Markdown，**唯一例外是 [`README.en.md`](./README.en.md)**——仓库公开，它是英文读者的唯一入口。新增 ADR 使用 `docs/adr/NNNN-slug.md`，至少包含日期、状态、背景、决策、理由和后果。
+
+**改了 [`README.md`](./README.md) 必须在同一个提交里同步 [`README.en.md`](./README.en.md)。** 增删章节、改结论、改链接、改表格行都算；纯中文措辞润色不影响事实时可略。中文是事实源，英文是镜像，两份冲突时以中文为准。**不同步即缺陷**——腐烂的英文版比没有英文版更糟：它会用过时的措辞冒充事实源，而唯一会读它的人恰好没有第二份可对照。
+
+这条规则由 `node scripts/check-readme-sync.mjs` 强制，不靠自觉：判据是 `README.md` 最后被改动的提交时间不得晚于 `README.en.md` 的。因此**同一个提交里改两份**是唯一顺畅的路径——补一个中文错别字也要把对应措辞带到英文版。
 
 **`.claude/rules/`** 是按主题拆分的实现细则，供 agent 按需加载。本文保持短，细则按需引用：
 

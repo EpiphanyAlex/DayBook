@@ -24,6 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # check-readme-sync.mjs 要读两个文件各自最后被改动的提交时间，
+          # 默认的浅克隆（fetch-depth: 1）看不到，会让它直接报错而不是误判。
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -36,6 +40,9 @@ jobs:
 
       - name: 全仓库 Markdown 链接检查
         run: node scripts/check-links.mjs
+
+      - name: README 中英同步检查
+        run: node scripts/check-readme-sync.mjs
 
 # ── 待建：00 基础设施 落地后在此并列增加两个 job ──────────────────
 #

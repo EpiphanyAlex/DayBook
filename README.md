@@ -1,5 +1,7 @@
 # Daybook（日簿）
 
+**中文** · [English](./README.en.md)
+
 **一个跑在本地的 AI 桌面助手，帮你把「过去这段时间的钱和事」补记回来。**
 
 它不是记账 app，不是待办 app，是**回溯记录器**——为「事后补记」而设计，不是为「当场记录」。
@@ -16,8 +18,9 @@
 现在唯一可跑的命令是文档门禁（CI 对所有 PR 强制，见 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
 
 ```bash
-node docs/prd/check-docs.mjs   # docs/prd/ 的 frontmatter + 链接
-node scripts/check-links.mjs   # 全仓库 Markdown 链接
+node docs/prd/check-docs.mjs        # docs/prd/ 的 frontmatter + 链接
+node scripts/check-links.mjs        # 全仓库 Markdown 链接
+node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
 ```
 
 前端与 Rust 的命令要等 [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) 落地后才存在，清单见 [`CLAUDE.md`](./CLAUDE.md)「常用命令」。
@@ -102,6 +105,6 @@ Daybook 的前提相反：**默认你是事后补的。**
 
 ## 许可
 
-[MIT](./LICENSE)。
+本项目以 [MIT 许可证](./LICENSE) 发布。
 
-选 MIT 是为了让 [ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)「后果」里那条**「贡献者只需 Node + Rust 工具链，不需要 Xcode」**真的成立——工具链门槛降下来了，许可门槛就不该再立一道。决策记录见 [`docs/PRD.md` §13](./docs/PRD.md) P4。
+选型理由与决策记录见 [`docs/PRD.md` §13](./docs/PRD.md)（开放问题 P4，2026-08-09 关闭）。
