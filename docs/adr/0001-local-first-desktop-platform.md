@@ -5,6 +5,7 @@
 - **决策者**：@maintainer
 - **相关**：[ADR-0003 Agent 运行时与可插拔后端](./0003-agent-runtime-and-pluggable-backend.md)、[ADR-0005 语音与系统集成](./0005-voice-and-system-integration.md)、[`docs/PRD.md` §3](../PRD.md)
 - **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变。**
+- **2026-08-09 修订**：决策句里的「React 18」改为「React」——主版本改在 [`00-foundation`](../prd/00-foundation.md) 初始化时锁定，见「决策」下的说明。**技术选型（Tauri v2 + React + Rust）未变。**
 
 ## 背景
 
@@ -18,7 +19,9 @@ v1 目标平台只有 macOS。
 
 ## 决策
 
-**桌面壳用 Tauri v2；界面用 React 18 + TypeScript + Vite；系统能力、本地存储与进程管理由 Rust / Tauri command 提供。**
+**桌面壳用 Tauri v2；界面用 React + TypeScript + Vite；系统能力、本地存储与进程管理由 Rust / Tauri command 提供。**
+
+> **React 的主版本不在本 ADR 钉死**（2026-08-09 修订）：原文写「React 18」，但项目尚未初始化，没有 `package.json` 也没有任何依赖约束——**在没有兼容性理由的情况下预先锁一个旧主版本，是把一个本该在初始化那天做的选择提前做错**。主版本在 [`docs/prd/00-foundation.md`](../prd/00-foundation.md) 落地时锁定为当时的最新稳定主版本，并在 `package.json` 里固定；若届时有具体的兼容性理由要退回旧主版本，在该文登记。**本 ADR 要定的是「React 而不是 SwiftUI / Svelte」，不是版本号。**
 
 具体地：
 
@@ -47,7 +50,7 @@ v1 目标平台只有 macOS。
 
 - Tauri 二进制小一个数量级；
 - Rust 侧做 SQLite / 进程管理 / 文件监听更扎实；
-- 关键：`rmcp`（官方 Rust MCP SDK）让 **MCP server 可以在同一进程内起**（[ADR-0003](./0003-agent-runtime-and-pluggable-backend.md)），不必额外拉一个 Node 进程。
+- 关键：`rmcp`（官方 Rust MCP SDK）让 **MCP server 可以用 Rust 写**（[ADR-0003](./0003-agent-runtime-and-pluggable-backend.md)），不必为它额外拉一个 Node 进程。（本条原文写「可以在同一进程内起」，2026-08-09 改——**进程归属另有争议**，见 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md)；但无论 R6 选哪条候选，**都不需要 Node**，本条论据不受影响。）
 
 ### 为什么不是「Tauri 壳 + 内嵌 Node 服务 / localhost API」
 

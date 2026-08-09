@@ -2,8 +2,8 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.3
+date: 2026-08-09
+version: v0.4
 ---
 
 # 系统架构基线
@@ -23,7 +23,7 @@ version: v0.3
 ├─ Tauri v2 主进程 (Rust) ───────────────────────────┤
 │    ├─ command 层      前端能调的全部能力            │
 │    ├─ domain 层       校验、状态机、确认动作         │
-│    ├─ MCP server      stdio · rmcp · 进程内         │  ← agent 通过它读写
+│    ├─ MCP server      stdio · rmcp · 进程归属待定    │  ← agent 通过它读写
 │    ├─ agent launcher  spawn `claude -p` / `codex exec`
 │    └─ store 层        rusqlite · 迁移 · 证据文件     │
 └─ SQLite（单一事实源）+ 证据目录（截图原件）─────────┘
@@ -116,7 +116,7 @@ version: v0.3
 
 ## 7. Agent 运行时边界
 
-- MCP server 走 **stdio**、用 **`rmcp`**、**在 Tauri 主进程内起**：不额外拉进程、不开端口（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。
+- MCP server 走 **stdio**、用 **`rmcp`**、**不开端口**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。⚠️ **它跑在哪个进程里尚未定**——原文的「在 Tauri 主进程内起」于 2026-08-09 挂起（与「agent CLI 以 stdio 连上来」互斥），候选方案与 spike 见 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md)。
 - **单 agent + 多工具**，不按业务领域拆。子 agent 只用于**上下文隔离**（如解析超长截图），不用于业务分工。
 - **后端可插拔**：agent launcher 通过接口访问后端，v1 只实现 Claude Code，接口从第一天存在。
 - **应用不打包任何厂商凭证、不提供第三方登录、不代理厂商鉴权。**
@@ -138,6 +138,7 @@ version: v0.3
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.4 | 2026-08-09 | §7 与 §1 结构图 **MCP server 的进程归属挂起**——「在 Tauri 主进程内起」与「agent CLI 以 stdio 连上来」互斥，改由 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md) 的 spike 决定；stdio、`rmcp`、不开端口三条不变。结构图里 MCP server 相应从「Tauri 主进程」框内移出，标注「进程归属待定」。同步 [ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) |
 | v0.3 | 2026-08-08 | 公开仓库去个人化：§2「harness」澄清**去掉外部参考仓库的出处从句，把界定直接写出**（结论不变）；本表去掉工具与会话指代；`owner` 改为 `@maintainer` |
 | v0.2 | 2026-08-08 | 设计评审回流：**未决 A3 关闭**（记忆规则改由 agent 经 `query_memory` 主动查，domain 只标记冲突不覆盖分类，见 [06 §3.4](./prd/06-memory.md)）；§2 补一段澄清「harness」在本项目指什么及它的规格散落在哪三处 |
 | v0.1 | 2026-08-06 | 初版：全局结构图、组件职责表、两条写入路径的结构性保证、一次导入的完整数据流、存储布局、前后端与 agent 运行时边界、未决结构问题 A1–A4 |

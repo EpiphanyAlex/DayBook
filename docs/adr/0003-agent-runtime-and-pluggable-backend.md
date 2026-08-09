@@ -5,6 +5,8 @@
 - **决策者**：@maintainer
 - **相关**：[ADR-0001 本地优先桌面平台](./0001-local-first-desktop-platform.md)、[ADR-0002 AI 永不直接写入](./0002-ai-never-writes-directly.md)、[`docs/prd/01-agent-runtime.md`](../prd/01-agent-runtime.md)
 - **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变**——§2 论证「不按业务领域拆 agent」的跨域例句保留，它是该决定的载重论据。
+- **2026-08-09 修订（二）**：§4 后端清单**删除「用户自备 API key」**——它要求应用存凭证、带 endpoint、自发 HTTPS、代理鉴权，与本节后半句及 [`CLAUDE.md`](../../CLAUDE.md) 约束 2 正面冲突，且产品用不上（用户已有付费订阅的 CLI）。后端形态收窄为「用户预先配置好的外部进程」。**应用直连模型 API 需新写 ADR。** 同日「理由」一节**删除三个未核实的政策日期**（见 [`docs/PRD.md` §12](../PRD.md) 的标注）——本 ADR 已被接受，不该把未核实的观察当既成事实引用；论据改为「厂商政策会变」，这一条不依赖任何具体日期。
+- **2026-08-09 修订**：§1 的「**在 Tauri 主进程内起**」**挂起**——它与「agent CLI 以 stdio 连上来」互斥（stdio 型 server 由 CLI 自己 `fork/exec`）。进程归属改由 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md) 的 spike 决定。**其余决策（用 MCP、走 stdio、不开端口、工具权限即签名、后端可插拔）全部不变。**
 
 ## 背景
 
@@ -24,14 +26,20 @@
 
 **不让 agent 输出 JSON 再由应用解析，而是用 MCP（Model Context Protocol）暴露工具。**
 
-MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，**在 Tauri 主进程内起**，不额外拉进程、不开端口（与 [ADR-0001](./0001-local-first-desktop-platform.md) 的「不开 localhost HTTP API」一致）。
+MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端口（与 [ADR-0001](./0001-local-first-desktop-platform.md) 的「不开 localhost HTTP API」一致）。
+
+> ⚠️ **「在 Tauri 主进程内起」这半句已于 2026-08-09 挂起**：stdio 型 MCP server 由 agent CLI 按配置里的 `command + args` 自己 `fork/exec`，**没有「连到一个已经在跑的进程」这种形态**——所以它不可能既活在 Tauri 主进程里、又被 `claude -p` 以 stdio 连上。**进程归属改由 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md) 的 spike 决定**（候选：独立 helper 二进制 + Unix domain socket / 应用自身 `--mcp-stdio` 子命令 / 改用 Agent SDK），结论出来后回写本 ADR。
+>
+> **本决策的其余部分不受影响**：用 MCP 而非解析 JSON、走 stdio 而非 HTTP、不开端口、工具权限即工具签名——四条都与进程归属无关。
 
 ```
 ┌─ React UI ──────────────────────┐   审核界面 / 两个视图 / 回顾
 ├─ Tauri (Rust) ──────────────────┤   进程管理、文件、SQLite
-│    ├─ MCP server (stdio, rmcp)  │   ← agent 通过它读写数据
 │    └─ agent launcher            │   ← spawn `claude -p` / `codex exec`
 └─ SQLite + 截图目录 ─────────────┘
+        ↕
+   MCP server (stdio, rmcp)           ← agent 通过它读写数据
+   进程归属待定（R6）
 ```
 
 ### 2. 单 agent + 多工具，不按业务领域拆
@@ -50,13 +58,17 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，**在 Tau
 
 这是 [ADR-0002](./0002-ai-never-writes-directly.md) 闸门 1 在工具层的落地：草稿区的隔离性由「agent 根本没有写事实表的工具」保证。
 
-### 4. 后端可插拔，接口从第一天存在
+### 4. 后端可插拔，接口从第一天存在——但后端只能是「外部进程」
 
-支持的后端形态：`claude -p` / `codex exec` / 用户自备 API key / 本地模型。
+支持的后端形态：`claude -p` / `codex exec` / 用户自己跑的本地模型进程。**共同点是它们都是用户预先装好、预先登录好的独立进程**，应用只负责 spawn 它、喂任务、收结果。
 
 **v1 只实现 Claude Code 一种，但接口从第一天就存在。**
 
-**应用不打包任何厂商凭证、不提供第三方登录、不代理厂商鉴权。** 用户使用的是自己已安装并登录的 CLI；模型服务商的流量由该 CLI 自行发起，应用不代理、不转发、不记录（[ADR-0001](./0001-local-first-desktop-platform.md)）。
+**应用不打包任何厂商凭证、不存储用户的 API key、不提供第三方登录、不代理厂商鉴权、不自己发出站请求。** 用户使用的是自己已安装并登录的 CLI；模型服务商的流量由该 CLI 自行发起，应用不代理、不转发、不记录（[ADR-0001](./0001-local-first-desktop-platform.md)）。
+
+> **「用户自备 API key」已从后端清单中删除**（2026-08-09）。它此前与本节自己的后半句、以及 [`CLAUDE.md`](../../CLAUDE.md) 约束 2 正面冲突：让应用拿着用户的 key 去调模型 API，意味着应用要**存凭证**、**代码里带 endpoint**、**自己发 HTTPS**、**在请求头里代理鉴权**——这四件事在 [`.claude/rules/rust-tauri.md`](../../.claude/rules/rust-tauri.md) §2 §5 与本 ADR 文末硬性要求第 4 条里都被单独判为缺陷。**产品用不上它**：用户已经有付费订阅的 Claude Code / Codex，key 这条路只是把凭证和出站流量搬进应用里，白白破掉两条约束。
+>
+> **代价要如实登记**：本节「不被单一厂商绑死」的对策，从此只剩「换另一个 CLI」和「本地模型」两条，不再包含「直接用 API」。若将来确需应用直连模型 API，**必须先写新 ADR**，重新定义出站流量边界、凭证存储位置与 UI 明示方式——不能靠改这一行措辞混过去。
 
 ### 5. 控制流由代码决定
 
@@ -74,9 +86,9 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，**在 Tau
 
 **为什么 stdio 而不是 HTTP MCP**：stdio 没有端口、没有本机其他程序可见的攻击面，且生命周期天然绑定在子进程上——agent 退出，通道就没了。
 
-**为什么在主进程内起而不是独立二进制**：`rmcp` 允许如此，省掉一层进程管理与版本同步。
+**为什么曾选主进程内起而不是独立二进制**：`rmcp` 允许如此，省掉一层进程管理与版本同步。**这条理由本身没错，但它回答的是「`rmcp` 能不能」，而不是「agent CLI 会不会连上来」——后者才是决定性的。** 挂起原因见上方 §1 的告示。
 
-**为什么可插拔接口不能推迟**：Anthropic 的政策已经反复过三次（2026-04-04 封禁 → 05 月改为 Agent SDK credits → 06-15 暂停该改动）。方向明确但未落地。等它落地再抽象接口，就是在压力下改架构。**但这条只作为工程对策，不写进产品叙事**——README 和产品定位里不需要反复强调。
+**为什么可插拔接口不能推迟**：**「第三方应用能不能用订阅额度」由厂商单方面决定，存在变化风险**——这是产品成本模型的单点依赖，而我们对它没有任何控制力。（立项时观察到的变更记录见 [`docs/PRD.md` §12](../PRD.md)，**未经核实，本 ADR 不复述、也不以它为论据**；本条只依赖「这个决定权不在我们手上」这一点，那不需要核实。）等政策真变了再抽象接口，就是在压力下改架构。**但这条只作为工程对策，不写进产品叙事**——README 和产品定位里不需要反复强调。
 
 ## 后果
 
@@ -98,4 +110,4 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，**在 Tau
 1. MCP 工具集里不存在通用 SQL / 通用文件写入工具
 2. 写事实表的代码路径不被任何 MCP 工具触及
 3. agent 后端通过 trait / 接口访问，v1 的 Claude Code 实现不得成为其他代码的直接依赖
-4. 代码里不出现任何厂商 API key、endpoint 或登录流程
+4. 代码里不出现任何厂商 API key、endpoint 或登录流程；**不存储用户提供的 key，也不由应用自己发出站请求**

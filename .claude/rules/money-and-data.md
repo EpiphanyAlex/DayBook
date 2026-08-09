@@ -146,7 +146,9 @@ CREATE TABLE draft_transactions (
 );
 ```
 
-**例外**：`draft_items` 的 `source_id` 可空（事项常来自用户口述），但 `evidence_text` 仍非空——存那句原话。理由见 [`docs/prd/05-items.md` §3.4](../../docs/prd/05-items.md)。
+**没有例外。** `draft_items` 与 `draft_transactions` 用同一套约束：两个字段都非空。用户口述的事项也有来源——那段话本身就是一条 `kind = utterance` 的 `sources`（转写文本落盘成 `.txt`，[`docs/prd/00-foundation.md` §3.6](../../docs/prd/00-foundation.md)「来源不等于文件」）。
+
+> `docs/prd/05-items.md` v0.1–v0.3 曾写「`draft_items.source_id` 可空」，**已于 2026-08-09 删除**（[05 §3.4](../../docs/prd/05-items.md)）——它与 [ADR-0002](../../docs/adr/0002-ai-never-writes-directly.md) 硬性要求 2 冲突，且成文于 `utterance` 引入之前。看到旧措辞按本文为准。
 
 ## 6. 总额交叉校验不留旁路
 

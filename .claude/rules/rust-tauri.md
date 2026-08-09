@@ -139,7 +139,8 @@ format!("INSERT INTO sources (id) VALUES ('{}')", id)   // 字符串拼接 SQL
 ```
 
 - 迁移只前进不回滚，用 `PRAGMA user_version` 记录进度
-- **多步写入必须在同一事务里**——尤其「写草稿 + 写审计」「删草稿 + 写事实表」
+- **多步写入必须在同一事务里**——尤其「写草稿 + 写审计」与确认动作的三步：**标记草稿已消费（`consumed_at` 置非空）+ 写事实表 + 写审计**
+- **确认不删草稿。** 草稿行原样保留，只置 `consumed_at`——审计要能回答「入库的这条当初 AI 起草成什么样」，删了就答不了（[`docs/prd/03-review.md` §3.1](../../docs/prd/03-review.md)）
 
 ```rust
 // ✅ 正确
@@ -151,16 +152,31 @@ tx.commit()?;
 
 ## 8. 日志与隐私
 
-```rust
-// ❌ 错误 —— 账目细节落盘
-tracing::info!("parsed transaction: {:?}", tx);
-eprintln!("{}", agent_stdout);   // 可能含截图内容
+**日志落盘，分两级** —— 依据 [ADR-0007 本地可观测性与日志分级](../../docs/adr/0007-local-observability-and-log-tiers.md)。**本条推翻了旧规则「不落盘」**：不落盘则「查日志 → 复现 bug → 变成回归测试」这条链不成立（进程一退内存缓冲就没了）。
 
-// ✅ 正确 —— 只记形状，不记内容
-tracing::info!(source_id = %id, draft_count = n, "parse finished");
+| 级别 | 内容 | 写入路径上**不得出现** |
+|---|---|---|
+| `trace` | 工具名与**参数形状**、耗时、退出码、重试次数、状态机转移、`agent_session_id`、`backend_id`、usage 元数据 | 金额字段、`evidence_text`、prompt 文本 |
+| `debug` | `trace` 全部 + 完整提示词 + agent 原始输出 + **完整**工具调用参数 | —（`debug` 就是为取证而存在，会含账目细节） |
+
+```rust
+// ❌ 错误 —— 把内容写进 trace 级
+tracing::info!("parsed transaction: {:?}", tx);   // 整个 struct = 金额 + 商户 + 原文
+tracing::info!(total = tx.amount_minor, "confirmed");
+
+// ✅ 正确 —— trace 只记形状
+tracing::info!(source_id = %id, draft_count = n, elapsed_ms = ms, "parse finished");
+
+// ✅ 正确 —— 内容只在 debug 级，且走独立的落盘通道
+if log_level >= LogLevel::Debug { debug_sink.record_tool_call(name, &raw_args); }
 ```
 
-agent 子进程的 stdout/stderr 采集到**内存环形缓冲**供 UI 排障，**不落盘**。
+- 位置 `<数据目录>/logs/`，与 SQLite 和 `evidence/` 同级——**用户看得见、能自己删**
+- 一次 agent 会话一个 JSONL 文件，文件名含 `agent_session_id`；**默认保留期后自动清除**
+- **`debug` 的默认值分构建**：发布构建默认关，开发构建（`npm run tauri dev` / `cargo` debug profile）默认开——夹具导出依赖它。两种情况下开关都必须在 UI 上可见并注明「会记录完整账目细节」
+- **绝不上传、绝不上报、绝不代理转发**。ADR-0001 禁的是「数据离开本机」，不是「数据写进本机磁盘」——这个区分是日志落盘成立的基础
+
+**判据**：`trace` 级的写入路径上有没有金额、`evidence_text` 或 prompt 文本？有就是缺陷。
 
 ## 9. 门禁
 

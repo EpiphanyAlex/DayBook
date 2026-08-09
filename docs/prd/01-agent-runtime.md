@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: ready
+status: draft
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.5
+date: 2026-08-09
+version: v0.6
 ---
 
 # 01 · Agent 运行时
@@ -17,13 +17,13 @@ version: v0.5
 
 1. 把数据库读写能力交给用户本机已登录的 agent CLI；
 2. **在结构上保证** agent 无法绕过草稿区（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）；
-3. 不被单一厂商绑死——Anthropic 对第三方 agent 使用订阅额度的政策已反复三次（[`docs/PRD.md` §12](../PRD.md)）。
+3. 不被单一厂商绑死——**厂商对「第三方应用能不能用订阅额度」的政策会变**（[`docs/PRD.md` §12](../PRD.md)，那里的具体日期未经核实，本文不复述）。
 
 **本模块是 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1 的物理实现处。** 如果这里的工具面开错一个口子，上层所有校验都是装饰。
 
 ## 2. 范围与非目标
 
-**范围**：MCP server（stdio · `rmcp` · 进程内）· 工具面定义与权限边界 · agent launcher（spawn / 监控 / 回收 / 超时）· 可插拔后端接口 · agent 侧提示词与任务下达 · 子进程日志采集。
+**范围**：MCP server（stdio · `rmcp` · **进程归属待定**，见 §5 R6）· 工具面定义与权限边界 · agent launcher（spawn / 监控 / 回收 / 超时）· 可插拔后端接口 · agent 侧提示词与任务下达 · 子进程日志采集。
 
 **非目标**：
 
@@ -35,13 +35,16 @@ version: v0.5
 
 ## 3. 决定与依据
 
-### 3.1 MCP server：stdio · `rmcp` · 主进程内
+### 3.1 MCP server：stdio · `rmcp` · 进程归属待定
 
 依据 [ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)。
 
 - 传输用 **stdio**：没有端口、没有本机其他程序可见的攻击面，生命周期天然绑定子进程
 - 实现用 **`rmcp`**（官方 Rust MCP SDK）
-- **在 Tauri 主进程内起**，不额外拉进程、不开 HTTP 端口（与 [ADR-0001](../adr/0001-local-first-desktop-platform.md) 的「不开 localhost API」一致）
+- **不开 HTTP 端口**（与 [ADR-0001](../adr/0001-local-first-desktop-platform.md) 的「不开 localhost API」一致）
+- **server 跑在哪个进程里：未定。** 三条候选与 spike 要求见 [§5 R6](#5-待决与风险)——这条是本文当前 `status: draft` 的原因
+
+> 本节 v0.1–v0.5 曾写「**在 Tauri 主进程内起**」，2026-08-09 撤下：stdio 型 MCP server 的启动方**是 agent CLI 自己**（读配置里的 `command` + `args` 去 `fork/exec`），**没有「连到某个已经在跑的进程」这种形态**——所以它不可能既活在 Tauri 主进程里、又被 `claude -p` 以 stdio 连上。**R6 结论落地前，任何关于进程归属的写法都不得作为实现依据。**
 
 ### 3.2 工具面（权限边界即工具签名）
 
@@ -82,7 +85,7 @@ version: v0.5
 
 **因此本工具的语义被收窄为**：
 
-1. 它回报的必须是**来源上原本印着的那个数字**（账单底部的 Total、余额行），**不是 agent 把逐笔加起来的结果**。
+1. 它回报的必须是**来源上原本印着的那个合计**（账单底部的 Total 那一行），**不是 agent 把逐笔加起来的结果，也不是账户余额**——余额不是合计（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)），来源上只印余额时按第 3 条处理。
 2. 参数为 `(amount_minor, currency, evidence_text)` **三者齐全**，缺任一 → `agent.tool_rejected`。`evidence_text` 是该合计在来源上的原文片段。
 3. **来源上没有印合计时，agent 必须不调用本工具**——留空即 `unavailable`（[03 审核 §3.3](./03-review.md)），**不许自己算一个填进去**。
 4. `declared_total_*` 三列在数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)），漏填一项写不进去。
@@ -95,7 +98,7 @@ version: v0.5
 
 ### 3.4 agent launcher
 
-- 通过 `std::process::Command` spawn 子进程，把 MCP server 的 stdio 端接上
+- 通过 `std::process::Command` spawn agent CLI 子进程。**CLI 与 MCP server 之间怎么接上取决于 §5 R6 的结论**（v0.1–v0.5 写的「把 MCP server 的 stdio 端接上」预设了 server 在主进程内，已撤下）
 - **v1 后端**：Claude Code（`claude -p`）
 - **并发**：v1 **同时只跑一个 agent 子进程**。排队，不并发
 - **日志**：**落盘，分两级**——见下方「日志分级」。此前本条写「不落盘」，已由 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) 推翻
@@ -113,16 +116,16 @@ version: v0.5
 
 **本条推翻了 v0.1–v0.3 的「不落盘」。** 原因：评审要求的「查日志 → 复现 bug → 变成回归测试」链条，前提就是日志落盘——进程一退内存缓冲就没了。
 
-| 级别 | 默认 | 内容 |
-|---|---|---|
-| `trace` | **开** | 工具调用的**名称与参数形状**、耗时、退出码、重试次数、状态机转移、`agent_session_id`、`backend_id`、usage 元数据。**不含金额、不含原文、不含 prompt** |
-| `debug` | **关** | `trace` 全部，外加完整提示词、agent 原始输出、**完整的 MCP 工具调用参数** |
+| 级别 | 发布构建默认 | 开发构建默认 | 内容 |
+|---|---|---|---|
+| `trace` | **开** | **开** | 工具调用的**名称与参数形状**、耗时、退出码、重试次数、状态机转移、`agent_session_id`、`backend_id`、usage 元数据。**不含金额、不含原文、不含 prompt** |
+| `debug` | **关** | **开** | `trace` 全部，外加完整提示词、agent 原始输出、**完整的 MCP 工具调用参数** |
 
 - 位置 `<数据目录>/logs/`，与 SQLite 和 `evidence/` 同级——**用户看得见、能自己删**
 - 一次会话一个 JSONL 文件，文件名含 `agent_session_id`
 - **默认保留期后自动清除**（具体天数实现时定，回流本文）
 - **绝不上传、绝不上报**。[ADR-0001](../adr/0001-local-first-desktop-platform.md) 禁的是「数据离开本机」，不是「写进本机磁盘」
-- **自用阶段 `debug` 默认开** —— 夹具导出依赖它（[07 评测 §3.6](./07-eval.md)），关着等于没有飞轮
+- **`debug` 的默认值分构建**：发布构建默认关，开发构建（`npm run tauri dev` / `cargo` debug profile）默认开——夹具导出依赖它（[07 评测 §3.6](./07-eval.md)），关着等于没有飞轮。两种构建下都是运行时可改的（[ADR-0007](../adr/0007-local-observability-and-log-tiers.md)「`debug` 的默认值分构建」）
 - `debug` 开关**必须在 UI 上可见并注明「会记录完整账目细节」**，不是只能改配置文件的隐藏项
 
 `debug` 必须包含**完整**工具调用参数，因为 agent 是非确定性的：复现一个 bug 不能靠「重跑一次 agent」，只能靠**重放录下来的调用序列**。
@@ -140,6 +143,7 @@ trait AgentBackend {
 
 **约束**：
 
+- **后端只能是「用户已配置好的外部进程」**（`claude -p` / `codex exec` / 本地模型进程）。`spawn()` 的语义就是起一个进程——**接口里没有、也不得增加「应用自己调 HTTP API」这条实现路径**（[ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)，2026-08-09 删除「用户自备 API key」）
 - v1 的 Claude Code 实现**不得成为其他代码的直接依赖**——上层只见 `dyn AgentBackend`
 - `probe()` 只做「CLI 存在且可执行」的检测，**不代用户登录、不读取用户的凭证文件**
 - 后端不可用时应用**仍可启动**，UI 如实显示「未检测到可用的 agent CLI」并给出安装指引
@@ -157,9 +161,9 @@ trait AgentBackend {
 |---|---|
 | agent 输出 JSON，应用解析 | ① 权限边界要在解析后再补一层校验，而 MCP 的边界就是工具签名 ② 做不到多轮编排（agent 无法「先查历史上这个商户归哪一类，再决定怎么起草」） ③ 失去「Claude Code 和 Codex 都支持 MCP」这条可插拔红利（[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)「理由」） |
 | HTTP 传输的 MCP server | 要开端口 → 本机其他程序可见的攻击面，与「数据不出本机」的姿态相悖；且生命周期不再天然绑定子进程 |
-| MCP server 做成独立二进制 | `rmcp` 允许进程内起，独立二进制凭空多一层进程管理与版本同步 |
+| ~~MCP server 做成独立二进制~~ **已重开（2026-08-09）** | 原否决理由是「`rmcp` 允许进程内起，独立二进制凭空多一层进程管理与版本同步」。但 §3.1 的告示说明**进程内起这个前提可能根本不成立**——若成立不了，本行就是候选方案而非被否决的方案。**结论随 §5 R6 一起给出。** |
 | 按业务领域拆「记账 agent」+「事项 agent」 | 用户一句话经常跨域（「今天吃饭 180，明天交房租，上周那 400 是给我妈买茶叶」），拆开要先分派再合并，凭空多出错误面且闭不了环（[ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md)） |
-| 应用内置 API key / 提供厂商登录 | 直接违反 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)；且一旦代理鉴权，「数据不出本机」就不再成立 |
+| 应用内置 API key / 让用户把 key 粘进应用 / 提供厂商登录 | 直接违反 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)：应用要存凭证、带 endpoint、自己发 HTTPS、代理鉴权，四件事各自是缺陷。**且产品不需要它**——用户已有付费订阅的 CLI。「用户自备 API key」已于 2026-08-09 从后端清单删除 |
 | v1 就实现多个后端 | 第二个后端的价值在厂商政策变化时才兑现；接口存在即可保住架构，实现推到 M4 |
 
 ## 5. 待决与风险
@@ -170,6 +174,7 @@ trait AgentBackend {
 | ~~R2~~ **已关闭（2026-08-07）** | 解析失败/超时的重试策略放在 launcher 还是 domain（[`docs/architecture.md` §8](../architecture.md) 未决 A2） | 本文 §3.4、[02 导入 §3.5](./02-ingest.md) | **结论：domain。** launcher 只负责「起进程、看着它、超时就杀」，不知道失败是否值得重试——那要看来源状态与用户意图。**v1 不做自动重试**：`failed` 的来源显式列在 UI 上由用户一键重试（[02 导入 §3.5](./02-ingest.md)），符合「控制流由代码决定、且不偷偷烧用户额度」。[`docs/architecture.md` §8](../architecture.md) A2 同步关闭 |
 | R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定，**不阻塞 M0**（M0 单张截图） |
 | R4 | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效 | 全产品 | 对策已定（可插拔接口），**不需要额外决策**；登记以免被当成新问题重新讨论 |
+| **R6**（2026-08-09 新增，**阻塞 M0**） | **MCP server 的进程归属**：§3.1 要「主进程内起」，§3.4 要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥（理由见 §3.1 告示）。三条候选：① **独立 MCP helper 二进制**，由 CLI 按 `command + args` 拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**（`<数据目录>` 下的 socket 文件，不是 TCP 端口，因此不违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「不开 localhost API」）；② **应用自身二进制加一个 `--mcp-stdio` 子命令**，CLI 拉起的是同一个可执行文件的另一种模式，省掉版本同步；③ **改用 Agent SDK / 库内嵌**，不走 CLI + MCP 这条路（代价：放弃「用用户自己已登录的 CLI」这条产品支点，[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md) 需重写） | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **M0 开工前必须先做 spike**，三项检查缺一不可：① 拿 `claude -p` + 一个最小 `rmcp` server 实测三条候选的可行性与生命周期行为；② 确认 CLI 侧 MCP 配置的实际契约（`command + args` 怎么传、stdio 怎么握手）；③ **核实厂商现行条款**——第三方应用经 `claude -p` 调用是否仍走用户订阅额度、有无额外限制。[`docs/PRD.md` §12](../PRD.md) 记的那三个日期是立项时的观察且未核实，**核实后才允许把结论写回决定依据**。**结论回流本文并同步 [ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)**。在此之前本文 `status: draft` |
 | ~~R5~~ **已关闭（2026-08-07）** | agent 会话 ID 的粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) schema | **结论：一个来源一个会话。** 理由是 §3.4 的作废语义按 `(source_id, agent_session_id)` 定位本次会话的草稿——若一次导入共用一个会话，批量导入时某一张超时会波及同批其他来源的草稿。已落进 [00 地基 §3.6](./00-foundation.md) 的 `sources.agent_session_id` 与 `draft_transactions.agent_session_id` 两列 |
 
 ## 6. 验收标准
@@ -202,7 +207,10 @@ trait AgentBackend {
 
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+| 日期 | 回流内容 | 依据 |
+|---|---|---|
+| 2026-08-09 | **§3.1「主进程内起」与 §3.4「把 stdio 端接上」互斥**，规格在实现前就被证伪。stdio 型 MCP server 由 agent CLI 按 `command + args` 自己 `fork/exec`，不存在「连到已在运行的进程」的形态。已把 §2 范围、§3.1 标题与正文、§3.4 第 1 条统一改为「进程归属待定」，§4 重开「独立二进制」一行、§5 新增 R6（三条候选 + spike 要求），`status` 由 `ready` 退回 `draft`。**先回写文档再动代码**（[`docs/prd/CLAUDE.md`](./CLAUDE.md)「回流义务」） | 文档审查发现，尚未有实现；spike 结论待补 |
+| 2026-08-09 | **后端清单删除「用户自备 API key」。** 它与 [`CLAUDE.md`](../../CLAUDE.md) 约束 2（唯一出站流量归 CLI）、约束 11（不代理鉴权）以及 [`.claude/rules/rust-tauri.md`](../../.claude/rules/rust-tauri.md) §2 §5 同时冲突——实现它所需的四件事（存 key / 带 endpoint / 自发 HTTPS / 代理鉴权）各自都被单独判为缺陷。§3.5 明确 `spawn()` 的语义就是起进程，接口里不得增加「应用自己调 HTTP API」这条路径 | 产品决定（2026-08-09）：用户已有付费订阅的 Claude Code / Codex，API key 这条路只是把凭证与出站流量搬进应用。将来确需直连需新写 ADR |
 
 ---
 
@@ -211,6 +219,7 @@ trait AgentBackend {
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
+| v0.6 | 2026-08-09 | **文档审查回流 → `status` 退回 `draft`。** ① §3.1 加告示：**「MCP server 在 Tauri 主进程内 + stdio + CLI 连上来」物理上不成立**——stdio 型 server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态；§4 相应重开「MCP server 做成独立二进制」一行。② §5 新增 **R6（阻塞 M0）**：三条候选（helper 二进制 + Unix domain socket / 应用自身 `--mcp-stdio` 子命令 / 改用 Agent SDK），M0 开工前先做 spike。③ §3.2 `report_source_total` 第 1 条把「余额行」从合格基准里去掉——余额不是合计（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md) 2026-08-09 修订）。④ §3.4 日志分级表把 `debug` 的「默认」拆成发布构建 / 开发构建两列——原先「默认关」与「自用阶段默认开」两句话在同一节里互相打架（[ADR-0007](../adr/0007-local-observability-and-log-tiers.md) 同步澄清）。⑤ **§2 范围、§3.1 标题、§3.4 第 1 条一并改成「进程归属待定」**——正文与标题此前仍写「进程内」，只有告示说待定，等于同一份文档两个说法；旧方案只留在本表。⑥ **§3.5 与 §4 删除「用户自备 API key」后端**：它要求应用存凭证、带 endpoint、自发 HTTPS、代理鉴权，与 [`CLAUDE.md`](../../CLAUDE.md) 约束 2、11 及 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md) 正面冲突，且产品用不上（用户已有付费订阅的 CLI）；后端形态收窄为「用户已配置好的外部进程」，`spawn()` 的语义就是起进程。⑦ **§1 删除「政策已反复三次」的具体日期**——那三个日期在 [`docs/PRD.md` §12](../PRD.md) 里已标注为未核实，不该在本文当既成事实复述；改为「厂商政策会变」。**核实现行条款列为 §5 R6 spike 的检查项第 ③ 条**，核实后才允许写回决定依据 |
 | v0.5 | 2026-08-08 | 公开仓库去个人化：§3.2「只读 ≠ 无限读」与 §3.6「程序记忆」两处**去掉外部参考仓库出处、把结论内联**（最小暴露 = AI 只读取任务需要的内容；程序记忆 = 规定 agent 怎么做事的那部分，与事实记忆分属两类）——**两条规定本身未变**；§3.4「dogfooding 期间 `debug` 默认开」改为「自用阶段」（同 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）；§5 R1 的具名网银样本改为「真实网银流水截图」；`owner` 改为 `@maintainer` |
 | v0.4 | 2026-08-08 | **设计评审回流。** ① §3.2 工具表新增 **「读取范围」列** + 「只读 ≠ 无限读」小节（依据 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）：此前只锁写入，导致 `query_memory` 可列举全部规则、把用户的个人语境词表整个送进模型上下文；现改为只按键回答，`read_source` / `list_pending_sources` 收窄到本次任务指派的来源。② §3.4 **「不落盘」被推翻**（[ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）：改为 `trace` 常开（元数据，无金额原文）/ `debug` 默认关（含完整工具调用参数，供夹具重放），自用阶段 `debug` 默认开，开关必须在 UI 可见。③ §3.6 明写**提示词模板属程序记忆、不得被模型修改**（程序记忆与事实记忆分属两类，前者只能由人改）——原先 agent 改不了只是巧合。④ §6 新增 6 条验收 |
 | v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.2 工具面**按里程碑分层**——M0 只注册 4 个，`draft_item` / `query_memory` 推到 M3（其目标表 `draft_items` / `memory_rules` 在 M0 尚未建，注册即验收必挂）；工具须**注册时声明写入目标表集合**，否则 `tools_cannot_write_fact_tables` 无法实现。② §3.2 新增 **`report_source_total` 可信性要求**——修复闸门 3 的结构性失效：原规格允许 agent 自行填写总额校验的基准值，而校验两边同源等于没有闸门；现强制 `(amount_minor, currency, evidence_text)` 三者齐全、必须是来源上印着的数字、没印就不许调用，并如实写明这道闸门挡不住什么。③ §3.4 **修正「同一事务」**——N 次独立 MCP 调用各自记审计，不可能事后收进一个事务；改为按 `(source_id, agent_session_id)` 的补偿性作废 + `actor = "system"` 审计。④ §5 **R2、R5 关闭**（重试归 domain 且 v1 不自动重试；会话粒度 = 一个来源一个会话），**R1 给定 M0 初值 180 秒**避免无值阻塞。⑤ §6 验收从 10 条增至 14 条，并把无法实现的「静态断言调用图」改为 `rg` 检查 |

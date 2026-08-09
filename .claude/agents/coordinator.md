@@ -20,11 +20,13 @@ model: sonnet
 
 ## PR
 
-**每个 PR 都套 [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)**——先读那份模板，逐节从**真实 diff** 填，本文不复述它的章节。**模板骨架是英文（仓库公开，外部贡献者的第一接触面），但 PR 正文中英皆可**——本仓库的历史 PR 与提交正文都是中文，沿用即可。三处最容易被敷衍掉的：
+**每个 PR 都套 [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)**——先读那份模板，逐节从**真实 diff** 填，本文不复述它的章节。**模板骨架是英文（仓库公开，外部贡献者的第一接触面），但 PR 正文中英皆可**——本仓库的历史 PR 与提交正文都是中文，沿用即可。
 
-- **Constraint check** —— **逐条看过再勾**，没触及的标 N/A。这一节是模板存在的理由，不是形式；不确定某条是否被触及时交给 `reviewer` 审一遍，**别替它勾**。
-- **门禁** —— 只勾**真的跑过**的，没跑的留空并说明。
-- **验收证据** —— sub-PRD 的验收标准要求什么命令，就**贴那条命令的真实输出**，不是「测试通过了」。跑与贴可以交给 `tester`。
+模板**故意不用勾选框**（2026-08-09 改）：勾选框会被整列勾满，而写一句「这条为什么被满足」写不出来就藏不住。三处最容易被敷衍掉的：
+
+- **Constraints** —— 点名这个 diff 真正触及的约束，每条**用一句话说清怎么满足的**。一条都没触及就明写「none」。不确定时交给 `reviewer` 审一遍，**别替它下结论**。
+- **Evidence** —— sub-PRD 的验收标准要求什么命令，就**贴那条命令的真实输出**，不是「测试通过了」。没跑的门禁如实说没跑。跑与贴可以交给 `tester`。
+- **Docs** —— 收尾三件事逐条说做了什么，或为什么不适用。
 
 在 `main` 上就先开分支。PR body 末尾加 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`。
 
@@ -35,8 +37,10 @@ docs: 关闭 P4 —— 许可选 MIT
 
 <中文正文：为什么这么改，权衡了什么，否决了什么方案，实测/门禁结果>
 
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: <当前会话实际使用的模型> <noreply@anthropic.com>
 ```
+
+**署名行写当前会话真实用的模型，不写死一个名字**——本文件配置的 `model:` 与编排者会话的模型不一定相同，抄一个固定名字会产生错误署名。拿不准就查 `git log -5 --format=%B | grep Co-Authored-By` 看上一条是怎么署的，或直接省掉这一行。
 
 - 前缀英文（`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `ci`，可组合成 `docs+ci:`），标题与正文中文。
 - 正文写**理由与取舍**，不是改动清单的复述——本仓库的历史提交是决策记录的一部分。
@@ -52,9 +56,16 @@ node scripts/check-links.mjs
 node scripts/check-readme-sync.mjs
 ```
 
-改了 [`README.md`](../../README.md) 就**必须在同一个提交里**带上 [`README.en.md`](../../README.en.md)——第三条门禁按祖先关系判定，分两次提交必红。
+动了 [`README.md`](../../README.md)，[`README.en.md`](../../README.en.md) **必须在合并前跟上**。门禁按祖先关系判定 HEAD 的状态——**分两次提交不会一直红，但中间那个提交是红的**，所以放同一个提交里最省事。
 
-代码 PR 另需前端四条（`npm run lint` · `typecheck` · `test` · `build`）与 Rust 三条（`cargo fmt --check` · `clippy -D warnings` · `test`）全绿（约束 16）。
+代码 PR 另需前端四条与 Rust 三条全绿（约束 16）——**参数照抄，别写简写**：
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run build
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
 
 ## Daybook 护栏
 
