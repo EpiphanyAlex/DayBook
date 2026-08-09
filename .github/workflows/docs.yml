@@ -25,8 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # check-readme-sync.mjs 要读两个文件各自最后被改动的提交时间，
-          # 默认的浅克隆（fetch-depth: 1）看不到，会让它直接报错而不是误判。
+          # check-readme-sync.mjs 按**提交历史的祖先关系**判定英文镜像有没有落后
+          # （不看时间戳——时间戳只到秒且会被 rebase 重写）。默认的浅克隆
+          # （fetch-depth: 1）没有历史可查，脚本会直接报错而不是误判。
           fetch-depth: 0
 
       - uses: actions/setup-node@v4

@@ -2,8 +2,8 @@
 title: 05 事项 Items — backlog、排期与完成时长
 status: draft
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.3
+date: 2026-08-09
+version: v0.4
 ---
 
 # 05 · 事项 Items
@@ -98,11 +98,13 @@ version: v0.3
 
 事项也走 `draft_items` → 人工确认 → `items`（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）。
 
-**但证据链要求宽松于交易**：事项的来源常常是用户自己的一句话，没有截图。因此：
+**证据链要求与交易一致，不设例外**（2026-08-09 改定）：
 
-- `draft_items.source_id` **可空**（与 `draft_transactions` 不同，后者非空）
-- 来源是用户口述时，`evidence_text` 存那句原话
-- **理由**：证据链的目的是防止「AI 编造了一个用户没说过的数字」。事项没有数字精度问题，且用户口述本身就是原文——**时间容忍模糊，钱不容忍**
+- `draft_items.source_id` **非空**，`evidence_text` **非空**——与 `draft_transactions` 同一条实现路径
+- 来源是用户口述时，那段话本身就是来源：落一条 `kind = utterance` 的 `sources`（转写文本落盘成 `.txt`，见 [00 地基 §3.6](./00-foundation.md)「来源不等于文件」、[02 导入 §3.1](./02-ingest.md)），`evidence_text` 取其中对应这一条事项的片段
+- **本节 v0.1–v0.3 曾写「`source_id` 可空」，已删除。** 那条例外与 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 2 的硬性要求 2（「草稿表的 `source_id` 与原文片段字段非空」）**直接冲突**，且它成文于 2026-08-08 引入 `utterance` 之前——当时口述确实无处可挂，现在有了。**留着例外等于让数据层放弃一道 `NOT NULL`，换取一个已经不存在的问题的解法**
+
+**闸门 3 对事项本来就不适用**：事项没有金额，无合计可校验。这与「口述来源的总额校验恒为 `unavailable`」是同一件事（[03 审核 §3.3](./03-review.md)），不需要在证据链上再开口子——**时间容忍模糊，钱不容忍，说的是精度要求，不是来源可以没有**。
 
 ### 3.5 两个基础问答
 
@@ -147,8 +149,8 @@ v1 只回答两个问题，**不做通用报表**：
 - [ ] `cargo test items::no_auto_return_to_backlog` 通过——过期未完成的事项状态不变，仍为 `scheduled`
 - [ ] `cargo test items::archived_is_distinct_from_done` 通过——两个终态在查询中可区分
 - [ ] `cargo test items::actual_minutes_is_optional_integer` 通过——可空且为整数分钟，无浮点
-- [ ] `cargo test items::draft_item_allows_null_source` 通过——与 `draft_transactions` 的非空约束区分
-- [ ] `cargo test items::draft_item_still_requires_evidence_text` 通过——口述场景下 `evidence_text` 存原话，仍非空
+- [ ] `cargo test items::draft_item_requires_source_and_evidence` 通过——`source_id` 与 `evidence_text` 均非空，与 `draft_transactions` 同一套约束（§3.4，取代原先的 `draft_item_allows_null_source`）
+- [ ] `cargo test items::spoken_items_get_utterance_source` 通过——一段口述拆成 N 条 `draft_items`，N 条共用同一个 `kind = utterance` 的 `source_id`，各自的 `evidence_text` 是该条对应的原话片段
 - [ ] `cargo test items::confirm_writes_audit` 通过
 - [ ] `npm test -- items/bulk-input` 通过——多行文本一行一条进 backlog
 - [ ] `npm test -- items/week-rollup` 通过——「这周时间花哪了」的汇总，未记时长的条目单独计数不混入总和
@@ -161,7 +163,9 @@ v1 只回答两个问题，**不做通用报表**：
 
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+| 日期 | 回流内容 | 依据 |
+|---|---|---|
+| 2026-08-09 | **§3.4 的「`draft_items.source_id` 可空」例外删除。** 它与 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 2 硬性要求 2 直接冲突，而 ADR 是权威；例外的原始理由（口述没有可挂的来源）已被 2026-08-08 引入的 `kind = utterance` 消解（[00 地基 v0.4](./00-foundation.md)）。§6 两条验收随之改写 | 文档审查发现的跨文档冲突；[`docs/prd/CLAUDE.md`](./CLAUDE.md) 硬规则 5（跨文档一致性） |
 
 ---
 
@@ -169,6 +173,7 @@ v1 只回答两个问题，**不做通用报表**：
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.4 | 2026-08-09 | **文档审查回流。** §3.4 **删除「`draft_items.source_id` 可空」例外**——与 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 2 硬性要求 2 冲突，且 `kind = utterance`（2026-08-08 引入）已让口述事项有来源可挂；改为「与交易同一条实现路径，两个字段都非空」，并说明闸门 3 不适用于事项是**金额层面**的事，不构成在证据链上开口子的理由。§6 相应改写两条验收（`draft_item_requires_source_and_evidence` / `spoken_items_get_utterance_source`）。同步改动：[`.claude/rules/money-and-data.md` §5](../../.claude/rules/money-and-data.md)、[`.claude/agents/reviewer.md`](../../.claude/agents/reviewer.md)、[INDEX.md](./INDEX.md) |
 | v0.3 | 2026-08-08 | 公开仓库去个人化：§5 R1 的判断人改为「产品决定」，本表去掉工具与会话指代；`owner` 改为 `@maintainer`。**§3.1 的例句（含「上周那 400 是给我妈买茶叶」）保留**——它是「钱是否已经流动」这条判据的载重例子，不指向具体的人 |
 | v0.2 | 2026-08-08 | **设计评审回流**：§3.1 新增**「交易与事项的边界：钱是否已经流动」**。此前规格里没有判据——一句口述里 agent 必须能判断归属，而「明天交房租 2000」未发生（像事项）却带金额（像交易），无论怎么选都丢东西。判据定为**钱是否已经流动**，不是有没有金额；「明天交房租 2000」归事项，`2000` 只进文本、**不建结构化金额字段**（那是提前做 [`docs/PRD.md` §11](../PRD.md) 划给 v2 的闭环，且做一半比不做更糟）。并说明分类错是**高可见低损害**错误，对策是 [03 审核 §3.6](./03-review.md) 的一键改实体类型，不是让 agent 更谨慎 |
 | v0.1 | 2026-08-06 | 初版：四态生命周期（含 `archived` 与 `done` 区分、不自动退回 backlog）、只记时长不记时段、一句话批量丢入与 v1 语音方案、事项草稿的 `source_id` 可空及其理由、两个基础问答、独立视图；否决方案七条；待决 R1–R5；验收标准 12 条可执行 + 2 条人工 |

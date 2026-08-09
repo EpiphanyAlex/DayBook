@@ -15,7 +15,9 @@ It is not an expense tracker and not a to-do app. It is a **retroactive recorder
 ## Current status
 
 **Skeleton stage (established 2026-08-06).** Constraints and documentation are in place; `src/` and `src-tauri/` **do not exist yet**.
-The first milestone is **M0 — end-to-end smoke test**: drop in a screenshot → the agent reads it → it is written to SQLite through MCP → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
+The first milestone is **M0 — end-to-end smoke test**: drop in a screenshot → the agent reads it → **drafts are written through MCP** → **a human confirms** → the fact tables are written → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
+
+**M0 is currently blocked on a spike**: where the MCP server process lives has to be settled first ([`docs/prd/01-agent-runtime.md` §5](./docs/prd/01-agent-runtime.md), R6).
 
 The only commands that run today are the documentation gates, enforced by CI on every PR (see [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
 
@@ -39,13 +41,33 @@ Daybook starts from the opposite premise: **you are catching up, by default.**
 
 ## How it works
 
-1. **The user brings their own AI quota → marginal cost is zero → any source can be re-parsed.**
+1. **The user brings their own AI quota → marginal cost on the product side is zero → any source can be re-parsed.**
    A conventional expense app has to ship a dedicated parser per bank: it breaks when a format changes, the long tail is never covered, and every new country means doing it all again. Competitors billing per API call end up back at hand-written parsers once they do the token math.
    **This capability is inherently bank-, currency-, and country-agnostic — because it does not recognize any specific format in the first place.** Multi-currency, multi-channel and arbitrary layouts fall out of it for free; none of them needs to be designed separately.
+   *("Zero marginal cost" means on this project's side: the tokens are billed to your own subscription or API account. It is not zero on your side — quotas are finite and going over them may cost money.)*
 2. **Reuse the agent CLI the user already has installed (Claude Code / Codex) → a mature agent runtime for free.**
    This is also why it **has to** be a desktop app: it needs local login state, local processes, local files.
-3. **Local-first, no accounts, no backend.**
-   Ledgers and calendars are deeply private. Data never leaves the machine → privacy holds by construction, there is no per-country compliance surface, and server cost is zero.
+3. **Local-first: no Daybook account, no remote server, none of your data hosted by us.**
+   Ledgers and calendars are deeply private. You never register an account for Daybook, and this project runs no remote service — **so no server operated by us ever retains your data**. (Whether the model provider you chose retains anything, and for how long, is governed by *their* policy — we neither handle that nor control it; see below.)
+
+### Where the data actually goes, stated plainly
+
+Two separate things here — **where things are stored**, and **what leaves the machine during parsing**. Conflating them is what makes "evidence files never leave your machine" and "screenshots are sent to a model provider" look like a contradiction.
+
+**Where it is stored (persistence)**
+
+| | Location |
+|---|---|
+| Ledger, evidence files, logs | **Only on your machine** — the app data directory, visible to you, deletable by you |
+| Daybook account / remote server / cloud sync / telemetry / crash reporting | **Do not exist**; this project runs no remote service |
+
+**What leaves the machine (transmission)**
+
+Parsing relies on an agent CLI *you* installed and logged into, and the inference behind `claude -p` / `codex exec` runs at their respective model providers. **When a screenshot is parsed, that screenshot and the related text are sent to that provider by that CLI**, using *your* subscription and *your* login with that provider. The CLI initiates this itself — Daybook does not proxy it, forward it, or log it — but it does happen. **It creates no storage on Daybook's side**: what goes out does not pass through our servers, because there are none.
+
+**Where the parsed content goes depends on the backend you pick**: switch to a local model process ([ADR-0003](./docs/adr/0003-agent-runtime-and-pluggable-backend.md), one of the pluggable options) and the content being parsed **never has to be sent to a remote model provider**. Note that this is about the *content* — **whether that local process itself talks to the network** (update checks, usage reporting) is its own business, which Daybook neither controls nor vouches for. **This is a property of the backend you chose, not a default promise of the product.**
+
+> **A note on the word "server"**: the "Rust MCP server" and the "agent backend" in the tech stack are both machine-local — the former is the tool surface exposed to the agent CLI, the latter is the abstraction over *which local process does the inference*. **Neither is a remote server**; do not confuse them with the "no remote server" claim above.
 
 The pain grows with **number of accounts → number of payment channels → number of currencies**; the more of each, the more obvious the value. The validation sample is a **multi-account, multi-channel, dual-currency** setup because it puts the most pressure on parsing — **a stress test, not a market boundary.**
 
@@ -58,8 +80,8 @@ Vision models **really do read 168 as 1680**, and a single wrong number in a led
 | Gate | What it does |
 |---|---|
 | **Draft area** | The AI writes only to `draft_*` tables; nothing reaches the fact tables until a human confirms it |
-| **Evidence chain** | Every draft carries its origin — which screenshot, which line of source text — replacing "trust the AI" with "glance at the original" |
-| **Total cross-check** | The entries extracted from one source must add up to the total or balance that source itself declares; a mismatch raises an alarm without anyone asking |
+| **Evidence chain** | Every draft carries its origin — which screenshot (or which spoken utterance), and which line of source text — replacing "trust the AI" with "glance at the original" |
+| **Total cross-check** | The entries extracted from one source must add up to the total printed on that source itself; a mismatch raises an alarm without anyone asking |
 | **Append-only audit log** | Every AI write and every human edit leaves a trace |
 
 ---
@@ -68,13 +90,13 @@ Vision models **really do read 168 as 1680**, and a single wrong number in a led
 
 | Layer | Choice | When |
 |---|---|---|
-| UI | React 18 + TypeScript + Vite | v1 |
+| UI | React + TypeScript + Vite (major version pinned to whatever is current when [`00-foundation`](./docs/prd/00-foundation.md) scaffolds the project) | v1 |
 | Desktop shell | Tauri 2 | v1 |
 | Core | Rust — `rusqlite` + process management + file watching | v1 |
 | Agent tool surface | Rust MCP server (`rmcp`, the official SDK) | v1 |
-| Agent backend | Pluggable interface: `claude -p` / `codex exec` / API key / local model | Interface in v1; only Claude Code implemented in v1 |
+| Agent backend | Pluggable interface; **a backend is always an external process you already configured**: `claude -p` / `codex exec` / a local model process | Interface in v1; only Claude Code implemented in v1 |
 | Photo library access | Swift sidecar (PhotoKit, headless standalone binary) | v1.1 |
-| Voice | macOS system dictation in v1 (zero code) → Swift sidecar in v1.1 | v1.1 |
+| Voice | macOS system dictation in v1 (zero code) → Swift sidecar in v1.1 | v1 + v1.1 |
 
 The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-desktop-platform.md) (why not SwiftUI, why not Electron) and [ADR-0003](./docs/adr/0003-agent-runtime-and-pluggable-backend.md) (why a local MCP server).
 
@@ -93,8 +115,8 @@ The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-
 | Specs for individual capabilities | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | Implementation rules split by topic | [`.claude/rules/`](./.claude/rules/) |
 | "How is this feature actually implemented right now?" | [`.claude/features/`](./.claude/features/) |
-| Dev-time subagent roster (**not** the product runtime agent) | [`.claude/agents/README.md`](./.claude/agents/README.md) |
-| What a pull request must fill in (English skeleton; body in either language) | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) |
+
+Opening a pull request? The workflow and the template are described in [`CLAUDE.md`](./CLAUDE.md).
 
 **This project does not use tickets.** Humans write *what and why* (a sub-PRD), the agent produces *how* (plan mode), humans review the plan. Rationale and workflow: [`CLAUDE.md`](./CLAUDE.md) under「PRD 体系与工作流」(PRD system and workflow).
 

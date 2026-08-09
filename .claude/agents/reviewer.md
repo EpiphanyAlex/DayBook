@@ -42,26 +42,28 @@ model: sonnet
 
 ### 1. 正确性 / 缺陷
 
-Rust：`.unwrap()` / `.expect()` / `panic!` 在 `Option`/`Result` 上，穿过 IPC 会杀掉整个命令；被吞掉的错误；多步写入没放进同一个事务（尤其「写草稿 + 写审计」「删草稿 + 写事实表」）；`i64` 乘法溢出（汇率换算必须走 `i128` 中间量）。
+Rust：`.unwrap()` / `.expect()` / `panic!` 在 `Option`/`Result` 上，穿过 IPC 会杀掉整个命令；被吞掉的错误；多步写入没放进同一个事务（尤其「写草稿 + 写审计」与确认动作的「标记草稿已消费 + 写事实表 + 写审计」三步）；**确认动作里出现 `DELETE FROM draft_*` 即缺陷**——草稿只置 `consumed_at`，不删（[03 审核 §3.1](../../docs/prd/03-review.md)）；`i64` 乘法溢出（汇率换算必须走 `i128` 中间量）。
 TS：null/undefined 访问、游离的 `any`、不安全的 `!`。
 
 ### 2. Daybook 硬约束（[`CLAUDE.md`](../../CLAUDE.md) 17 条）
 
 - **AI 只写草稿**（约束 3，[ADR-0002](../../docs/adr/0002-ai-never-writes-directly.md)）：把 MCP 工具清单列出来，逐个问「**这个工具能不能让一条未经人确认的数据出现在 `transactions` 或 `items` 里？**」——能，就是缺陷。`domain::confirm` 被任何 MCP 工具调用即缺陷；名字叫 `confirm_draft` 的工具是「形式合规、实质绕过」。
 - **工具面收窄**（约束 9）：存在通用「执行任意 SQL」/ 任意文件写入 / 任意命令执行工具即缺陷。草稿区应有独立 store 类型（如 `DraftStore`），它**根本没有**写事实表的方法——越权在编译期不可表达，而不是靠 review 发现。
-- **证据链**（约束 4）：`draft_transactions` 的 `source_id` 与 `evidence_text` 必须是必填（不是 `Option`），数据层也要有 `NOT NULL`。例外只有 `draft_items.source_id` 可空，但 `evidence_text` 仍非空。审核界面必须原文与解析结果并排、默认可见。
+- **证据链**（约束 4）：**全部 `draft_*` 表**的 `source_id` 与 `evidence_text` 都必须是必填（不是 `Option`），数据层也要有 `NOT NULL`——`draft_items` **没有例外**（口述走 `kind = utterance` 来源，2026-08-09 改定，见 [05 §3.4](../../docs/prd/05-items.md)）。审核界面必须原文与解析结果并排、默认可见。
 - **总额交叉校验无旁路**（约束 5）：任何 `force` / `ignore` / `skip_check` 参数即缺陷。`Unavailable` 不得被当成 `Passed`。
 - **整数金额**（约束 6）：全链路整数最小货币单位，中间计算与 IPC 传输都不许有浮点。`/ 100` **全仓库只应出现在前端的格式化函数里**。
 - **三元组自洽**（约束 7）：原币金额 + 本位币金额 + 当时汇率三者齐全；不满足返回 `data.money_inconsistent`。**原币 = 本位币时不设特例分支**（`rate_ppm = 1_000_000` 走同一条路）。任何 `SUM(base_amount_minor)` 必须带 `GROUP BY base_currency`，或带「结果集只含一种本位币」的显式断言。
 - **审计 append-only**（约束 8）：`UPDATE`/`DELETE` 针对 `audit_log` 即缺陷；agent 写草稿（`actor = "agent"`）与人工确认修改（`actor = "human"`）两条路径都要留痕。
-- **平台边界**（约束 1、2）：`TcpListener::bind`、`Command::new("node")`、应用自己发的 `reqwest`/`fetch`、任何遥测/崩溃上报/第三方分析 SDK ——各自都是缺陷。唯一允许 spawn 的子进程是 agent CLI。
+- **平台边界**（约束 1、2）：`TcpListener::bind`、`Command::new("node")`、应用自己发的 `reqwest`/`fetch`、任何遥测/崩溃上报/第三方分析 SDK ——各自都是缺陷。**允许 spawn 的子进程只有两类**：agent CLI（[ADR-0003](../../docs/adr/0003-agent-runtime-and-pluggable-backend.md)）与 v1.1 的 Swift sidecar（[ADR-0005](../../docs/adr/0005-voice-and-system-integration.md)）；其余一律是缺陷。
 - **无厂商凭证**（约束 11）：代码里出现 API key、endpoint、登录流程、读用户凭证文件（如 `~/.claude/.credentials.json`）即缺陷。上层只应依赖 `dyn AgentBackend` 这类接口，不直接依赖某个具体后端。
 - **控制流由代码决定**（约束 15）：`if agent_says("should_confirm")` 这类让模型决定业务动作的写法即缺陷。
 - **记忆存规则不存对话**（约束 14）：持久化原始对话历史即缺陷。
 
 ### 3. 隐私与日志（[ADR-0007](../../docs/adr/0007-local-observability-and-log-tiers.md)）
 
-账目细节 / 截图内容 / 商户名 / 金额落盘即缺陷——日志**只记形状不记内容**（`source_id = %id, draft_count = n`，不是 `{:?}` 整个 struct）。agent 子进程的 stdout/stderr 采集到内存环形缓冲，**不落盘**。
+**日志落盘是被批准的，分两级——「落盘」本身不是缺陷，「串级」才是。** 判据只有一条：**`trace` 级的写入路径上出现金额字段、`evidence_text` 或 prompt 文本即缺陷**（`tracing::info!("{:?}", tx)` 是典型），`trace` 只记形状（`source_id = %id, draft_count = n, elapsed_ms = ms`）。`debug` 级含完整账目细节与 prompt，这是它的用途，不报。
+
+另查四条：日志写在 `<数据目录>/logs/`（不在系统临时目录或主目录隐藏路径）；有保留期清理；`debug` 开关在 UI 上可见；**没有任何代码把日志内容发往网络**。细则见 [`.claude/rules/rust-tauri.md` §8](../rules/rust-tauri.md)。
 
 ### 4. 分层与契约
 
