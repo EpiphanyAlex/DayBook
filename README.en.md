@@ -8,7 +8,7 @@ It is not an expense tracker and not a to-do app. It is a **retroactive recorder
 
 > `daybook` is the accounting term for a day book: a chronological register of original vouchers. Read literally it is also "the book of days." One word covers both halves of the product — money and time — and it happens to describe the data model exactly: a single timeline of evidence-backed raw records, ordered by date.
 
-> **Note on language:** the design documents in this repository are written in Chinese. This file is the English mirror of [`README.md`](./README.md); every link below leads to a Chinese document.
+> **Note on language:** the design documents in this repository are written in Chinese. This file is the English mirror of [`README.md`](./README.md). Every link below leads to a Chinese document, with one exception — [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) is in English, and you may write the pull request body in either language.
 
 ---
 
@@ -93,6 +93,8 @@ The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-
 | Specs for individual capabilities | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | Implementation rules split by topic | [`.claude/rules/`](./.claude/rules/) |
 | "How is this feature actually implemented right now?" | [`.claude/features/`](./.claude/features/) |
+| Dev-time subagent roster (**not** the product runtime agent) | [`.claude/agents/README.md`](./.claude/agents/README.md) |
+| What a pull request must fill in (English skeleton; body in either language) | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) |
 
 **This project does not use tickets.** Humans write *what and why* (a sub-PRD), the agent produces *how* (plan mode), humans review the plan. Rationale and workflow: [`CLAUDE.md`](./CLAUDE.md) under「PRD 体系与工作流」(PRD system and workflow).
 
