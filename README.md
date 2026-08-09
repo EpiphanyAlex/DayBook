@@ -91,6 +91,8 @@ Daybook 的前提相反：**默认你是事后补的。**
 | 各能力的规格 | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | 按主题拆分的实现细则 | [`.claude/rules/`](./.claude/rules/) |
 | 「这个功能现在是怎么实现的」 | [`.claude/features/`](./.claude/features/) |
+| 开发期 subagent 分工（**不是**产品运行时的 agent） | [`.claude/agents/README.md`](./.claude/agents/README.md) |
+| 提 PR 要填什么 | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) |
 
 **本项目不用 ticket。** 人写「要什么和为什么」（sub-PRD），agent 出「怎么做」（plan 阶段），人审计划。理由与工作流见 [`CLAUDE.md`](./CLAUDE.md)「PRD 体系与工作流」。
 

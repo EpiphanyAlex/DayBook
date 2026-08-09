@@ -67,7 +67,7 @@
 
 **改了 [`README.md`](./README.md) 必须在同一个提交里同步 [`README.en.md`](./README.en.md)。** 增删章节、改结论、改链接、改表格行都算；纯中文措辞润色不影响事实时可略。中文是事实源，英文是镜像，两份冲突时以中文为准。**不同步即缺陷**——腐烂的英文版比没有英文版更糟：它会用过时的措辞冒充事实源，而唯一会读它的人恰好没有第二份可对照。
 
-这条规则由 `node scripts/check-readme-sync.mjs` 强制，不靠自觉：判据是 `README.md` 最后被改动的提交时间不得晚于 `README.en.md` 的。因此**同一个提交里改两份**是唯一顺畅的路径——补一个中文错别字也要把对应措辞带到英文版。
+这条规则由 `node scripts/check-readme-sync.mjs` 强制，不靠自觉：判据是**祖先关系**而非提交时间——从 HEAD 出发、不在 `README.en.md` 最后一次改动的历史里、且改动了 `README.md` 的提交，数量必须为 0（时间戳只到秒且会被 `git rebase` 重写，会产生假绿）。因此**同一个提交里改两份**是唯一顺畅的路径——补一个中文错别字也要把对应措辞带到英文版。
 
 **`.claude/rules/`** 是按主题拆分的实现细则，供 agent 按需加载。本文保持短，细则按需引用：
 
@@ -77,8 +77,11 @@
 | Rust / Tauri：分层、错误契约、MCP 工具面、SQLite | @.claude/rules/rust-tauri.md |
 | React / TypeScript：IPC 桥、审核界面键盘流、性能 | @.claude/rules/frontend.md |
 | 某个功能「现在是怎么实现的」 | @.claude/features/README.md |
+| 开发期 subagent 找谁干、边界在哪 | [`.claude/agents/README.md`](./.claude/agents/README.md) |
 
 **`.claude/features/`** 是**功能领域速查**——每个功能「现在是怎么实现的」，供 agent 接手时免去逆向阅读代码。功能实现后必须补上对应文件。
+
+**`.claude/agents/`** 是**开发期的 Claude Code subagent**（`architect` / `researcher` / `reviewer` / `backend` / `frontend` / `data-model` / `tester` / `prd-keeper` / `coordinator`）。**注意别与约束 10 混为一谈**：约束 10「单 agent + 多工具」管的是**产品运行时**的 agent 架构，本目录是**开发这个仓库时**的分工，两者只是同名。约束或 `.claude/rules/` 变了，同一个提交里把受影响的 agent 提示词一起改。
 
 ## PRD 体系与工作流
 

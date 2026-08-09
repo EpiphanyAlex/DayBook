@@ -66,6 +66,7 @@ Daybook 的 17 条不可协商约束（仓库根 CLAUDE.md）。
 
 - [ ] 文档：`node docs/prd/check-docs.mjs` 绿（改过 `docs/prd/` 时必跑）
 - [ ] 文档：`node scripts/check-links.mjs` 绿（改过任何 `.md` 时必跑；CI 对全部 PR 强制）
+- [ ] 文档：`node scripts/check-readme-sync.mjs` 绿 —— **改了 [`README.md`](../README.md) 必须在同一个提交里同步 [`README.en.md`](../README.en.md)**；中文是事实源，英文是镜像
 - [ ] 前端：`npm run lint` · `npm run typecheck` · `npm test` · `npm run build`
 - [ ] Rust：`cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test`
 - [ ] 本地跑得起来：`npm run tauri dev`

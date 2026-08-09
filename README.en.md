@@ -93,6 +93,8 @@ The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-
 | Specs for individual capabilities | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | Implementation rules split by topic | [`.claude/rules/`](./.claude/rules/) |
 | "How is this feature actually implemented right now?" | [`.claude/features/`](./.claude/features/) |
+| Dev-time subagent roster (**not** the product runtime agent) | [`.claude/agents/README.md`](./.claude/agents/README.md) |
+| What a pull request must fill in | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) |
 
 **This project does not use tickets.** Humans write *what and why* (a sub-PRD), the agent produces *how* (plan mode), humans review the plan. Rationale and workflow: [`CLAUDE.md`](./CLAUDE.md) under「PRD 体系与工作流」(PRD system and workflow).
 
