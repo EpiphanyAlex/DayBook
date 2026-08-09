@@ -39,5 +39,5 @@ Daybook（日簿）是一个 **macOS 本地优先的桌面应用**，帮用户�
 
 ## 写作与提交
 
-- 文档一律中文 Markdown。新增 ADR 用 `docs/adr/NNNN-slug.md`，至少含日期、状态、背景、决策、理由、后果。
-- 开 PR 套用 [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md)，其中 **Constraint check** 一节逐条对应 `CLAUDE.md` 的 17 条约束。
+- 文档一律中文 Markdown，**两处例外**（都因为仓库公开、是外部读者的第一接触面）：[`README.en.md`](./README.en.md) 与 [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) 的骨架。新增 ADR 用 `docs/adr/NNNN-slug.md`，至少含日期、状态、背景、决策、理由、后果。
+- 开 PR 套用 [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md)（骨架英文，**正文中英皆可**），其中 **Constraint check** 一节逐条对应 `CLAUDE.md` 的 17 条约束——以中文 `CLAUDE.md` 为准，模板里的英文只是转述。

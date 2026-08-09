@@ -63,7 +63,12 @@
 4. [`docs/CONTEXT.md`](./docs/CONTEXT.md)：当前术语。
 5. [`README.md`](./README.md)：导航与摘要；[`README.en.md`](./README.en.md) 是它的英文镜像。
 
-文档采用中文 Markdown，**唯一例外是 [`README.en.md`](./README.en.md)**——仓库公开，它是英文读者的唯一入口。新增 ADR 使用 `docs/adr/NNNN-slug.md`，至少包含日期、状态、背景、决策、理由和后果。
+文档采用中文 Markdown，**两处例外,都因为仓库公开、它们是外部读者的第一接触面**：
+
+1. [`README.en.md`](./README.en.md) —— 英文读者的唯一入口，[`README.md`](./README.md) 的镜像。
+2. [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) —— **模板骨架**（章节名、勾选项、注释）用英文，因为提 PR 是外部贡献者第一件要填的事。**PR 正文本身中英皆可。** 骨架里引用的约束仍以中文 [`CLAUDE.md`](./CLAUDE.md) 为准，英文只是转述。
+
+新增 ADR 使用 `docs/adr/NNNN-slug.md`，至少包含日期、状态、背景、决策、理由和后果。
 
 **改了 [`README.md`](./README.md) 必须在同一个提交里同步 [`README.en.md`](./README.en.md)。** 增删章节、改结论、改链接、改表格行都算；纯中文措辞润色不影响事实时可略。中文是事实源，英文是镜像，两份冲突时以中文为准。**不同步即缺陷**——腐烂的英文版比没有英文版更糟：它会用过时的措辞冒充事实源，而唯一会读它的人恰好没有第二份可对照。
 

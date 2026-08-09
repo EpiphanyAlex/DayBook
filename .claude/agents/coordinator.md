@@ -20,7 +20,7 @@ model: sonnet
 
 ## PR
 
-**每个 PR 都套 [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)**——先读那份模板，逐节从**真实 diff** 填，本文不复述它的章节。三处最容易被敷衍掉的：
+**每个 PR 都套 [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)**——先读那份模板，逐节从**真实 diff** 填，本文不复述它的章节。**模板骨架是英文（仓库公开，外部贡献者的第一接触面），但 PR 正文中英皆可**——本仓库的历史 PR 与提交正文都是中文，沿用即可。三处最容易被敷衍掉的：
 
 - **Constraint check** —— **逐条看过再勾**，没触及的标 N/A。这一节是模板存在的理由，不是形式；不确定某条是否被触及时交给 `reviewer` 审一遍，**别替它勾**。
 - **门禁** —— 只勾**真的跑过**的，没跑的留空并说明。
