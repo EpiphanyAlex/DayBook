@@ -49,10 +49,16 @@ sub-PRD 的「6. 验收标准」必须尽量是命令，不是散文（[`docs/pr
 
 - **走生产同一条路径**：起 MCP server、spawn agent CLI、落进临时数据目录、查表打分。**绝不直接调 Anthropic API**——那测的是另一个系统，没有我们的工具面、提示词模板与闸门，跑绿了不说明产品是对的。
 - **跑一轮 eval 要先说成本、等人批准**。20 个用例 ≈ 20 次真实导入的额度消耗，而额度是 [`docs/PRD.md`](../../docs/PRD.md) §12 登记的真实约束。**不自作主张跑，不自动触发，不进 CI。** 只在改提示词、换后端、发版前手动跑。
-- **eval 集不新建数据**：它是 `sources` × `draft_transactions` × `transactions` 三表 join 的一个视图——审核界面里用户的每一次纠正，天然就是一条标注好的样本。
-- **评分几乎全是代码型**：`amount_minor` / `currency` / `occurred_on` / `direction` **精确相等无容差**，条目数相等（多读、漏读都算错）。**不用 LLM-judge**，因此不需要校准 judge——这是「金额一律整数」的一个红利，别把它丢掉。`merchant` 的判据是待决项 R1，没定之前不要自己发明一个模糊匹配阈值。
-- **transcript 维度同样是代码型**：每条草稿的 `evidence_text` 必须是输入里真实出现过的子串；`report_source_total` 恒等于逐笔之和是**可疑信号**（说明它算了而不是抄了）；`audit_log` 里 `actor = "agent"` 的记录只许触及草稿表。
-- **输出逐条 diff 表，不输出一个百分比**。N = 20 时单条 = 5 个百分点，百分比门槛是噪声。任何一条从「过」变「不过」都要人看一眼。diff 表必须带**模型标识与后端标识**（`backend_id` / `model_id`），否则分不清「模型退步了」和「我改坏了提示词」。
+- **真值只有一个：`expected.json`**（来源级期望条目集合，每条带位置标识，[07 §3.2](../../docs/prd/07-eval.md)）。**`drafted_json` 是被评分的那一侧，不是真值**——把它当真值等于拿模型的答案当标准答案。它必须存在是另一件事：**别去读草稿行的当前值**，审核界面的行内编辑会就地改写它，用户把 1680 改回 168 之后，拿当前值算出来的错误率恒为零。
+- **先按位置对齐，再逐字段评分**（2026-08-10 改）：**两侧都按 `source_ordinal`** 排序（期望侧人工标注，预测侧由 agent 起草时必报——`file` 没有 OCR 也没有坐标，**位置算不出来只能问 agent 要**），做**保序序列对齐**，ordinal 相等即配对；未匹配的期望条目 = **漏读**，未匹配的草稿 = **多读**，匹配上的再逐字段独立比。
+  > ⚠️ **别用被评分的字段当匹配键。** 拿 `(occurred_on, amount_minor, currency)` 精确相等去配对，会让这三项的准确率**恒为 100%**（能配上的按定义全对），一个金额读错还会被记成「一漏一多」两个条目错误、同时丢掉那个字段错误本身。拿不到可靠位置时可以退回集合匹配，**但必须在 diff 表上标注「降级匹配、字段准确率不计入」**——降级要写在脸上。
+- **「条目数相等」不是判据**——漏一条同时多一条，条数一样对。要报的是 precision / recall 两个数。
+- **评分几乎全是代码型**：`amount_minor` / `currency` / `occurred_on` / `direction` **精确相等无容差**。**不用 LLM-judge**，因此不需要校准 judge——这是「金额一律整数」的一个红利，别把它丢掉。`merchant` 的判据是待决项 R1，没定之前不要自己发明一个模糊匹配阈值。
+- **transcript 维度同样是代码型**：`kind = utterance` 的草稿，`evidence_text` 必须是转写文本的真实子串（**`file` 来源不能这样断言——系统里没有 OCR，手里没有可比的真值文本**）；调过 `complete_source`；自报条目数与实际草稿数一致；`audit_log` 里 `actor = "agent"` 的记录只许触及草稿表。
+  > ⚠️ **别再写「`report_source_total` 恒等于逐笔之和是可疑信号」那条评分器**——它的方向是反的，已于 2026-08-10 从 [07 §3.3](../../docs/prd/07-eval.md) 删除。**正确解析的账单，逐笔之和本来就该等于它印着的合计**，那正是总额校验判 `passed` 的定义；按那条判据，校验通过反而最可疑。「抄的还是算的」在单次运行里不可判定，只能靠反事实（改图重跑），v1 不做，改由人工抽查 `reported_total_evidence_text` 是否真在原件上。
+- **关键用例跑 3 轮**（标记为 `flaky` 或曾出过错的），报「3 轮全过 / 部分过 / 全不过」，**不取平均**——agent 非确定性下单轮结果是一次采样。
+- **用例清单固定在 `fixtures/manifest.json`**，不是每次临时从库里挑 20 条——动态挑的话两轮结果不可比，而逐条 diff 的整套判定建立在可比之上。
+- **输出逐条 diff 表，不输出一个百分比**。N = 20 时单条 = 5 个百分点，百分比门槛是噪声。任何一条从「过」变「不过」都要人看一眼。diff 表必须带**模型标识、后端标识与 `prompt_hash`**（都在 `parse_attempts` 行上），否则分不清「模型退步了」和「我改坏了提示词」。
 - **检测不到可用 agent CLI 时非零退出并明确报原因**，**绝不静默降级为通过**。
 
 ### 回归夹具（[07 §3.6](../../docs/prd/07-eval.md)）
@@ -65,8 +71,11 @@ agent 是非确定性的，所以「复现一个 bug」**不能是「重新跑�
 fixtures/local/<date>-<slug>/
 ├── input.png | input.txt   截图原件，或 utterance 的转写文本
 ├── tool-calls.json         agent 那次调了哪些工具、每次的完整参数
-└── expected.json           人确认后的正确结果
+├── expected.json           该来源的期望条目集合
+└── env.json                重放所需的环境（2026-08-10 新增）
 ```
+
+**`env.json` 是「自包含」这个词的兑现**：只有前三样时重放的第一步就会报「来源不存在」——工具调用里带着 `source_id`，而库里没有那条 `sources` 行。它至少要含：初始 DB 状态（需预置的 `sources` 行、必要时的 `memory_rules`）· ID 映射 · 版本三元组（`tool_surface_version` / `app_version` / `user_version`）· 期望的中间状态（重放后该来源的 `state` 与总额校验结果）。**版本对不上时要明确报「夹具过期」，不是跑到一半报个别的错。**
 
 **重放跳过 agent CLI**，直接把 `tool-calls.json` 喂进系统。所以它测的不是模型，是——**当 agent 读错时，我们的代码有没有拦住**。一条「把 168 读成 1680」的夹具，断言是「总额交叉校验必须报警、批量确认必须被拒、`transactions` 保持为空」。谁把闸门改坏了，这条夹具立刻变红。
 
@@ -96,7 +105,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 npm run lint && npm run typecheck && npm test && npm run build
-node docs/prd/check-docs.mjs && node scripts/check-links.mjs && node scripts/check-readme-sync.mjs
+node docs/prd/check-docs.mjs && node scripts/check-links.mjs && node scripts/check-readme-sync.mjs && node scripts/check-spec-invariants.mjs
 ```
 
 **任一失败即红**（约束 16），没有「主要都过了」这种状态。

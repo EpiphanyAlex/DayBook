@@ -26,38 +26,94 @@ struct Transaction {
 ```
 
 ```typescript
-// ✅ 正确 —— 分支类型让「分」和「元」不可混用
+// ✅ 正确 —— 分支类型让「最小单位」和「主单位」不可混用
 type MinorUnits = number & { readonly __brand: 'MinorUnits' }
 
 function formatMoney(amount: MinorUnits, currency: string): string {
-  // 除法只允许出现在这里
-  return `${(amount / 100).toFixed(2)} ${currency}`
+  // 除法只允许出现在这里，且除数由币种决定
+  const exp = currencyExponent(currency)          // JPY→0 · AUD→2 · KWD→3
+  return `${(amount / 10 ** exp).toFixed(exp)} ${currency}`
 }
 
 // ❌ 错误
-const total = items.reduce((s, i) => s + i.amount / 100, 0)  // 浮点累加
+const total = items.reduce((s, i) => s + i.amount / 100, 0)  // 浮点累加 + 写死 100
 const amount = parseFloat(input)                              // 浮点入口
 ```
 
 **为什么是「禁止」而不是「不推荐」**：[总额交叉校验](../../docs/adr/0002-ai-never-writes-directly.md)是唯一能在无人工介入下捕获错误的机制，它**依赖精确相等**。浮点让这个唯一的自动纠错机制失效。
 
-**唯一允许除法的地方**：显示层的格式化函数。它应该是全仓库唯一一处 `/ 100`。
+### 1.1 「最小货币单位」不等于「分」
+
+**不是所有货币都是两位小数**（[ADR-0004 §2](../../docs/adr/0004-data-model-sqlite-integer-money.md)、[`docs/prd/00-foundation.md` §3.4](../../docs/prd/00-foundation.md)「币种精度」）：ISO 4217 的 minor unit exponent 多数是 2，但 **JPY / KRW 是 0**、**KWD / BHD / JOD 是 3**。
+
+```rust
+// ✅ 正确 —— exponent 由币种决定，不入库；未知币种是错误，不是待猜的值
+fn currency_exponent(code: &str) -> Result<u32, AppError> { /* ISO 4217 常量表；表外 → data.unsupported_currency */ }
+
+// ❌ 错误 —— 写死两位小数
+const MINOR_PER_MAJOR: i64 = 100;
+format!("{}.{:02}", amount_minor / 100, amount_minor % 100)
+
+// ❌ 也错 —— 未知币种回退到 2 并只记一条告警
+fn currency_exponent(code: &str) -> u32 { TABLE.get(code).copied().unwrap_or(2) }
+//    告警落在日志里没人看，而那条金额已经带着错误的 exponent 进了草稿、过了总额校验、
+//    被人一眼扫过去确认入库 ——「有记录但没拦住」和「没记录」对用户是同一件事
+```
+
+**`amount_minor` 单看没有意义，必须和 `currency` 一起读。** 写死 `/ 100` 不只是显示难看——**在 JPY 上会把 9700 日元显示成 97.00 日元**。
+
+**唯一允许除法的地方**：显示层的格式化函数，且除数是 `10^exponent`。**全仓库不应存在写死的 `/ 100`。**
+
+### 1.2 金额过 IPC 是十进制字符串
+
+```rust
+// ✅ 正确 —— i64 序列化成字符串，超范围在序列化前就拒绝
+#[derive(Serialize)]
+struct DraftDto {
+    #[serde(serialize_with = "money_as_string")]   // "168" / "-4500"
+    amount_minor: i64,
+    // …
+}
+
+// ❌ 错误 —— JSON 数字，JSON.parse 会把超 2^53 的值静默舍入
+struct DraftDto { amount_minor: i64 }   // serde 默认序列化成数字
+```
+
+```typescript
+// ✅ 正确 —— 解析与校验都只在 call<T> 里做一次
+const v = Number(raw)
+if (!Number.isSafeInteger(v) || Math.abs(v) > 1e15) throw appError('data.amount_out_of_range')
+
+// ❌ 错误 —— 组件里第二次解析，或干脆不校验
+const amount = Number(dto.amountMinor)
+```
+
+**适用 `amount_minor` · `base_amount_minor` · `rate_ppm` · `reported_total_minor`**，同一条规则不留例外。范围不变式 `|v| ≤ 10^15`，**IPC 两侧各校验一次**。
+
+**为什么不是全链路 `bigint`**：JS 的 `number` 对 `≤ 2^53` 的整数是精确的，而前端本来就不做金额累加（§6 的汇总一律由 Rust 给出）。字符串边界要挡的是**唯一一条静默路径**——`JSON.parse` 把 agent 读错成 20 位的数字悄悄舍入。完整论证与迁移后路见 [`docs/prd/00-foundation.md` §3.4](../../docs/prd/00-foundation.md)「金额怎么过 IPC」。
 
 ## 2. 汇率：定点整数
 
+**`rate_ppm` 是「1 主单位原币 = 多少主单位本位币」× 1_000_000**——就是账单上印的、用户会手填的那个数。因此**换算公式必须带两边的 exponent**，不能直接乘。
+
 ```rust
 // ✅ 正确
-const RATE_SCALE: i64 = 1_000_000;
+const RATE_SCALE: i128 = 1_000_000;
 
-fn to_base(amount_minor: i64, rate_ppm: i64) -> i64 {
+fn to_base(amount_minor: i64, rate_ppm: i64, from: &str, to: &str) -> i64 {
     // 先乘后除，i128 中间量防溢出，banker's rounding
-    round_half_even_i128((amount_minor as i128) * (rate_ppm as i128), RATE_SCALE as i128)
+    let num = (amount_minor as i128) * (rate_ppm as i128) * 10_i128.pow(currency_exponent(to));
+    let den = RATE_SCALE * 10_i128.pow(currency_exponent(from));
+    round_half_even_i128(num, den)
 }
 
 // ❌ 错误
-fn to_base(amount: f64, rate: f64) -> f64 { amount * rate }   // 浮点
-fn to_base(a: i64, rate_ppm: i64) -> i64 { a * rate_ppm / 1_000_000 }  // 截断而非舍入，且 i64 可能溢出
+fn to_base(amount: f64, rate: f64) -> f64 { amount * rate }             // 浮点
+fn to_base(a: i64, rate_ppm: i64) -> i64 { a * rate_ppm / 1_000_000 }   // 截断而非舍入，i64 可能溢出，
+                                                                        // 且漏了 exponent：AUD→JPY 结果大 100 倍
 ```
+
+**两边 exponent 相同时（绝大多数情况）退化成 `amount_minor × rate_ppm / 1_000_000`**——所以带上 exponent 项**不会改变现有的任何一个正确结果**，只会修好 JPY / KWD 那些错的。
 
 **原币与本位币相同时 `rate_ppm = 1_000_000`，走同一条代码路径，不设特例分支。**
 
@@ -95,7 +151,7 @@ tx.base_amount_minor = to_base(tx.amount_minor, tx.rate_ppm);  // rate_ppm 为 1
 ```rust
 // ✅ 正确
 fn validate(tx: &Transaction) -> Result<(), AppError> {
-    let expected = to_base(tx.amount_minor, tx.rate_ppm);
+    let expected = to_base(tx.amount_minor, tx.rate_ppm, &tx.currency, &tx.base_currency);
     if tx.base_amount_minor != expected {
         return Err(AppError::money_inconsistent(expected, tx.base_amount_minor));
     }
@@ -125,6 +181,21 @@ async fn write_file(path: String, ...)    // 通用文件写入，绝对禁止
 
 **判据**：把工具清单列出来，问「这个工具能不能让一条未经人确认的数据出现在 `transactions` 或 `items` 里？」——能，就是缺陷。
 
+> ⚠️ **这个判据只覆盖了一半**（2026-08-10 补）：它问的是**我们注册的**工具，而 agent CLI 自带内置工具（执行命令、读写文件），一条 `sqlite3 daybook.db "INSERT INTO transactions …"` 就绕过全部四道闸门，**而上面这份清单照样是干净的**。另一半在 [`rust-tauri.md` §5.1](./rust-tauri.md)「密封启动配置」与 [`docs/prd/01-agent-runtime.md` §3.7](../../docs/prd/01-agent-runtime.md)：**子进程必须密封启动，且有效工具集要实测**。两半缺一，另一半就是装饰。
+
+### 4.1 agent 的原始起草值不可变
+
+```rust
+// ✅ 正确 —— 起草时由 Rust 侧写一次快照，此后永不更新
+let drafted_json = serde_json::to_string(&args)?;
+store.insert_draft(args, drafted_json)?;
+
+// ❌ 错误 —— 人的编辑覆盖掉「AI 当初写的是什么」
+"UPDATE draft_transactions SET amount_minor = ?1, drafted_json = ?2 WHERE id = ?3"
+```
+
+**审核界面的行内编辑改业务列，不改 `drafted_json`。** 它同时是审计的「当初起草成什么样」与 [`docs/prd/07-eval.md` §3.2](../../docs/prd/07-eval.md) 的 eval 真值——**用户把 1680 改回 168 之后，如果草稿行被就地改写，错误率的度量恒为零**。约束强度与 `audit_log` 的 append-only 同级（[ADR-0002](../../docs/adr/0002-ai-never-writes-directly.md) 硬性要求 7）。
+
 ## 5. 证据链：草稿必带来源
 
 ```rust
@@ -135,6 +206,12 @@ struct DraftTransactionArgs {
     // …
 }
 ```
+
+**`evidence_text` 是抽取声明，不是独立证据**（2026-08-10，[ADR-0002 闸门 2](../../docs/adr/0002-ai-never-writes-directly.md)）。它和被核对的金额**出自同一次模型输出**——模型把 168 读成 1680 时，也会把 `evidence_text` 写成「1680」，两者自洽却一起错。
+
+- **证据是不可变原件**（截图字节 / 转写文本），`evidence_text` 只是「原件上的哪个位置」的指针
+- **审核界面必须让原件本身可见**，不能只渲染 `evidence_text` 那一列——否则用户核对的是模型和它自己（[`frontend.md` §5](./frontend.md)）
+- 因此**不要在代码或注释里把 `evidence_text` 叫「原文」**，那个词属于原件
 
 ```sql
 -- ✅ 正确 —— 数据层非空约束，不依赖应用层自觉
@@ -153,12 +230,15 @@ CREATE TABLE draft_transactions (
 ## 6. 总额交叉校验不留旁路
 
 ```rust
-// ✅ 正确
-fn confirm_batch(&self, source_id: Uuid, ids: &[Uuid]) -> Result<(), AppError> {
-    match self.total_check(source_id)? {
-        TotalCheck::Passed => self.do_confirm(ids),
-        TotalCheck::Failed { .. } => Err(AppError::total_mismatch()),
-        TotalCheck::Unavailable => Err(AppError::total_unavailable()),  // 不伪装成通过
+// ✅ 正确 —— 放行看的是确认策略，不是对账状态
+fn confirm_batch(&self, attempt_id: Uuid, ids: &[Uuid]) -> Result<(), AppError> {
+    let check = self.total_check(attempt_id)?;
+    match check.confirmation_policy {
+        Policy::ReconciledBatch | Policy::UserAttestedBatch => self.do_confirm(ids),
+        Policy::SingleOnly => Err(match check.reconciliation_status {
+            Status::Failed { .. } => AppError::total_mismatch(),
+            _ => AppError::total_unavailable(),          // 不伪装成通过
+        }),
     }
 }
 
@@ -166,7 +246,28 @@ fn confirm_batch(&self, source_id: Uuid, ids: &[Uuid]) -> Result<(), AppError> {
 fn confirm_batch(&self, ids: &[Uuid], force: bool) -> Result<(), AppError> {
     if !force && self.total_check(...)? != Passed { /* … */ }   // force 就是旁路
 }
+fn confirm_batch(...) { if status == NotApplicable { self.do_confirm(ids) } }
+// ↑ 也是错的：把「能不能对账」当成了「能不能批量确认」，两者是两个维度
 ```
+
+**`NotApplicable` 与 `UserAttestedBatch` 只属于 `kind = utterance`**（[`docs/prd/03-review.md` §3.3](../../docs/prd/03-review.md)）。`kind = file` 取不到合计是**信号**，必须落在 `Unavailable` + `SingleOnly`——把它也放行等于闸门 3 白做。
+
+### 6.1 校验的入参是 `attempt_id`，求和范围是「该次尝试的全部未作废草稿」
+
+```rust
+// ❌ 错误 —— 逐条确认掉一条后，剩余和永远小于合计，该来源再也回不到 passed
+"SELECT ... FROM draft_transactions WHERE source_id = ?1 AND consumed_at IS NULL"
+
+// ❌ 也错 —— 按来源求和，重试后两次尝试的草稿会混在一起
+"SELECT ... FROM draft_transactions WHERE source_id = ?1 AND voided_at IS NULL"
+
+// ✅ 正确 —— 校验是「这次尝试的解析完整性」，确认动作不改变它
+"SELECT ... FROM draft_transactions WHERE attempt_id = ?1 AND voided_at IS NULL"
+```
+
+**总额校验回答的是「agent 这一次从来源读出来的东西，对不对得上它这一次报告的合计」**，与「这一批要确认哪些」正交。合计存在 `parse_attempts.reported_total_*`——**它和草稿一样是那次尝试的输出，不是来源的属性**（[`docs/prd/00-foundation.md` §3.6](../../docs/prd/00-foundation.md)）。
+
+**求和还要按 `reported_total_kind` 选等式**（`expense_total` / `income_total` / `net_change`），并在存在 `direction = transfer` 的条目时返回 `Unavailable`——转账在 schema 里没有符号，硬算等于编一个。
 
 ## 7. 审计日志 append-only
 
@@ -205,6 +306,11 @@ occurred_on: DateTime<Utc>,        // 业务日期不该带时区：「8 月 3 �
 rg -n 'f32|f64' src-tauri/src                                    # 金额模块应无命中
 rg -n 'SUM\(base_amount_minor\)' src-tauri/src                   # 每处都应带 GROUP BY base_currency
 rg -n 'UPDATE\s+audit_log|DELETE\s+FROM\s+audit_log' src-tauri/src   # 应无命中
+rg -n 'UPDATE[^;]*drafted_json' src-tauri/src                    # 应无命中（§4.1 起草值不可变）
 rg -n 'execute_sql|raw_query|write_file' src-tauri/src/mcp        # 应无命中
-rg -n '/ 100|\* 100' src/                                         # 前端只应命中格式化函数
+rg -n '/ 100|\* 100|100\.0' src-tauri/src src                     # 只应命中 exponent 表实现（§1.1）
+rg -n 'consumed_at IS NULL' src-tauri/src/domain                  # 总额校验路径上应无命中（§6.1）
+rg -n 'declared_total' src-tauri/src                             # 应无命中——已改名 reported_total_* 并移到 parse_attempts
+rg -n 'unwrap_or\(2\)|unwrap_or_default' src-tauri/src            # exponent 查表处不应命中（未知币种要报错）
+rg -n 'amount_minor.*: i64' src-tauri/src/commands                # DTO 上应带字符串序列化标注（§1.2）
 ```

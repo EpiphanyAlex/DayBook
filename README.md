@@ -23,6 +23,7 @@
 node docs/prd/check-docs.mjs        # docs/prd/ 的 frontmatter + 链接
 node scripts/check-links.mjs        # 全仓库 Markdown 链接
 node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
+node scripts/check-spec-invariants.mjs  # 现行章节不得残留已被推翻的结论
 ```
 
 前端与 Rust 的命令要等 [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) 落地后才存在，清单见 [`CLAUDE.md`](./CLAUDE.md)「常用命令」。
@@ -77,10 +78,10 @@ Daybook 的前提相反：**默认你是事后补的。**
 
 | 闸门 | 作用 |
 |---|---|
-| **草稿区** | AI 只写 `draft_*` 表，人确认才进事实表 |
-| **证据链** | 每条草稿挂「来自哪张截图（或哪段口述）、原文是哪一行」——把「信任 AI」换成「扫一眼原文」 |
-| **总额交叉校验** | 拆出的 N 笔加起来必须对上来源自己印着的合计，对不上自己报警 |
-| **append-only 审计日志** | 每次 AI 写入、每次人工修改都留痕 |
+| **草稿区** | AI 只写 `draft_*` 表，人确认才进事实表。子进程以密封配置启动，**它实际拿得到的工具**在下发任务前实测 |
+| **证据链** | 每条草稿挂「来自哪张截图（或哪段口述）、模型说它读的是哪一段」——审核时**并排给你看的是原件**，把「信任 AI」换成「扫一眼原件」 |
+| **总额交叉校验** | 拆出的 N 笔加起来必须对上来源自己印着的合计，对不上自己报警。来源本来就没有合计时（比如你说的一段话），换成「整段原文并排 + 你按一次确认」那道闸门 |
+| **append-only 审计日志** | 每次 AI 写入、每次人工修改都留痕；**AI 最初写的那一版永远保留** |
 
 ---
 

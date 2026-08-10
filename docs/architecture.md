@@ -2,8 +2,8 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-09
-version: v0.4
+date: 2026-08-10
+version: v0.6
 ---
 
 # 系统架构基线
@@ -68,6 +68,9 @@ version: v0.4
 2. **`domain::confirm` 不被任何 MCP 工具调用。** 确认动作只能由 Tauri command 触发。
 3. **不存在通用「执行任意 SQL」或「任意文件写入」类工具**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §3）。
 4. **两条路径都写 `audit_log`**，且该表 append-only。
+5. **agent 子进程以密封配置启动，有效工具集在下发任务前实测**（2026-08-10 新增，[`01-agent-runtime` §3.7](./prd/01-agent-runtime.md)）。前四条约束的都是**我们注册的**工具面，而后端是通用编码 agent——它自带的执行命令与文件读写工具能直接打开 SQLite 写事实表，**上面四条一条都拦不住，而它们的测试照样全绿**。本条是路径 A 在进程层的边界。
+6. **agent 的原始起草值不可变**（`drafted_json`）。人在审核界面的编辑改业务列，不动它——否则「AI 当初写的是什么」在用户改完的一瞬间就没了。
+7. **原件属于来源，读出来的东西属于尝试**：草稿、声明合计、条目数、未解析说明全部挂在 `parse_attempts` 上，总额校验的入参是 `attempt_id`。放在 `sources` 上会让它们与产出它们的那次解析脱钩（超时后合计留存、重试后两次输出混在一起）。
 
 ## 4. 一次导入的完整数据流（M0 的骨架）
 
@@ -76,26 +79,34 @@ version: v0.4
       ↓
 2. store：文件落进证据目录 + 写 sources 表（原件、哈希、导入时间）
       ↓
-3. agent launcher：spawn agent CLI，告知「有一个新 source 待解析」
+3. agent launcher：写一行 parse_attempts → 以密封配置 spawn agent CLI
+      → 探测有效工具集，与注册表不相等则拒绝下发（agent.tool_surface_unsealed）
+      → 告知「有一个新 source 待解析」
       ↓
 4. agent：经 MCP 工具读取该 source →（视觉解析）→ 逐条调用起草工具
       ↓
 5. MCP 工具 → domain::draft → draft_transactions
-      每条强制带 source_id + 原文片段，否则工具直接拒绝
+      每条强制带 source_id + evidence_text，否则工具直接拒绝
+      同时由 Rust 侧写下 drafted_json（不可变起草快照）
       ↓
-6. domain：对该 source 做总额交叉校验，结果落在 source 上
+6. agent 调 complete_source 声明读完了（条目数 + 未解析区域）
+      没调 ⇒ 协议失败，source 转 failed，本次草稿作废，不判为 parsed
       ↓
-7. UI：审核界面拉取草稿 + 原文并排显示，异常项前置
+7. domain：对该 attempt 做总额交叉校验
+      求和范围 = 该次尝试全部未作废草稿，与「要确认哪些」无关
+      返回 reconciliation_status + confirmation_policy 两个字段
       ↓
-8. 用户逐条/批量确认 → Tauri command → domain::confirm
+8. UI：审核界面拉取草稿 + 来源原件并排显示，异常项前置
+      ↓
+9. 用户逐条/批量确认 → Tauri command → domain::confirm
       校验不过 ⇒ 拒绝批量入库
       ↓
-9. store：写 transactions + audit_log；草稿标记已消费
+10. store：写 transactions + audit_log；草稿标记已消费（drafted_json 不动）
       ↓
-10. 用户的每次修改 → 记忆规则（商户→分类映射等）
+11. 用户的每次修改 → 记忆规则（商户→分类映射等）
 ```
 
-**控制流由代码决定**：第 6、8、9 步的判断全是确定性代码。**LLM 只在第 4 步出现**，做抽取、解析、分类与起草，不做最终业务决策（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §5）。
+**控制流由代码决定**：第 3、6、7、9、10 步的判断全是确定性代码。**LLM 只在第 4 步出现**，做抽取、解析、分类与起草，不做最终业务决策（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §5）。第 6 步是 agent 的**声明**，不是它的决定——判不判 `parsed` 仍归代码。
 
 ## 5. 存储布局
 
@@ -110,13 +121,15 @@ version: v0.4
 ## 6. 前后端边界
 
 - **唯一通道是 Tauri command**。不创建 Electron、内嵌 Node.js 本地服务或 `localhost` HTTP API（[ADR-0001](./adr/0001-local-first-desktop-platform.md)）。
-- **IPC 上传的金额是整数**，不是格式化字符串、不是浮点。
+- **IPC 上的金额是「最小单位整数的十进制字符串」**——不是格式化字符串（`"1,234.50"`）、不是 JSON 数字（`JSON.parse` 会静默舍入超 `2^53` 的值）。解析与范围校验只在桥接层做一次（[`docs/prd/00-foundation.md` §3.4](./prd/00-foundation.md)「金额怎么过 IPC」）。
 - 错误走**统一错误契约**（形状与错误码集由 [`docs/prd/00-foundation.md`](./prd/00-foundation.md) 定义），前端不解析错误文案做分支。
 - 前端不含业务规则——总额校验、状态机、确认条件全在 Rust 侧。
 
 ## 7. Agent 运行时边界
 
 - MCP server 走 **stdio**、用 **`rmcp`**、**不开端口**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。⚠️ **它跑在哪个进程里尚未定**——原文的「在 Tauri 主进程内起」于 2026-08-09 挂起（与「agent CLI 以 stdio 连上来」互斥），候选方案与 spike 见 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md)。
+- **子进程以密封配置启动，有效工具集在下发任务前实测**（[`01-agent-runtime` §3.7](./prd/01-agent-runtime.md)）——**「我们暴露了什么」不等于「它实际拿得到什么」**，这是 §3 结构性保证第 5 条的落点。
+- **来源内容是不可信输入**：截图与口述可能携带指令，提示词显式声明它们是数据不是指令；爆炸半径由四道闸门限死在「产出一批错的草稿」（[`01-agent-runtime` §3.8](./prd/01-agent-runtime.md)）。
 - **单 agent + 多工具**，不按业务领域拆。子 agent 只用于**上下文隔离**（如解析超长截图），不用于业务分工。
 - **后端可插拔**：agent launcher 通过接口访问后端，v1 只实现 Claude Code，接口从第一天存在。
 - **应用不打包任何厂商凭证、不提供第三方登录、不代理厂商鉴权。**
@@ -138,6 +151,8 @@ version: v0.4
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.6 | 2026-08-10 | 随[`docs/PRD.md` v0.10](./PRD.md) 第三轮同步：§3 结构性保证增第 7 条「**原件属于来源，读出来的东西属于尝试**」；§4 第 7 步的总额校验改为按 `attempt_id`、返回两个字段；§6 的 IPC 金额表示改为十进制字符串 |
+| v0.5 | 2026-08-10 | 随[`docs/PRD.md` v0.9](./PRD.md) 第二轮文档审查同步：§3 **结构性保证由四条增至六条**——新增「子进程密封启动 + 有效工具集实测」（前四条只约束我们注册的工具面，而通用编码 agent 自带的能力可直接绕过）与「agent 原始起草值不可变」；§4 数据流由 10 步扩为 11 步，补 `parse_attempts` 落行、工具集探测、`complete_source` 完成协议、`drafted_json`，并写明总额校验的求和范围与「要确认哪些」无关；§7 补密封配置与来源内容不可信两条。**组件职责与两条写入路径的形状未变** |
 | v0.4 | 2026-08-09 | §7 与 §1 结构图 **MCP server 的进程归属挂起**——「在 Tauri 主进程内起」与「agent CLI 以 stdio 连上来」互斥，改由 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md) 的 spike 决定；stdio、`rmcp`、不开端口三条不变。结构图里 MCP server 相应从「Tauri 主进程」框内移出，标注「进程归属待定」。同步 [ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) |
 | v0.3 | 2026-08-08 | 公开仓库去个人化：§2「harness」澄清**去掉外部参考仓库的出处从句，把界定直接写出**（结论不变）；本表去掉工具与会话指代；`owner` 改为 `@maintainer` |
 | v0.2 | 2026-08-08 | 设计评审回流：**未决 A3 关闭**（记忆规则改由 agent 经 `query_memory` 主动查，domain 只标记冲突不覆盖分类，见 [06 §3.4](./prd/06-memory.md)）；§2 补一段澄清「harness」在本项目指什么及它的规格散落在哪三处 |

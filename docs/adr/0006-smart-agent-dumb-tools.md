@@ -37,7 +37,7 @@
 ### 归工具与数据层的（不可移除）
 
 - **参数校验**：`draft_transaction` 缺 `source_id` 或 `evidence_text` → 拒绝（`agent.tool_rejected`）
-- **数据层约束**：草稿表的 `source_id` / `evidence_text` 为 `NOT NULL`；三元组与 `declared_total_*` 的 all-or-nothing CHECK
+- **数据层约束**：草稿表的 `source_id` / `evidence_text` 为 `NOT NULL`；三元组与 `parse_attempts.reported_total_*` 的 all-or-nothing CHECK
 - **写入范围锁死**：工具注册时声明写入目标表集合；与事实表的交集必须为空
 - **读取范围锁死**：只读 ≠ 无限读（见下）
 - **闸门**：草稿区隔离、证据链非空、总额校验无旁路、审计 append-only

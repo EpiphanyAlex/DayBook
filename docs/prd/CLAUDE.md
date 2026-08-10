@@ -93,7 +93,7 @@ agent 的实施计划是一次性的，不进 git。但 planning 或实现过程
 
 ## 交付自检（完成任何 docs/prd 写作后必做）
 
-1. 跑机械检查（frontmatter 完整性 + 相对链接可达）：
+1. 跑机械检查（frontmatter 完整性 + 相对链接可达 + 规格不变式）：
 
    ```bash
    node docs/prd/check-docs.mjs
@@ -112,7 +112,17 @@ agent 的实施计划是一次性的，不进 git。但 planning 或实现过程
    - **做什么**：同样的链接规则（「待建」豁免、http/mailto 跳过、纯 `#锚点` 不查），但扫的是仓库全部 `.md`；额外把 `file://` 绝对路径判为错误。
    - **为什么要两条**：`check-docs.mjs` 只扫 `docs/prd/`。曾有两处失效链接正因不在本目录下而漏网——`.claude/features/README.md` 的模板占位路径，与 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) 里一条 `file://` 本机绝对路径。
 
-   （两条均由 [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上强制执行，靠退出码报成败；本地交付前先自己跑一遍，别把红推上去。）
+   再跑规格不变式检查——**上面两条查不了「这句话和上周拍的决定相反」**：
+
+   ```bash
+   node scripts/check-spec-invariants.mjs
+   ```
+
+   - **做什么**：把几条最容易复发的旧措辞列成禁用表（`declared_total_*`、「口述合计恒为空」、「`not_applicable` 放行批量」等），在**现行章节**里出现就红。「变更记录」与「回流记录」整段跳过；现行正文确需引用旧措辞时在行尾加 `<!-- legacy -->`。
+   - **为什么要第三条**：硬规则 5（跨文档一致性）此前完全靠人记得 grep。**一次「口述合计」的改定之后，前两条全绿而七处文档仍在说旧结论**——其中一处在 agent 提示词里。**这条把那一步从自觉变成会红。**
+   - **改了共享决定就该往里加一条**：新规则要能说出「它防的是哪一次真实回退」，说不出来的不加。
+
+   （三条均由 [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上强制执行，靠退出码报成败；本地交付前先自己跑一遍，别把红推上去。）
 
 2. 人工过一遍**悬空指称**（机器查不了语义）：文中每个「这 / 该 / 两份 / 另一个 / 上述」，指称对象是否已在**本句或本行**点名？每个从对话里搬来的结论，是否带了出处？
 
