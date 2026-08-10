@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # 刻意不装依赖：两个脚本零依赖、只用 node: 内置模块，
+      # 刻意不装依赖：四个脚本零依赖、只用 node: 内置模块，
       # 因此不需要 package.json / lockfile（仓库目前也还没有）。
 
       - name: docs/prd 自检（frontmatter + 链接）
@@ -44,6 +44,9 @@ jobs:
 
       - name: README 中英同步检查
         run: node scripts/check-readme-sync.mjs
+
+      - name: 规格不变式检查（决策漂移）
+        run: node scripts/check-spec-invariants.mjs
 
 # ── 待建：00 基础设施 落地后在此并列增加两个 job ──────────────────
 #

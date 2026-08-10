@@ -2,8 +2,8 @@
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
 status: ready
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.5
+date: 2026-08-10
+version: v0.8
 ---
 
 # 02 · 导入 Ingest
@@ -58,14 +58,23 @@ version: v0.5
 - 输入是一个多行文本框。**语音由 macOS 系统听写完成**（用户在框内连按两下 `Fn`），应用零代码、音频不出本机（[ADR-0005 §1](../adr/0005-voice-and-system-integration.md)）
 - **转写文本落盘成 `.txt`**，与截图同等对待 → `evidence_relpath` 非空，闸门 2 的实现路径对两种来源完全一致
 - 每条草稿的 `evidence_text` 是**这段话里对应的那个片段**（「今天吃饭 180」这半句），不是整段
-- **幂等仍以内容哈希为准**：同一段话说两次判为重复，返回已存在的 `source_id`
-- **`declared_total_*` 恒为空** → 总额校验恒为 `unavailable`。**闸门 3 对语音天然失效**，`03` 会把这类草稿在异常前置里单独提一档
+- **幂等靠一次提交一个令牌，不靠内容哈希**（2026-08-10 改定，见 §3.2）：隔天再说同样一句话是**新的一笔**，不是重复
+- **`reported_total_*` 通常为空** → 对账结果 **`not_applicable`**（2026-08-10 改，此前写 `unavailable`）；**用户自己说出「总共 100」时照常对账**，结果是 `passed` / `failed`（[00 地基 §3.6](./00-foundation.md)「来源不等于文件」第 2 条）。**两种情况下确认策略都是 `user_attested_batch`**——闸门 3 之外另有「整段原文 + 全部拆分结果并排 + 一次人工确认」那道（[03 审核 §3.3](./03-review.md)）；`03` 仍会把这类草稿在异常前置里单独提一档
 - **M0 只记交易**：`draft_items` 是 M3 的表，所以 agent 遇到事项类内容（「明天交房租」）**必须明确回一句「这条我现在还记不了」**，不得静默丢弃（[`docs/PRD.md` §9.2](../PRD.md)）
 
 ### 3.2 来源身份与幂等
 
-- 导入时计算文件内容的 **SHA-256**，存 `sources.content_hash`，该列**唯一**
-- **幂等以内容为准，不以文件名为准**——用户从不同 app 导出的同一张图文件名会不同
+**两种来源，两把幂等键**（2026-08-10 改定，[00 地基 §3.6](./00-foundation.md)「口述的幂等键不是内容哈希」）：
+
+| `kind` | 幂等键 | 重复的含义 |
+|---|---|---|
+| `file` | **内容 SHA-256**（`content_hash`，部分唯一索引） | 同一张图导两次确实是同一份证据 |
+| `utterance` | **一次提交一个令牌**（`idempotency_key`，前端生成） | 同一次提交的重试 / 双击 / 崩溃重放 |
+
+- 文件导入时计算内容的 **SHA-256**，存 `sources.content_hash`
+- **文件的幂等以内容为准，不以文件名为准**——用户从不同 app 导出的同一张图文件名会不同
+- **口述不能用内容哈希去重。** 本节 v0.4–v0.5 曾把「同一段话说两次判为重复」写成刻意设计，理由是「用户重说一遍通常意味着他以为上次没记上」。**那个理由只在几分钟的尺度上成立**：连续两天各说一句「今天咖啡 5 元」文本逐字相同 → 第二笔被判重复 → **一笔真实交易静默消失**，而用户看到的提示是「这段已经导入过」，他不会去追。**丢一笔真实交易，比多一批可以一键丢弃的草稿严重得多**
+- **文本重复只提示，不阻止**：新来源与既有 `utterance` 文本相同时，UI 提示「你之前也说过同样的话」并列出那一条，**由用户决定**（判断留给人，[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）
 
 **重复导入的返回契约**（2026-08-07 M0 开工评审补定——原文只说「返回已存在的 `source_id` 并在 UI 告知」，没说是成功还是错误，前后端会各按各的理解写）：
 
@@ -95,13 +104,15 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 |---|---|
 | `imported` | 文件已落盘、已入库，尚未解析 |
 | `parsing` | agent 子进程正在处理 |
-| `parsed` | 解析完成，草稿已生成，等待人工审核 |
-| `failed` | 解析失败或超时；**该会话的草稿已全部作废**（[01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿性作废）。失败原因记在 `sources.parse_error_code` |
+| `parsed` | **agent 调过 `complete_source` 且进程正常退出**，草稿已生成，等待人工审核 |
+| `failed` | 解析失败 / 超时 / 取消 / 中断 / **协议失败**；**该次尝试的草稿已全部作废**（[01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿性作废，置 `voided_at` 不删行）。失败原因记在 `sources.parse_error_code` |
 | `reviewed` | 该来源的全部草稿都已被确认或丢弃 |
+
+> **`parsed` 的判据由「退出码 0」改为「调过 `complete_source`」**（2026-08-10，[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。旧判据下，agent 读了 12 笔里的 9 笔然后正常收工，退出码同样是 0——**静默漏读被判为解析成功**。现在这种情况走 `failed` + `agent.protocol_violation`：我们不知道它是读完了还是走了一半，而**「不知道」不能算通过**。
 
 **取值集与字段**：本表即 `sources.state` 的权威取值集，字段定义在 [00 地基 §3.6](./00-foundation.md)。
 
-**状态转移由 Rust 侧代码执行，agent 无法改状态**——工具面里没有改状态的工具，且 agent 对 `sources` 的写入权限在数据层收窄到 `declared_total_*` 三列（[00 地基 §3.6](./00-foundation.md)「列级写入权限」、[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。非法转移返回 `ingest.invalid_state_transition`。
+**状态转移由 Rust 侧代码执行，agent 无法改状态**——工具面里没有改状态的工具，且 agent 对 `sources` 无任何写入权限，对 `parse_attempts` 也只收窄到 `reported_total_*` 等六列（[00 地基 §3.6](./00-foundation.md)「列级写入权限」、[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。非法转移返回 `ingest.invalid_state_transition`。
 
 #### 启动时的崩溃恢复扫描（2026-08-08 设计评审新增）
 
@@ -109,19 +120,48 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 **原则：任务恢复不依赖内存中的 Promise**——应用重启后，未完成的任务必须能从持久化状态里重新认出来。完整做法是持久化任务队列；v1 规模下不需要那么重，一次启动扫描就够：
 
-- 启动时扫描 `state = parsing` 的全部来源
-- **v1 同时只跑一个 agent 子进程**（§3.5），所以启动那一刻**不可能有活着的解析** —— 这些来源必然是上次崩溃的残留
-- 全部转 `failed`，`parse_error_code = agent.interrupted`
-- 按 [01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿逻辑作废其草稿，并写 `actor = "system"` / `action = "void"` 的审计
+- 启动时扫描 `state = parsing` 的全部来源，**以及 `ended_at` 为空的全部 `parse_attempts`**（2026-08-10 补：两处都要扫，只扫来源会漏掉「尝试行已插入但来源状态还没推进」的那一瞬）
+- **v1 同时只跑一个 agent 子进程**（§3.5），所以启动那一刻**不可能有活着的解析** —— 这些必然是上次崩溃的残留
+- 来源全部转 `failed`，`parse_error_code = agent.interrupted`；对应的 `parse_attempts` 回填 `ended_at` 与 `outcome = interrupted`
+- 按 [01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿逻辑作废其草稿（置 `voided_at`），并写 `actor = "system"` / `action = "void"` 的审计
 - 扫描发生在**任何窗口出现之前**，用户看到的第一屏就已经是干净状态
 
 ### 3.5 解析编排
 
 - 一次导入 N 个文件 → 生成 N 个解析任务，**串行执行**（v1 同时只跑一个 agent 子进程，见 [01 Agent 运行时 §3.4](./01-agent-runtime.md)）
 - **不预先注入记忆规则**（2026-08-08 改定，[06 记忆 §3.4](./06-memory.md) R1 关闭 · `architecture` A3 关闭）：agent 解析出商户后**自己调 `query_memory` 批量查**。代码侧不做上下文装配，也不在起草后改写分类
-- 解析后由代码触发**总额交叉校验**（[03 审核与草稿区](./03-review.md) 的职责），结果落在 `sources` 上
+- 解析后由代码触发**总额交叉校验**（[03 审核与草稿区](./03-review.md) 的职责），**入参是本次的 `attempt_id`**——合计与草稿都属于产出它们的那次尝试（2026-08-10 改，此前写「结果落在 `sources` 上」）
 - **失败不静默**：`failed` 的来源在 UI 上显式列出，附失败原因（`parse_error_code`），可一键重试
 - **v1 不做自动重试**（2026-08-07 评审，[01 Agent 运行时 §5](./01-agent-runtime.md) R2 关闭）：重试由用户在 UI 上显式触发。自动重试会在用户不知情时二次消耗 AI 额度，而额度是真实约束（[`docs/PRD.md` §12](../PRD.md)）
+
+### 3.5.1 降级与失败态矩阵（2026-08-10 新增）
+
+**这张表存在的理由**：这些状态此前**每一条都有归属，但没有一处能一起看到**——散在 [01 §3.4](./01-agent-runtime.md)、[01 §3.5](./01-agent-runtime.md)、本文 §3.2/§3.4/§3.5、[03 审核 §3.3](./03-review.md) 六个地方。实现时最容易漏的不是某一条，是**没意识到还有第七条**。本表是索引，判据以各自出处为准。
+
+| 用户遇到的情况 | 判定处 | 错误码 / 状态 | 应用行为 |
+|---|---|---|---|
+| agent CLI 没装 | `probe()`（[01 §3.5](./01-agent-runtime.md)） | `agent.backend_unavailable` | **应用照常启动**，UI 给安装指引；手工录入可用（[04 §3.5](./04-transactions.md)） |
+| CLI 装了但没登录 | `probe()` | `agent.not_authenticated` | 同上，但指引是**去登录**不是去安装 |
+| 有效工具集不合预期 | 任务下发前探测（[01 §3.7](./01-agent-runtime.md)） | `agent.tool_surface_unsealed` | **拒绝下发任务**，不降级运行 |
+| 额度耗尽 | 后端报告（[01 §3.4](./01-agent-runtime.md)） | `agent.quota_exhausted` | 来源转 `failed`，**不自动重试** |
+| 解析超时 | 硬超时（[01 §5](./01-agent-runtime.md) R1） | `agent.timeout` | 来源转 `failed`，草稿作废，UI 可一键重试 |
+| 用户点停止 | `cancel`（[01 §3.4](./01-agent-runtime.md)） | `agent.cancelled` | 同步 kill，草稿作废 |
+| 应用崩溃 / 强杀 | 启动扫描（§3.4） | `agent.interrupted` | 下次启动时清理，第一屏就是干净的 |
+| **读了一半就收工** | 未调 `complete_source`（[01 §3.2](./01-agent-runtime.md)） | `agent.protocol_violation` | 来源转 `failed`，**不判为 `parsed`** |
+| **自报条目数对不上** | `complete_source`（[01 §3.2](./01-agent-runtime.md)） | `agent.completion_mismatch` | **可补救**：会话不封闭，agent 补齐后重调；再次不符才判协议失败 |
+| **agent 说有一块没读** | `unparsed_note` 非空 | `outcome = completed_with_gaps` | 来源仍转 `parsed`，但审核界面**显眼提示**，不与普通成功同貌 |
+| 记忆键没查全（**M3**） | `complete_source`（[06 §3.4](./06-memory.md)） | `agent.memory_lookup_incomplete` | 同上，可补救：返回缺的键，agent 补查后重调 |
+| 部分成功（批量中某张失败） | 队列（§3.7） | 该来源 `failed`，其余照常 | 队列不中断 |
+| 重复来源（文件） | 内容哈希（§3.2） | 非错误，`deduplicated: true` | 成功返回，UI 提示「已导入过」 |
+| 重复文本（口述） | 文本比对（§3.2） | **非错误，也不去重** | 提示「你之前也说过同样的话」，**由用户决定** |
+| 格式不支持 | 格式集（§3.1） | `ingest.unsupported_format` | 不落盘不写库，UI 明说 |
+| 来源没印合计 | 总额校验（[03 §3.3](./03-review.md)） | `unavailable` + `single_only` | 批量确认被拒，逐条可用 |
+| 口述来源（本就无合计） | 总额校验 | `not_applicable` + **`user_attested_batch`** | **批量确认可用**（三条 UI 前提，[03 §3.3](./03-review.md)） |
+| 缺汇率 | 确认时校验（[04 §3.2](./04-transactions.md)） | `review.incomplete_triple` | 该条不入库，其余可入 |
+| 合计对不上 | 总额校验 | `failed` → `review.total_mismatch` | 批量被拒，逐条可用 |
+| 误确认了一条 | 软删除（[04 §3.5](./04-transactions.md)） | — | 删除是软删除并写审计 |
+
+> **一条贯穿全表的原则**：**每一格都有一个用户看得懂的说明和一个可做的动作。** 没有静默失败，也没有「出错了」这种说了等于没说的提示——上一节「失败不静默」只是它的一个实例，不是全部。
 
 ### 3.6 跨图去重（M2）
 
@@ -171,10 +211,12 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 - [ ] `cargo test ingest::state_machine_transitions` 通过——枚举全部合法/非法转移，非法转移被拒
 - [ ] `cargo test ingest::agent_cannot_change_source_state` 通过——工具面中不存在改 `sources.state` 的工具
 - [ ] `cargo test ingest::failed_source_has_no_drafts` 通过——解析失败后该来源关联草稿数为 0，且 `parse_error_code` 非空
-- [ ] `cargo test ingest::agent_cannot_write_source_columns` 通过——agent 经工具面只能写 `declared_total_*`，改 `state` / `evidence_relpath` 等列无路径可走
+- [ ] `cargo test ingest::agent_cannot_write_source_columns` 通过——agent 经工具面写不到 `sources` 的任何一列（合计已移到 `parse_attempts`），改 `state` / `evidence_relpath` 无路径可走
 - [ ] `cargo test ingest::startup_scan_clears_stuck_parsing` 通过——预置一条 `state = parsing` 的来源后启动，扫描把它转 `failed` + `agent.interrupted` 并作废其草稿
-- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段文本 → `kind = utterance`、`ext = txt`、转写文本已落盘、`evidence_relpath` 非空、`declared_total_*` 全空
-- [ ] `cargo test ingest::utterance_idempotent_by_text` 通过——同一段文本投两次只产生一条 `sources`，第二次 `deduplicated == true`
+- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段**未提及合计**的文本 → `kind = utterance`、`ext = txt`、转写文本已落盘、`evidence_relpath` 非空、本次尝试 `reported_total_*` 全空；**另投一段含「总共 100」的文本 → `reported_total_*` 非空**（§3.1）
+- [ ] `cargo test ingest::utterance_idempotent_by_token` 通过——同一段文本配**同一个** `idempotency_key` 投两次只产生一条 `sources`（`deduplicated == true`）；配**不同**令牌投两次产生**两条**，`deduplicated == false`（§3.2，**取代原先的 `utterance_idempotent_by_text`**）
+- [ ] `cargo test ingest::parsed_requires_complete_source` 通过——agent 未调 `complete_source` 时来源转 `failed` + `agent.protocol_violation`，**不得为 `parsed`**（§3.4）
+- [ ] `cargo test ingest::startup_scan_closes_open_attempts` 通过——预置一行 `ended_at` 为空的 `parse_attempts` 后启动，扫描把它回填为 `outcome = "interrupted"`（§3.4）
 - [ ] `cargo test ingest::batch_continues_after_failure` 通过——队列中一个文件失败，其余照常完成
 - [ ] `cargo test ingest::cross_image_dedup_candidates`（**M2**）通过——构造同金额同币种相差 1 天的两条草稿，被标为疑似重复且**未自动合并**
 - [ ] `node scripts/verify-m0.mjs`（**待建**）退出码 0
@@ -186,7 +228,14 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+| 日期 | 回流内容 | 依据 |
+|---|---|---|
+| 2026-08-10（五轮） | **口述显式合计的改定漏了本文**：§3.1 与 §6 仍写「恒为空」。这是「改了共享决定但没 grep 全仓」的又一次——同一轮里还漏了 [`docs/PRD.md`](../PRD.md)、[03 §3.4](./03-review.md)、[05 §3.4](./05-items.md) 与 `.claude/agents/backend.md`。**本轮同时建立 `scripts/check-spec-invariants.mjs` 把这类漂移变成会红的检查** | 文档审查（五轮） |
+| 2026-08-10（二轮） | **§3.5「总额校验结果落在 `sources` 上」跟着合计一起搬家**：校验入参改为 `attempt_id`，agent 对 `sources` 的写入权限归零。§3.5.1 矩阵补三行（自报条目数对不上、agent 说有一块没读、记忆键没查全），并把两条对账相关行改成「状态 + 确认策略」两个字段 | [00 地基 §3.6](./00-foundation.md) v0.7 · [03 审核 §3.3](./03-review.md) v0.6 · [01 §3.2](./01-agent-runtime.md) v0.8 |
+| 2026-08-10 | **§3.2 的「口述用内容哈希去重」会静默吞掉真实交易。** 跨天各说一句「今天咖啡 5 元」文本逐字相同，第二笔被判重复直接消失，而用户看到的是「已导入过」，不会去追。改为两种来源两把幂等键：`file` 用内容哈希，`utterance` 用一次提交一个令牌；文本重复只提示不阻止。同步 [00 地基 §3.6](./00-foundation.md) 的部分唯一索引与 `idempotency_key` 列 | 文档审查 |
+| 2026-08-10 | **§3.4 的 `parsed` 判据是「退出码 0」，静默漏读因此被判为解析成功。** 改为「调过 `complete_source` 且正常退出」，未调即 `failed` + `agent.protocol_violation`。启动扫描同时扫 `ended_at` 为空的 `parse_attempts`。同步 [01 §3.2/§3.4](./01-agent-runtime.md) | 文档审查；产品决定（2026-08-10）接受为此扩大 M0 |
+| 2026-08-10 | **新增 §3.5.1 降级与失败态矩阵。** 16 种情况此前每条都有归属，但散在六份文档的六个小节里，**没有一处能一起看到**——实现时最容易漏的不是某一条，是没意识到还有第七条。本表是索引，判据以各自出处为准 | 文档审查 |
+| 2026-08-10 | §3.1 口述来源的总额校验结果由 `unavailable` 改为 **`not_applicable`**（[03 审核 §3.3](./03-review.md) 新增第四态） | 产品决定（2026-08-10）：给 utterance 独立信任策略 |
 
 ---
 
@@ -194,6 +243,9 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.8 | 2026-08-10 | **文档审查第五轮同步**：§3.1 口述来源的合计由「恒为空」改为「**通常**为空；用户明说「总共 100」时照常对账」——与 [00 地基 §3.6](./00-foundation.md) v0.9 的改定对齐（此前只改了 00 和 03，本文漏同步）。§6 的 `utterance_source_roundtrip` 相应加一条「含合计的文本」断言 |
+| v0.7 | 2026-08-10 | **文档审查第二轮回流**：§3.5 总额校验入参改为 `attempt_id`（合计已移入 `parse_attempts`）、agent 对 `sources` 写入权限归零；§3.5.1 矩阵由 16 行增至 19 行并把对账行改为「状态 + 确认策略」两个字段；§3.1 与 §6 的 `declared_total_*` 全部改为 `reported_total_*` |
+| v0.6 | 2026-08-10 | **文档审查回流四处。** ① §3.2 **口述的幂等键由内容哈希改为一次提交一个令牌**——原写法会让跨天重复的真实交易静默消失。② §3.4 **`parsed` 的判据改为「调过 `complete_source`」**，未调即协议失败；启动扫描补扫未闭合的 `parse_attempts`。③ 新增 **§3.5.1 降级与失败态矩阵**（16 行索引）。④ §3.1 口述的总额校验结果改为 `not_applicable`。§6 验收新增 2 条、改写 1 条 |
 | v0.1 | 2026-08-06 | 初版：v1 拖拽导入、SHA-256 内容幂等、证据先落盘后写库、来源五态状态机、解析编排（串行/记忆注入/失败不静默）、跨图去重候选判定（不自动合并）、批量导入；否决方案七条；待决 R1–R5；验收标准 11 条可执行 + 2 条人工 |
 | v0.5 | 2026-08-08 | 公开仓库去个人化：§3.4 崩溃恢复扫描**去掉外部参考仓库出处**，把「任务恢复不依赖内存中的 Promise」作为原则直接写出——**做法未变**；§6 人工验收的具名网银样本改为「真实网银流水截图」；`owner` 改为 `@maintainer` |
 | v0.4 | 2026-08-08 | **设计评审回流。** ① §3.1 新增**第二种来源 `utterance`**（M0）——依据 [`docs/PRD.md` §1.1](../PRD.md)「录入摩擦是痛点的另一半」；转写文本落盘成 `.txt` 与截图同等对待、`evidence_text` 取对应片段、闸门 3 对其天然失效、M0 只记交易且遇事项内容必须明说记不了。② §3.4 新增**启动时的崩溃恢复扫描**——此前解析任务只活在内存里，崩溃后 `state = parsing` 的来源**永久卡死**且重启后无人处理（M0 Ctrl-C 一次即复现）；依据「任务恢复不依赖内存中的 Promise」。③ §6 新增 4 条验收 |

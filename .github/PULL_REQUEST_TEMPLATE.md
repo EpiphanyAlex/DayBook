@@ -44,10 +44,11 @@ Gates (CLAUDE.md constraint 16 — any failure is red):
   cargo fmt --all -- --check
   cargo clippy --all-targets --all-features -- -D warnings
   cargo test
-Docs gates (CI enforces all three on every PR):
+Docs gates (CI enforces all four on every PR):
   node docs/prd/check-docs.mjs
   node scripts/check-links.mjs
   node scripts/check-readme-sync.mjs
+  node scripts/check-spec-invariants.mjs
 UI changes: before/after screenshots.
 -->
 

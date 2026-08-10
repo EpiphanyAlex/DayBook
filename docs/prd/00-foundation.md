@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: ready
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.5
+date: 2026-08-10
+version: v0.10
 ---
 
 # 00 · 地基 Foundation
@@ -77,14 +77,67 @@ version: v0.5
 
 | 项 | 决定 |
 |---|---|
-| 金额 | **整数最小货币单位**（分 / cent）。SQLite `INTEGER`，Rust `i64`，TS `number` |
+| 金额 | **整数最小货币单位**。SQLite `INTEGER`，Rust `i64`，**IPC 上是十进制字符串**，TS 侧解析成安全整数 `number`——见下方「金额怎么过 IPC」。**「最小单位」是币种的属性，不恒等于「分」**——见「币种精度」 |
 | 币种 | ISO 4217 三字母大写码，`TEXT`（`AUD` / `CNY` / …） |
 | **本位币** | **可切换**，逐笔存 `base_currency`（同为 ISO 4217 码）——见下方「本位币切换语义」 |
-| 汇率 | **定点整数**：存 `rate_ppm`，即「1 单位原币 = 多少本位币」× 1_000_000，`INTEGER` |
-| 舍入 | 本位币金额 = `round_half_even(原币金额 × rate_ppm / 1_000_000)`。**舍入在写入前完成一次，结果落库**，不在读取时重算 |
+| 汇率 | **定点整数**：存 `rate_ppm`，即「1 **主**单位原币 = 多少 **主**单位本位币」× 1_000_000，`INTEGER` |
+| 舍入 | `round_half_even`，**在写入前完成一次、结果落库**，不在读取时重算。公式见下方「换算公式」 |
 | 浮点 | **任何位置禁止**——包括中间计算、IPC 传输、测试夹具 |
 
-**自洽约束**：写入交易时校验 `本位币金额 == round_half_even(原币金额 × rate_ppm / 1_000_000)`，不满足则拒绝写入并返回 `data.money_inconsistent`。原币与本位币相同时 `rate_ppm = 1_000_000`，**不设特例分支**。
+#### 币种精度（2026-08-10 补，依据 [ADR-0004 §2](../adr/0004-data-model-sqlite-integer-money.md)）
+
+**不是所有货币都是两位小数**：ISO 4217 的 minor unit exponent 多数为 2，但 **JPY / KRW 为 0**、**KWD / BHD / JOD 为 3**。此前本节把「最小货币单位」直接写作「分 / cent」，跨 exponent 币种会**整整差 100 倍**——这与 [`docs/PRD.md` §3.1](../PRD.md)「解析能力与国家/币种无关」直接冲突：在 schema 层写死两位小数，就是又一次把地域假设塞回底座。
+
+- **exponent 不入库。** 它是币种的全局属性，由 Rust 侧一张 ISO 4217 常量表给出：`fn currency_exponent(code: &str) -> Result<u32, AppError>`
+- **表里没有的币种是非法数据，不是待猜的数据**：返回 `data.unsupported_currency`，**拒绝这一条的写入**（2026-08-10 改，见下）
+- **格式化除以 `10^exponent`，不是除以 100。** 全仓库不得出现写死的 `/ 100`（[`.claude/rules/money-and-data.md` §1](../../.claude/rules/money-and-data.md)）
+- 逐行存 exponent 是**被否决的**：同币种的 exponent 是常量，逐行存等于允许两行 `CNY` 精度不同——一个只会被写错、不会被用到的自由度
+
+> **未知币种为什么必须报错而不是回退到 2**（2026-08-10 改，此前本节写「按 2 处理并写一条 `trace` 告警」）：币种字段的取值域**已经被定义为 ISO 4217**（§3.4 第一张表）。落在域外的值只有三种来源——**agent 把币种符号读错、拼错、或读到一个我们的表还没收的新代码**，三种都是「这条数据不可信」，没有一种是「按 2 猜一下也行」。
+>
+> 而回退 + 告警的实际后果是**一条带告警但已经入账的错误金额**：告警落在日志里没人看，金额进了草稿、过了总额校验（同一个错误 exponent 两边都用，还可能恰好自洽）、被人一眼扫过去确认入库。**这正是本项目反复在消灭的那一类缺陷**——「有记录但没拦住」和「没记录」对用户是同一件事。
+>
+> 落点：`draft_transaction` / `report_source_total` 收到未知币种 → `agent.tool_rejected`（detail 带该币种码），**不写库**；已入库数据不受影响。用户看到的是「这条读到的币种 `XBT` 不是有效的 ISO 4217 代码」，可在审核界面改——**比一个悄悄差 100 倍的数字好得多**。
+
+#### 金额怎么过 IPC（2026-08-10 定死，产品决定）
+
+**问题**：本节 v0.1–v0.6 写「TS `number`」，而 [`CLAUDE.md`](../../CLAUDE.md) 约束 6 写「**任何位置**禁止用浮点数表示金额，**包括 IPC 传输**」。**JS 的 `number` 就是 IEEE-754 双精度，这两句话直接打架。** 分支类型（branded type）挡得住「分」和「元」混用，挡不住数值精度。
+
+**真实的失败路径只有一条，但它是静默的**：Rust 的 `i64` 序列化成 **JSON 数字**，`JSON.parse` 把超过 `2^53 − 1` 的值**悄悄舍入**——`9007199254740993` 变成 `9007199254740992`，没有异常、没有告警。而这个值不是凭空来的：**agent 把截图上的数字读错成 20 位就会产生它**，正好是本产品最要防的那类错误。
+
+**决定：IPC 上金额与汇率一律是十进制字符串；TS 在边界处显式解析并校验范围。**
+
+| 层 | 表示 |
+|---|---|
+| SQLite · Rust | `i64` |
+| **IPC（两个方向）** | **十进制字符串**（`"168"` / `"-4500"` / `"1000000"`） |
+| TS 内部 | `number`，且**保证是安全整数** |
+
+适用字段：`amount_minor` · `base_amount_minor` · `rate_ppm` · `reported_total_minor`，以及将来任何 `i64` 金额类字段。**同一条规则，不留例外**。
+
+**范围不变式**：`|v| ≤ 10^15`。
+
+- **Rust 侧**在序列化前校验，超出返回 `data.amount_out_of_range`（§3.7），**不序列化出去**
+- **TS 侧**在 `call<T>` 的解析处再校验一次，超出抛同一个 `code`
+- 上限取 `10^15` 而不是 `2^53 − 1`（≈ 9.007 × 10^15）：**留一个数量级的余量**，且它远超任何真实个人账目（按两位小数计是 10 万亿主单位）。**触到这个上限的值必然是解析错误，不是大额交易**
+
+**为什么不是全链路 `bigint`**：那是唯一能让约束 6 字面成立的选项，但 JSON 不原生支持 `bigint`、每个渲染点都要转换、测试夹具变重，而**它多挡住的只有「TS 内部算术溢出安全整数」这一种情况——而前端根本不做金额累加**（汇总一律由 Rust 侧给出，[`.claude/rules/frontend.md` §3](../../.claude/rules/frontend.md)）。**字符串边界把静默舍入变成了一次响亮的错误**，这是那条失败路径的全部。
+
+> **约束 6 的措辞随之改准**：不是「TS 里不存在浮点类型」（做不到），而是——**金额在任何位置都以整数表示与传输；`number` 仅作为安全整数范围内的整数载体使用，范围由 IPC 两侧强制**。[`CLAUDE.md`](../../CLAUDE.md) 约束 6 已同步。**如果哪天范围不变式挡不住了，路径是全链路 `bigint`**，登记为 §5 R9。
+
+#### 换算公式
+
+```
+base_amount_minor = round_half_even(
+    amount_minor × rate_ppm × 10^exp(base_currency)
+    ÷ (1_000_000 × 10^exp(currency))
+)
+```
+
+- **中间量用 `i128`**，先乘后除，不得先除
+- 两边 exponent 相同时退化为 `amount_minor × rate_ppm / 1_000_000`——**绝大多数情况下与 2026-08-10 之前的写法逐位相同**，补的是漏掉的那一项，不是改决定
+
+**自洽约束**：写入交易时按上式校验 `base_amount_minor`，不满足则拒绝写入并返回 `data.money_inconsistent`。原币与本位币相同时 `rate_ppm = 1_000_000` 且两边 exponent 必然相等，**走同一条路径，不设特例分支**。
 
 #### 本位币切换语义（2026-08-07 拍板，[`docs/PRD.md` §13](../PRD.md) P2 已关闭）
 
@@ -109,13 +162,36 @@ version: v0.5
 **完整表清单**（v1 终态）：
 
 ```
-sources · draft_transactions · transactions · draft_items · items
-memory_rules · audit_log
+sources · parse_attempts · draft_transactions · transactions · draft_items · items
+accounts · memory_rules · memory_rule_corrections · draft_memory_hits · audit_log
 ```
 
-**M0 建其中四张**：`sources` · `draft_transactions` · `transactions` · `audit_log`。其余三张随对应 sub-PRD 在后续里程碑建（`draft_items` / `items` 属 [05 事项](./05-items.md)，`memory_rules` 属 [06 记忆](./06-memory.md)）。
+**M0 建其中六张**：`sources` · `parse_attempts` · `draft_transactions` · `transactions` · **`accounts`（骨架）** · `audit_log`。其余随对应 sub-PRD 在后续里程碑建（`draft_items` / `items` 属 [05 事项](./05-items.md)，M3；`memory_rules` / `memory_rule_corrections` / `draft_memory_hits` 属 [06 记忆](./06-memory.md)，M3）。
 
-> **2026-08-07 M0 开工评审**：以下四张表的字段**逐列定死**。此前本节只写「关键约束」并注明「详细字段由对应 sub-PRD 在开工前补进」——现在正是开工前，不补齐则每次实施各写各的（**零沉默原则**）。
+> **`parse_attempts` 为什么在 M0**（2026-08-10 加入，产品决定）：M0 的**全部目的**是度量「视觉模型读真实账单准不准」与「一段口述能不能可靠拆多笔」（[`docs/PRD.md` §9.1](../PRD.md)）。而 `sources.agent_session_id` 只存**最近一次**解析——重试一次就把上一次覆盖掉，失败历史、换过哪个模型、提示词改没改全部丢失，[07 评测 §3.5](./07-eval.md)「区分模型退步和我改坏了提示词」这条直接落空。**一张表换掉一次不可解释的 M0 基线，值。**
+>
+> **`accounts` 骨架为什么也在 M0**（2026-08-10 修正）：`transactions.account_id` 声明为 `REFERENCES accounts(id)`，而 M0 不建 `accounts`——**这在 SQLite 上直接跑不起来**。开了 `PRAGMA foreign_keys = ON` 之后，**即使插入的 `account_id` 是 `NULL`**，只要父表不存在就报：
+>
+> ```
+> no such table: main.accounts
+> ```
+>
+> （sqlite 3.45.3 实测；SQLite 在**写子表时**才解析 FK 的父表，`CREATE TABLE` 阶段不报错，所以问题会推迟到 M0 的第一条 `INSERT INTO transactions` 才炸。）
+>
+> 两条路：**① M0 建一张最小 `accounts` 骨架**，UI 与业务逻辑仍推 M2；**② M0 不声明 FK，M2 再重建 `transactions` 加上**。**选 ①**——选 ② 就等于承认「现在留列是为了避免返工」那条理由不成立：`transactions` 照样要在 M2 被重建一次，而那正是留列想省掉的事。骨架表的成本是四列和一条迁移语句。
+
+#### `accounts` — 账户骨架（M0 建表，M2 才用）
+
+| 列 | 类型 | 空 | 说明 |
+|---|---|---|---|
+| `id` | TEXT PK | 非空 | |
+| `name` | TEXT | 非空 | 用户自己起的名字（「主力储蓄卡」）。**M0/M1 不产生任何行** |
+| `created_at` | TEXT | 非空 | |
+| `archived_at` | TEXT | 可空 | 软归档：销户的卡不删，历史交易还挂着它 |
+
+**M0 只建表、不写行、UI 不呈现。** 语义（账户与渠道是两个维度）见 [04 交易 §3.4](./04-transactions.md)。**别在 M0 给它加字段**——真实需要的列（机构、币种、卡号后四位、初始余额）要等 M2 拿到真实账单再定，现在猜等于白猜一遍。
+
+> **2026-08-07 M0 开工评审**：以下 M0 表的字段**逐列定死**。此前本节只写「关键约束」并注明「详细字段由对应 sub-PRD 在开工前补进」——现在正是开工前，不补齐则每次实施各写各的（**零沉默原则**）。**2026-08-10 由四张增至六张**（新增 `parse_attempts` 与 `accounts` 骨架，理由见上）。
 > 类型省略处按 §3.3 约定：ID 为 `TEXT`（UUID v4）、时间为 `TEXT`（RFC 3339 UTC）、业务日期为 `TEXT`（`YYYY-MM-DD`）。
 
 #### `sources` — 一份被导入的原始材料
@@ -124,22 +200,61 @@ memory_rules · audit_log
 |---|---|---|---|
 | `id` | TEXT PK | 非空 | |
 | `kind` | TEXT | 非空 | **`file`**（截图/PDF）\| **`utterance`**（一段口述或文字的转写结果）。见下方「来源不等于文件」 |
-| `content_hash` | TEXT **UNIQUE** | 非空 | SHA-256 十六进制；**导入幂等以此为准**（[02 导入 §3.2](./02-ingest.md)）。`utterance` 取转写文本的哈希 |
+| `content_hash` | TEXT | 非空 | SHA-256 十六进制。**`kind = file` 的导入幂等以此为准**（[02 导入 §3.2](./02-ingest.md)）；`utterance` 也算并存，但**不以它去重**——见下方「口述的幂等键不是内容哈希」 |
+| `idempotency_key` | TEXT | 可空 | **一次提交一个令牌**，由前端生成。`kind = utterance` 时非空，`file` 时为空 |
 | `original_filename` | TEXT | **可空** | 用户那份文件的原名，仅供显示。`kind = utterance` 时为空 |
 | `ext` | TEXT | 非空 | 规范化小写、不带点。`utterance` 恒为 `txt` |
 | `byte_size` | INTEGER | 非空 | |
 | `evidence_relpath` | TEXT | 非空 | **相对数据目录**的路径（§3.2）。`utterance` 的转写文本**也落盘成 `.txt`**，与截图同等对待 |
 | `imported_at` | TEXT | 非空 | |
 | `state` | TEXT | 非空 | 取值集 `imported` / `parsing` / `parsed` / `failed` / `reviewed`，语义与转移规则由 [02 导入 §3.4](./02-ingest.md) 定义 |
-| `declared_total_minor` | INTEGER | 可空 | **来源自身印着的合计**，供总额校验 |
-| `declared_total_currency` | TEXT | 可空 | 该合计的币种——**没有币种的金额无法校验** |
-| `declared_total_evidence_text` | TEXT | 可空 | 合计在来源上的原文片段——**校验基准本身也必须可核对**，见 [03 审核 §3.3](./03-review.md) |
 | `parse_error_code` | TEXT | 可空 | `state = failed` 时非空，取 §3.7 的 `agent.*` / `ingest.*` 码 |
-| `agent_session_id` | TEXT | 可空 | 最近一次解析的会话（§3.3 会话粒度） |
+| `latest_attempt_id` | TEXT → `parse_attempts(id)` | 可空 | **当前受审的是哪次尝试的输出**。历史尝试在 `parse_attempts` 里 |
 
-**CHECK 约束**：`declared_total_minor` / `declared_total_currency` / `declared_total_evidence_text` **三者要么全空、要么全非空**。缺任一即视为「未声明合计」，总额校验结果为 `unavailable`。
+**唯一性约束**（2026-08-10 改）：
 
-**列级写入权限**：agent 经 MCP 工具**只能写** `declared_total_*` 三列（[01 Agent 运行时 §3.2](./01-agent-runtime.md) 的 `report_source_total`）。`state` 等其余列只由 Rust 侧代码写。
+```sql
+CREATE UNIQUE INDEX sources_file_hash ON sources(content_hash) WHERE kind = 'file';
+CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempotency_key IS NOT NULL;
+```
+
+**列级写入权限**：**agent 对 `sources` 没有任何写入权限**（2026-08-10 改，此前是「只能写 `declared_total_*` 四列」——那四列已移到 `parse_attempts`）。本表全部列只由 Rust 侧代码写。 <!-- legacy -->
+
+##### 声明合计归尝试，不归来源（2026-08-10 改定）
+
+本节 v0.3–v0.6 把 `declared_total_*` 放在 `sources` 上。**放错地方了**：那四个值不是原件自身的属性，**是某一次 agent 解析的输出**——和草稿完全同源、同样可能读错。放在来源上，它的生命周期就和产出它的那次尝试脱钩，三种坏情况： <!-- legacy -->
+
+1. 第一次尝试读出合计写进 `sources` → 随后超时 → **草稿按 `attempt_id` 全部作废，而合计留了下来**
+2. 用户重试 → 新尝试调 `report_source_total` → 撞上「一个来源只接受一次成功调用」被拒，或者默默沿用上一次那个**可能本来就读错**的值
+3. 一个来源被解析过两次且都成功时，「该来源全部未作废草稿」会**混进两次尝试的输出**，总额校验对着一堆重复条目求和
+
+**改为**：
+
+- **原件属于来源**（`evidence_relpath`、`content_hash`、`kind`），**读出来的东西属于尝试**（草稿、合计、条目数、未解析说明）
+- 四列改名并移到 `parse_attempts`：**`reported_total_minor` / `reported_total_currency` / `reported_total_kind` / `reported_total_evidence_text``**
+- **总额校验的入参是 `attempt_id`，不是 `source_id`**——只算该次尝试的未作废草稿（[03 审核 §3.3](./03-review.md)）
+- **`sources.latest_attempt_id` 决定当前审核的是哪次输出**。重试产生新尝试、新草稿、新合计，旧的一整套原样留在库里供 [07 评测](./07-eval.md) 用
+- 「一次成功调用」的约束从**每来源**收窄为**每尝试**——重试本来就该能重新回报合计
+
+> **命名为什么从 `declared_` 改成 `reported_`**：`declared` 读起来像「来源自己声明的」，而这一列存的是 **agent 报告它在来源上看到的东西**。概念上「声明合计」仍指账单底部印着的那个数（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)），但**库里存的从来是 agent 对它的一次转述**——和 `evidence_text` 是同一类东西，同一类可信度。名字应该说实话。
+
+##### 合计必须带类型（2026-08-10 新增）
+
+**一个裸数字表达不了「本期消费合计」「本期收入合计」「净变动」的差别**，而这三者对应三条不同的等式（逐条等式在 [03 审核 §3.3](./03-review.md)）。此前 schema 只有金额与币种，于是校验只能对该来源的全部草稿无差别求和——**一张同时含消费与退款的账单，底部印着「本期消费合计」，校验必然对不上**，而它会以 `failed` 的形式报出来，看起来像 agent 读错了。
+
+- 取值集：`expense_total`（本期消费/支出合计）· `income_total`（本期收入合计）· `net_change`（净变动，收入减支出）
+- **判不出类型时 agent 不得调 `report_source_total`**（[01 §3.2](./01-agent-runtime.md)），结果如实为 `unavailable`——与「余额不当合计用」同一条原则：**基准的语义不确定，就不是基准**（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)）
+- **一次尝试只登记一条合计。** 账单同时印了消费合计与收入合计时，v1 取消费合计（覆盖绝大多数场景），另一条丢弃——「一来源多条 claim」登记为 §5 R7，M2 决
+
+##### 口述的幂等键不是内容哈希（2026-08-10 改定）
+
+本节 v0.3–v0.5 曾写「`utterance` 的幂等键仍是内容哈希，同一段话说两次判为重复，这是刻意的」。**该理由只在几分钟的尺度上成立，跨天就变成静默数据丢失**：连续两天各说一句「今天咖啡 5 元」，文本逐字相同 → 第二天那笔被判为重复来源、**直接消失**，而用户不会发现——他刚说完，界面显示「这段已经导入过」。
+
+**丢一笔真实交易，比多一批可以一键丢弃的重复草稿严重得多。** 因此改为：
+
+1. **`content_hash` 的唯一约束收窄到 `kind = 'file'`。** 文件有客观内容身份，同一张图导两次确实是同一份证据
+2. **`utterance` 的幂等由 `idempotency_key` 保证**——前端在**一次提交**里生成一次令牌，重试、双击、崩溃重放都带同一个令牌，因此不会重复落库；隔天再说一遍是**新的一次提交**，产生新来源
+3. **文本重复只提示，不阻止**：新来源的 `content_hash` 与既有 `utterance` 相同时，UI 提示「你之前也说过同样的话」并列出那一条，由用户决定——**判断留给人**（[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）
 
 ##### 来源不等于文件（2026-08-08 设计评审）
 
@@ -150,8 +265,52 @@ memory_rules · audit_log
 三条随之确定：
 
 1. **转写文本落盘成 `.txt`，与截图同等对待。** 这样 `evidence_relpath` 保持非空，闸门 2 的实现路径对两种来源完全一致，不产生分支。
-2. **`utterance` 的 `declared_total_*` 恒为空** —— 一段口述没有「账单底部印着的合计」。CHECK 约束不受影响（全空是合法的），总额校验结果恒为 `unavailable`（[03 审核 §3.3](./03-review.md)）。**闸门 3 对语音来源天然失效**，这是已知且接受的代价。
-3. **`utterance` 的幂等键仍是内容哈希** —— 同一段话说两次会被判为重复。这是**刻意的**：用户重说一遍通常意味着他以为上次没记上，返回已存在的 `source_id` 比产生两批重复草稿好。
+2. **`utterance` 来源通常没有合计，但不是「恒为空」**（2026-08-10 三轮改定）—— 一段口述一般没有「账单底部印着的合计」，此时 `reported_total_*` 全空、对账结果 `not_applicable`、确认策略 `user_attested_batch`（[03 审核 §3.3](./03-review.md)）。**但用户自己说出「总共 100」时，那就是一个来源上真实存在的声明合计**，agent 可以照常调 `report_source_total`（`evidence_text` 取那半句话），于是对账结果变成 `passed` / `failed`——**白拿一道校验**。 <!-- legacy -->
+   **确认策略不随之改变**：无论对账做没做成，`utterance` 的策略恒为 `user_attested_batch`。**这正是把两个维度拆开的理由**（[03 审核 §3.3](./03-review.md)「两个维度，不是一个枚举」）——本条 v0.6–v0.7 写「恒为空」，与 03 拿这个场景当拆分论据**直接打架**，是同一轮改动里留下的自相矛盾。
+   **闸门 3 对语音来源结构性不适用**（因为多数时候确实没有合计），代之以「整段原文 + 全部拆分结果并排展示 + 一次人工确认」这道闸门；**有合计时两道都在**。
+3. **`utterance` 的幂等键是提交令牌，不是内容哈希**（2026-08-10 改定）—— 见上方「口述的幂等键不是内容哈希」。原写法会让「今天咖啡 5 元」这类跨天重复的真实交易被静默吞掉。
+
+#### `parse_attempts` — 一次解析尝试（2026-08-10 新增）
+
+**一次解析任务 spawn = 一行**，无论成败。它是「这条草稿是谁在什么条件下产出的」的唯一答案，也是 [07 评测](./07-eval.md) 的归因依据。
+
+> **工具集探测的那次 spawn 不算**（2026-08-10 澄清）：[01 §3.7](./01-agent-runtime.md) 的有效工具集探测是一次独立的、短命的子进程，**它不解析任何来源，因此不产生 `parse_attempts` 行**。「一次 spawn 一行」说的是**解析任务**的 spawn。探测失败时不新增行，与 [01 §6](./01-agent-runtime.md) 的 `unsealed_surface_blocks_task` 一致。
+
+| 列 | 类型 | 空 | 说明 |
+|---|---|---|---|
+| `id` | TEXT PK | 非空 | |
+| `source_id` | TEXT → `sources(id)` | 非空 | |
+| `agent_session_id` | TEXT | 非空 | 一个来源一次尝试一个会话（[01 §5](./01-agent-runtime.md) R5） |
+| `backend_id` | TEXT | 非空 | `claude-code` / `codex` / …（[01 §3.5](./01-agent-runtime.md)） |
+| `backend_version` | TEXT | 可空 | 后端 CLI 自报的版本；取不到为空 |
+| `model_id` | TEXT | 可空 | 后端报告的模型标识 |
+| `prompt_hash` | TEXT | 非空 | 本次所用提示词模板的 SHA-256——**提示词是程序记忆**（[01 §3.6](./01-agent-runtime.md)），改了必须能看出来 |
+| `tool_surface_version` | TEXT | 非空 | **我们期望的**工具面版本，由代码给出 |
+| `effective_capability_hash` | TEXT | 非空 | **实测到的** capability manifest 指纹（[01 §3.7](./01-agent-runtime.md)）。**覆盖工具型与非工具型两类条目**——hook / 插件 / 权限模式没有名字、没有参数 schema，但同样是能力。**只哈希「工具名 + server + 参数 schema」不够**：那样一个改写每次调用的 `PreToolUse` hook 挂上去，指纹一个字节都不变 |
+| `app_version` | TEXT | 非空 | |
+| `started_at` · `ended_at` | TEXT | 起非空 / 止可空 | `ended_at` 为空 = 进行中或崩溃残留（[02 导入 §3.4](./02-ingest.md) 启动扫描） |
+| `outcome` | TEXT | 可空 | `completed` / **`completed_with_gaps`** / `failed` / `timeout` / `interrupted` / `cancelled` / `protocol_violation`；进行中为空 |
+| `error_code` | TEXT | 可空 | `outcome` 非 `completed*` 时取 §3.7 的 `agent.*` 码 |
+| `reported_item_count` | INTEGER | 可空 | agent 经 `complete_source` 自报的条目数（[01 §3.2](./01-agent-runtime.md)） |
+| `unparsed_note` | TEXT | 可空 | agent 自报的「有哪块我没读」——**空字符串与 NULL 语义不同**：前者是「它说全读了」，后者是「它没说」 |
+| **`reported_total_minor`** | INTEGER | 可空 | **agent 报告它在来源上看到的合计**（此前叫 `sources.declared_total_minor`，2026-08-10 移入本表） | <!-- legacy -->
+| **`reported_total_currency`** | TEXT | 可空 | 该合计的币种——**没有币种的金额无法校验** |
+| **`reported_total_kind`** | TEXT | 可空 | `expense_total` / `income_total` / `net_change`，见 `sources`「合计必须带类型」 |
+| **`reported_total_evidence_text`** | TEXT | 可空 | 合计在来源上的原文片段——**校验基准本身也必须可核对**（[03 审核 §3.3](./03-review.md)） |
+
+**CHECK 约束**：`reported_total_*` **四者要么全空、要么全非空**。缺任一即视为「本次尝试未取到合计」。
+
+**列级写入权限**：agent 经 MCP 工具对**本表**只能写六列——`reported_total_*` 四列（`report_source_total`）与 `reported_item_count` / `unparsed_note`（`complete_source`），且**只能写自己那一行**；本表其余列由 Rust 侧代码写。
+
+> **agent 在整个库里能写的地方就两处**（2026-08-10 说全）：**① `draft_*` 表**（业务实体输出，经 `draft_transaction` / `draft_item`）；**② 本表这六列**（协议与对账元数据）。**其余每一张表、每一列都不可达**，事实表尤其（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）。本行此前写「其余列与**全部其他表**由 Rust 侧代码写」，字面上把 `draft_*` 也排除了——那和闸门 1 的写法自相矛盾。
+
+> **`outcome` 的三档「结束了」要分清**（2026-08-10）：
+>
+> - **`completed`** —— 调过 `complete_source`、自报条目数与实际草稿数一致、`unparsed_note` 为空字符串。**只有这一档是干净的**
+> - **`completed_with_gaps`** —— 同上，但 `unparsed_note` 非空：agent 自己说了「有一块我没读」。**草稿可用，但 UI 必须显眼提示**，不能和 `completed` 长一个样。**它是这条来源在审核界面里的一个警告，不是一次成功**
+> - **`protocol_violation`** —— 没调 `complete_source` 就退出，或反复调用后自报条目数仍与实际不符（[01 §3.2](./01-agent-runtime.md)）。**不判为 `parsed`**（[02 导入 §3.4](./02-ingest.md)）
+>
+> **为什么 `reported_item_count` 与实际草稿数都要留**：两者不等本身就是信号——agent 说「我起草了 12 条」而库里只有 9 条，说明有 3 次工具调用被拒或它在说谎。**这个信号现在会当场变成一次工具调用失败**（[01 §3.2](./01-agent-runtime.md)），两个数仍要留档供 [07 §3.3](./07-eval.md) 用。
 
 #### `draft_transactions` — AI 起草的待确认交易
 
@@ -159,10 +318,12 @@ memory_rules · audit_log
 |---|---|---|---|
 | `id` | TEXT PK | 非空 | |
 | `source_id` | TEXT → `sources(id)` | **非空** | [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 2，数据层强制 |
-| `evidence_text` | TEXT | **非空** | 同上 |
-| `agent_session_id` | TEXT | 非空 | 溯源到具体哪次解析 |
-| `backend_id` | TEXT | 非空 | 产出这条草稿的后端（`claude-code` / `codex` / …，见 [01 §3.5](./01-agent-runtime.md)） |
-| `model_id` | TEXT | 可空 | 后端报告的模型标识，取不到时为空 |
+| `evidence_text` | TEXT | **非空** | 同上。**这是 agent 的抽取声明，不是独立证据**——见下方「`drafted_json`」 |
+| `source_ordinal` | INTEGER | **非空** | **这条在原件上是第几条**（1 起，自上而下 / 口述中出现的先后）。见下方「位置是 agent 报的，不是我们算的」 |
+| `evidence_span_start` · `evidence_span_end` | INTEGER | 可空 | `evidence_text` 在转写文本里的位置，**坐标定义见下方「span 用哪套坐标」**。**`kind = utterance` 时必填，`file` 时恒空** |
+| `attempt_id` | TEXT → `parse_attempts(id)` | 非空 | 溯源到具体哪次尝试。后端、模型、提示词哈希全在那张表上，**不在本表重复一份** |
+| `drafted_json` | TEXT | **非空** | **agent 首次写入时的完整字段快照，写入后永不更新**——见下方 |
+| `voided_at` | TEXT | 可空 | 非空 = 本行已作废（超时/中断的补偿性作废，[01 §3.4](./01-agent-runtime.md)）。**作废不删行** |
 | `occurred_on` | TEXT | 非空 | 业务日期 |
 | `amount_minor` | INTEGER | 非空 | 原币金额 |
 | `currency` | TEXT | 非空 | 原币币种 |
@@ -177,7 +338,55 @@ memory_rules · audit_log
 | `created_at` | TEXT | 非空 | |
 | `consumed_at` | TEXT | 可空 | **非空 = 已被确认消费**；[03 审核 §3.1](./03-review.md)「标记为已消费而非删除」的落点 |
 
-> **`backend_id` / `model_id` 为什么必须存**（2026-08-08 新增）：[07 评测 §3.2](./07-eval.md) 的 eval 集就是「草稿 ← 交易」这条 join。若不记产出草稿的后端与模型，模型一升级就**无法区分「模型退步了」和「我改坏了提示词」**——20 个用例的基线会变得不可解释。这是 eval 成立的必要条件，不是可选的元数据。
+> **位置是 agent 报的，不是我们算的**（2026-08-10 新增）：[07 评测 §3.2](./07-eval.md) 的条目对齐要求预测侧也有位置，而它上一版写的是「草稿按 `evidence_text` 在原件上的位置排序」——**那做不到**：`file` 来源是一张 PNG，系统里**没有 OCR、没有坐标**，我们无从知道那段文字在图上哪里。这与同一份文档里「`evidence_text` 的子串断言对图像来源无法实现」是同一个事实的两面，上一版只认了一半。
+>
+> **因此位置由 agent 在起草时一并报告**，成为工具的必填参数（[01 §3.2](./01-agent-runtime.md)）：
+>
+> - **`source_ordinal` 两种来源都必填**——对齐算法因此只有一条路径，不按 `kind` 分支
+> - **`utterance` 另外必填字符区间**（`evidence_span_*`），它同时兑现 [07 §3.3](./07-eval.md) 的子串断言与 [03 审核 §3.2](./03-review.md) 的原文高亮；`file` 的区域定位仍是 [03 §5](./03-review.md) R1 的 spike 对象
+> - **`(attempt_id, source_ordinal)` 唯一**：两条草稿都声称自己是第 3 条，是协议错误 → `agent.tool_rejected`
+> - **不要求连续**：`1, 2, 4` 合法——agent 跳过了读不动的一行，那该写进 `unparsed_note`（[01 §3.2](./01-agent-runtime.md)）。**跳号是信号，不是错误**，它进 [07 §3.3](./07-eval.md) 的 transcript 维度
+>
+> **这仍然是 agent 自报的数，我们无法独立核验**——但它换来三件事：eval 的对齐**写得出来了**、审核界面能稳定按来源顺序排（[03 §3.4](./03-review.md) 的排序之下仍需一个确定的原始序）、以及 ordinal 本身出错时**它是一个可观测的 transcript 错误**，而不是一个静默的对齐失败。
+
+##### span 用哪套坐标（2026-08-10 定死）
+
+上一版只写「字符区间」。**「字符」在这条链路上有四种互不相同的含义**，而这条链路正好横跨 Rust 与 TypeScript：
+
+| 坐标系 | 谁的默认 | 「今天喝了☕️ 5 元」里 `5` 的起点 |
+|---|---|---|
+| UTF-8 字节偏移 | Rust 的 `&str[..]` 索引 | 一个数 |
+| UTF-16 code unit | JS 的 `String.prototype.slice` | 另一个数（emoji 占 2） |
+| Unicode code point | Rust `char` / JS `Array.from` | 又一个数 |
+| grapheme cluster | 人眼看到的「一个字」 | 再一个数（☕️ 的变体选择符会合并） |
+
+**中文夹一个 emoji 就会立刻错位**，而错位的表现是「高亮选错了半句话」——看起来像模型报错了位置，实际是两端各按自己的默认解释了同一个数字。**这类缺陷不会在写代码时暴露，会在用户第一次说带 emoji 的话时暴露。**
+
+**决定**：
+
+- **零起、左闭右开** `[start, end)`
+- **单位是 Unicode scalar value（code point）**——不是字节、不是 UTF-16 code unit、不是 grapheme
+- **计量对象是那份原样落盘、未经任何 normalize 的转写文本**（`evidence_relpath` 指向的 `.txt` 内容逐字节那一份）。**不许先做 NFC/NFKC 再算**——归一化会改变 code point 数量
+- **两端的实现方式定死**：Rust 用 `.chars()`，TypeScript 用 `Array.from(text)`。**不许用各语言的原生字符串索引**（`&s[a..b]` / `s.slice(a,b)`），那正是四套坐标混进来的入口
+
+**写入时强制校验两条**，不满足 → `agent.tool_rejected`：
+
+```
+0 ≤ start < end ≤ code_point_length(转写文本)
+slice_by_code_points(转写文本, start, end) == evidence_text
+```
+
+> **第二条顺带解决了一件别的事**：它让 `utterance` 的 `evidence_text` **变成可独立核验的**——我们手里有原文，能逐字比对 agent 声称读的那一段是否真的在那儿。**这是 `file` 来源不具备的**（没有 OCR，无从比对，[03 审核 §3.2](./03-review.md)），所以口述路径的证据链实际上比截图路径强一档。**别把这条便宜当成两种来源都有。**
+
+**若实测发现模型报不准精确数字**（这是可能的），退路是把工具参数改成 `evidence_text` + **`evidence_occurrence`**（第几次出现），由 Rust 在原文里算出 span。**那是一次工具形态变更，M0 第一轮 eval 之后才有数据支撑，现在不做**——登记为 §5 R10。
+
+> **`drafted_json` 为什么必须存**（2026-08-10 新增）：[03 审核 §3.5](./03-review.md) 允许**行内编辑直接改草稿**，改完这一行就等于人的答案。此前 [07 评测 §3.2](./07-eval.md) 声称「草稿保留原始起草值」——**那是错的**：一旦用户把 1680 改回 168，「草稿 ← 交易」这条 join 两边一模一样，eval 看到的错误率恒为零，`audit_log` 里那条 `before_json` 是唯一残存的真相，而靠遍历审计链重建原始草稿既慢又脆。
+>
+> 一列不可变快照同时解决三件事：eval 的真值、审计的「AI 当初起草成什么样」（[03 §3.1](./03-review.md) 此前只由 `source_draft_id` 兑现一半）、以及 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7。
+>
+> **写入规则**：agent 经 MCP 工具插入时由 **Rust 侧**序列化当次参数写入，**不由 agent 提供**；此后任何 `UPDATE draft_transactions` 都不得触及该列（与 `audit_log` 的 append-only 同级的硬约束）。
+>
+> **后端与模型标识为什么不在本表**（2026-08-10 移走）：它们此前逐条重复存在每条草稿上，同一次解析的 40 条草稿写 40 遍同样的 `backend_id`。现在归 `parse_attempts` 一行，草稿只留 `attempt_id`——**同一个事实只有一个出处**（[`CLAUDE.md`](./CLAUDE.md) 硬规则 5）。eval 的归因照旧，多一次 join。
 
 **草稿阶段的三元组可空**：`base_amount_minor` / `base_currency` / `rate_ppm` **三者要么全空、要么全非空**（CHECK）。全非空时必须满足 §3.4 的自洽约束。
 
@@ -196,10 +405,22 @@ memory_rules · audit_log
 | `base_amount_minor` · `base_currency` · `rate_ppm` | | **非空** | 三元组齐全且自洽（§3.4） |
 | `direction` · `merchant` | TEXT | 非空 | |
 | `merchant_normalized` · `category` · `channel` · `note` | TEXT | 可空 | |
+| `account_id` | TEXT → `accounts(id)` | 可空 | **哪张卡 / 哪个账户**（[04 交易 §3.4](./04-transactions.md)）。**M0/M1 恒为空，M2 起启用**——见下方「账户与渠道是两个维度」 |
 | `confirmed_at` | TEXT | 非空 | 事实表的行必然经人确认 |
 | `deleted_at` | TEXT | 可空 | **软删除**（[04 交易 §3.5](./04-transactions.md)）；非空的行不进任何汇总 |
 
 **CHECK 约束**：`source_draft_id` 非空 ⇒ `source_id` 非空（来自草稿必有来源）；`source_id` 非空 ⇔ `evidence_text` 非空。
+
+##### 账户与渠道是两个维度（2026-08-10 新增，产品决定）
+
+[`docs/PRD.md` §2](../PRD.md) 说痛感随「**账户数** → 支付渠道数 → 币种数」递增、多账户用户是首要验证场景。但此前 schema 里只有 `channel` 一个维度，取值示例是 `bank_debit` / `wallet` 这类**支付方式类别**——「我这笔刷的是**哪张**卡」在结构上无法表达。后果不止是回顾少一个维度：[02 导入 §3.6](./02-ingest.md) 的跨图去重（同一笔在信用卡账单与银行流水各出现一次）与 [04 交易 §5](./04-transactions.md) R3 的转账双边，**都需要「这两条属于不同账户」这个信息才能判**。
+
+- `channel` = **支付方式类别**（`bank_debit` / `bank_credit` / `wallet` / `cash`）
+- `account_id` = **具体账户或卡**，用户自己维护。**`accounts` 骨架表在 M0 就建**（见上方「`accounts` — 账户骨架」），字段补全与 UI 在 **M2**
+- **两者正交**，不是一个维度的粗细两档：同一个账户可以有多种支付方式，同一种支付方式跨多个账户
+- **M0/M1 不实现业务**：列与骨架表都建好但恒为空，保证 M2 补字段时不用改 `transactions` 的既有行
+
+> **为什么现在就留列而不是 M2 再加**：只前进迁移（§3.5）下加一列本来就不贵，但 M0/M1 期间的回顾查询、去重逻辑、导出格式**会按「没有账户维度」这个前提写**，等 M2 再回头补是把同一批代码改两遍。留列的成本是一列 NULL，不留的成本是一次返工。
 
 #### `audit_log` — append-only 变更记录
 
@@ -221,7 +442,10 @@ memory_rules · audit_log
 1. `draft_*` 与事实表**结构分离**，不共用同一张表加状态字段
 2. 草稿表的 `source_id` 与 `evidence_text` 为 `NOT NULL`
 3. 代码中**不存在**针对 `audit_log` 的 `UPDATE` / `DELETE` 语句
-4. agent 对 `sources` 的写入权限**收窄到 `declared_total_*` 三列**
+4. agent **对 `sources` 无写入权限**；对 `parse_attempts` 收窄到 `reported_total_*` 四列 + `reported_item_count` + `unparsed_note`，且**只能写自己那一行**（2026-08-10 改）
+5. 代码中**不存在**任何会写 `drafted_json` 的 `UPDATE` 语句（2026-08-10 新增，[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
+6. `(attempt_id, source_ordinal)` 上有唯一索引；`kind = utterance` 的草稿 `evidence_span_*` 非空、`file` 的恒空（CHECK）
+7. 金额与汇率**在 IPC 上是字符串**，两侧各有一次范围校验（2026-08-10 新增，§3.4「金额怎么过 IPC」）
 
 ### 3.7 命令契约与错误形状
 
@@ -246,6 +470,8 @@ memory_rules · audit_log
 | `data.storage_failure` | 00 | SQLite 读写失败 |
 | `data.migration_drift` | 00 | 磁盘 `user_version` 超前于代码（§3.5） |
 | `data.money_inconsistent` | 00 | 三元组不自洽（§3.4） |
+| `data.unsupported_currency` | 00 | 币种码不在 ISO 4217 表内（§3.4「币种精度」）。**不回退到 exponent 2**——带告警入账的错误金额比拒绝更糟（2026-08-10 新增） |
+| `data.amount_out_of_range` | 00 | 金额或汇率超出 `\|v\| ≤ 10^15`（§3.4「金额怎么过 IPC」）。**IPC 两侧各校验一次**（2026-08-10 新增） |
 | `data.not_found` | 00 | 实体不存在 |
 | `data.invalid_argument` | 00 | 参数形状错误 |
 | `data.icloud_path_rejected` | 00 | 数据目录在 iCloud 容器内（§3.2） |
@@ -254,7 +480,16 @@ memory_rules · audit_log
 | `ingest.evidence_write_failed` | [02](./02-ingest.md) | 证据落盘失败（此时不写 `sources` 行） |
 | `ingest.invalid_state_transition` | [02](./02-ingest.md) | 非法状态转移（§3.4） |
 | `agent.backend_unavailable` | [01](./01-agent-runtime.md) | `probe()` 失败或 CLI 不可执行 |
+| `agent.not_authenticated` | [01](./01-agent-runtime.md) | CLI 存在但未登录（2026-08-10 新增）——与「没装」是两种不同的用户动作，UI 要给不同指引 |
+| `agent.quota_exhausted` | [01](./01-agent-runtime.md) | 后端报告用量额度耗尽（2026-08-10 新增）。**不重试**（[02 导入 §3.5](./02-ingest.md)），否则在用户不知情时接着烧 |
 | `agent.timeout` | [01](./01-agent-runtime.md) | 单次任务超硬超时 |
+| `agent.interrupted` | [01](./01-agent-runtime.md) | 上次运行中断的残留（应用崩溃 / 强杀），由启动扫描判定（2026-08-10 补登记；[02 导入 §3.4](./02-ingest.md) 早已在用它，此前**未登记**） |
+| `agent.cancelled` | [01](./01-agent-runtime.md) | 用户主动取消本次解析（2026-08-10 新增） |
+| `agent.protocol_violation` | [01](./01-agent-runtime.md) | 子进程正常退出但未调 `complete_source`，或反复调用后自报条目数仍与实际不符（2026-08-10 新增，[01 §3.2](./01-agent-runtime.md)）——**不判为解析成功** |
+| `agent.unexplained_gap` | [01](./01-agent-runtime.md) | `source_ordinal` 跳号而 `unparsed_note` 为空（2026-08-10 新增，[01 §3.2](./01-agent-runtime.md)）——**跳号必须有说明**。同样是可补救的拒绝 |
+| `agent.completion_mismatch` | [01](./01-agent-runtime.md) | `complete_source` 自报条目数 ≠ 实际草稿数（2026-08-10 新增）。**这是可补救的工具级拒绝**，不封闭会话——agent 补齐或修正后可再调（[01 §3.2](./01-agent-runtime.md)） |
+| `agent.memory_lookup_incomplete` | [01](./01-agent-runtime.md) | `complete_source` 时发现起草出的商户有未经 `query_memory` 查过的（**M3**，[06 记忆 §3.4](./06-memory.md)）。同样可补救，返回体带缺的键 |
+| `agent.tool_surface_unsealed` | [01](./01-agent-runtime.md) | 启动前的有效工具集探测发现超出预期的工具（2026-08-10 新增，[01 §3.7](./01-agent-runtime.md)）——**拒绝下发任务**，不降级运行 |
 | `agent.spawn_failed` | [01](./01-agent-runtime.md) | 子进程起不来 |
 | `agent.tool_rejected` | [01](./01-agent-runtime.md) | 工具参数不合法（如缺 `evidence_text`） |
 | `review.total_mismatch` | [03](./03-review.md) | 总额校验 `failed` 时批量确认被拒 |
@@ -265,6 +500,7 @@ memory_rules · audit_log
 ### 3.8 TS 类型桥
 
 - 前端不手写 `invoke` 调用，统一走一层 `call<T>(command, args)` 包装：把 Tauri 的错误规整成 `AppError` 形状
+- **`call<T>` 同时是金额的解析与校验点**（2026-08-10）：IPC 上的金额是十进制字符串（§3.4「金额怎么过 IPC」），在这里解析成 `number` 并校验 `|v| ≤ 10^15`，超出抛 `data.amount_out_of_range`。**组件里不应出现第二处解析**
 - 金额在 TS 侧用**分支类型**（branded type）标记为「最小单位整数」，防止和「元」混用
 - Rust↔TS 类型是否引入 codegen（如 `tauri-specta`）**暂不决定**，见 §5 风险 R2
 
@@ -289,6 +525,11 @@ memory_rules · audit_log
 | R4 | 证据目录长期累积到 GB 级后的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.2、[02 导入](./02-ingest.md) | 真实使用出现容量问题时 |
 | R5 | 数据库 at-rest 加密——v1 不做（数据不出本机 + macOS FileVault 已提供一层）。若未来需要，`rusqlite` 的 `bundled-sqlcipher` 是路径 | 全产品安全姿态 | v1 明确不做，登记以免被沉默填掉 |
 | R6（**新增 2026-08-07**） | 证据区域坐标字段——[03 审核 §5](./03-review.md) R1 若结论是「能稳定定位」，`draft_transactions` 需加坐标列 | 本文 §3.6 | M1 开工前随 03 R1 一并决；**只前进迁移，届时加 `0002_*.sql` 即可**，不阻塞 M0 |
+| R7（**新增 2026-08-10**） | **一次尝试多条合计**——账单常同时印「本期消费合计」与「本期收入合计」，甚至再加期初/期末余额。§3.6 现在只登记一条（取消费合计），另一条丢弃 | 本文 §3.6 `reported_total_*`、[03 审核 §3.3](./03-review.md) | M2 拿到真实月结单后决。**候选是把四列拆成 `reconciliation_claims` 子表**（一来源多行，各带 kind/金额/币种/原文）。M0/M1 不做——单条已覆盖交易列表类截图，而那是 M0 的主要来源类型 |
+| R10（**新增 2026-08-10**） | **模型报不准 span 时的退路**——§3.6「span 用哪套坐标」要求 agent 直接报 code point 区间。若实测发现它经常算错，退路是改成 `evidence_text` + `evidence_occurrence`（第几次出现），由 Rust 算 span | 本文 §3.6、[01 §3.2](./01-agent-runtime.md) 工具参数 | **M0 第一轮 eval 后决**——这是工具形态变更，需要真实数据支撑。在此之前不做 |
+| R11（**新增 2026-08-10**） | **M3 的 ordinal 跨表唯一**——同一段口述会同时产出 `draft_transactions` 与 `draft_items`，两张表**各自**的 `UNIQUE(attempt_id, source_ordinal)` **保证不了跨表唯一**：交易第 2 条和事项第 2 条会同时存在，而 [07 评测](./07-eval.md) 的对齐按 ordinal 配对 | 本文 §3.6、[05 事项](./05-items.md)、[07 评测 §3.2](./07-eval.md) | **M3 开工前决**，两条候选：① domain 在同一事务里跨表检查；② 引入一张公共的位置占用表。**不阻塞 M0**（`draft_items` 是 M3 的表），登记以免被沉默填掉 |
+| R9（**新增 2026-08-10**） | **范围不变式挡不住时怎么办**——§3.4 用「IPC 传字符串 + `\|v\| ≤ 10^15`」换掉了全链路 `bigint`。若将来出现合法但超范围的金额（极端通胀币种、或产品扩到机构场景），路径是**全链路 `bigint`**：IPC 已经是字符串，改动面收窄在 TS 侧 | 本文 §3.4/§3.8、[`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) | 出现第一个被 `data.amount_out_of_range` 拒绝的**合法**金额时。**在此之前不做**——`bigint` 的代价是真的，而这个场景至今是假想的 |
+| R8（**新增 2026-08-10**） | **跨 exponent 币种的汇率精度**——`rate_ppm` 是主单位汇率 × 1e6（§3.4）。原币 exponent 大于本位币时有效精度会掉：`1 JPY = 0.010412 AUD` 存成 `10412`，相对精度只剩 1e-4，大额换算后可能与账单印的折算金额差几分，从而让总额校验系统性 `failed` | 本文 §3.4、[03 审核 §5](./03-review.md) R6 | **M2 与 R3（舍入规则）一并实测**。候选：提高标度到 1e-9（`rate_nano`），或对该情形改存「最小单位对最小单位」的比率。**M0/M1 不动**——验证场景的两个币种 exponent 都是 2，本条不触发 |
 
 ## 6. 验收标准
 
@@ -299,17 +540,39 @@ memory_rules · audit_log
 - [ ] `cargo test` 全绿
 - [ ] `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 全绿
 - [ ] `cargo test foundation::migration_idempotent` 通过——同一库连开两次，`user_version` 不变、无重复表
+- [ ] `cargo test foundation::m0_creates_six_tables` 通过——空目录启动后 M0 六张表存在（含 `accounts` 骨架）
 - [ ] `cargo test foundation::migration_drift_rejected` 通过——把 `user_version` 手工调高一号后打开，返回 `data.migration_drift` 且不写入任何数据
 - [ ] `cargo test foundation::money_roundtrip_is_integer` 通过——金额经「写入 → 读出 → IPC 序列化 → 反序列化」四步后逐位相等
 - [ ] `cargo test foundation::money_inconsistent_rejected` 通过——三元组不自洽时写入被拒并返回 `data.money_inconsistent`
+- [ ] `cargo test foundation::currency_exponent_is_not_hardcoded_two` 通过——`currency_exponent("JPY") == 0`、`("KWD") == 3`、`("AUD") == 2`；未知币种回落到 2 且产生一条告警（§3.4「币种精度」）
+- [ ] `cargo test foundation::convert_across_exponents` 通过——AUD（exp 2）→ JPY（exp 0）与反向各一例，结果与手算逐位相等；**去掉公式里的 `10^exp` 项时该用例必须变红**
+- [ ] `rg -n '/ 100|\* 100' src-tauri/src src` 无命中，或每处命中都在 exponent 表实现内（§3.4）
 - [ ] `cargo test foundation::base_currency_frozen_per_row` 通过——切换全局本位币后，已确认交易的 `base_currency` 与 `base_amount_minor` 逐行不变
 - [ ] `cargo test foundation::rollup_groups_by_base_currency` 通过——含两种本位币的数据集，汇总按本位币分组返回，**不产生跨本位币的单一合计**
 - [ ] `rg -n 'SUM\(base_amount_minor\)' src-tauri/src` 的每处命中都伴随 `GROUP BY base_currency` 或单本位币断言
 - [ ] `cargo test foundation::draft_requires_evidence` 通过——`source_id` 或 `evidence_text` 为空时插入 `draft_transactions` 失败
-- [ ] `cargo test foundation::declared_total_all_or_nothing` 通过——`declared_total_*` 三列只填其一或其二时 CHECK 拒绝
+- [ ] `cargo test foundation::reported_total_all_or_nothing` 通过——`parse_attempts.reported_total_*` 四列只填一部分时 CHECK 拒绝
+- [ ] `cargo test foundation::reported_total_lives_on_attempt` 通过——`sources` 表**不存在** `declared_total_*` 列；同一来源解析两次，两行 `parse_attempts` 各自带自己的 `reported_total_*`，第一次的值不被第二次覆盖（§3.6「声明合计归尝试，不归来源」） <!-- legacy -->
 - [ ] `cargo test foundation::utterance_evidence_is_a_file` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
-- [ ] `cargo test foundation::utterance_has_no_declared_total` 通过——`kind = utterance` 的 `declared_total_*` 全空、CHECK 通过、总额校验结果为 `unavailable`
-- [ ] `cargo test foundation::draft_records_backend_and_model` 通过——每条草稿的 `backend_id` 非空（[07 评测 §3.2](./07-eval.md) 的必要条件）
+- [ ] `cargo test foundation::utterance_has_no_reported_total` 通过——`kind = utterance` 的尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
+- [ ] `cargo test foundation::m0_insert_transaction_with_null_account` 通过——`PRAGMA foreign_keys = ON` 下，M0 schema 里插入 `account_id IS NULL` 的交易**成功**（`accounts` 骨架表存在）；同时插入一个不存在的 `account_id` **被 FK 拒绝**
+- [ ] `cargo test foundation::money_crosses_ipc_as_string` 通过——金额与 `rate_ppm` 序列化出去是十进制字符串，`i64::MAX` 往返后逐位相等（走 JSON 数字时该用例必须变红）
+- [ ] `cargo test foundation::amount_out_of_range_rejected` 通过——`|v| > 10^15` 的金额在序列化前被拒并返回 `data.amount_out_of_range`
+- [ ] `npm test -- bridge/money-parse` 通过——`call<T>` 把字符串金额解析成安全整数，超范围抛 `data.amount_out_of_range`；组件里不存在第二处解析
+- [ ] `cargo test foundation::utterance_idempotency_is_by_token` 通过——同一段文本配**不同** `idempotency_key` 提交两次产生**两条** `sources`；配**同一个**令牌提交两次只产生一条（§3.6「口述的幂等键不是内容哈希」）
+- [ ] `cargo test foundation::file_hash_unique_only_for_files` 通过——两条 `kind = utterance` 且 `content_hash` 相同的行可以共存，而两条 `kind = file` 且哈希相同的不行（部分唯一索引）
+- [ ] `cargo test foundation::draft_links_to_attempt` 通过——每条草稿的 `attempt_id` 指向真实的 `parse_attempts` 行，且该行 `backend_id` 非空（[07 评测 §3.2](./07-eval.md) 的必要条件）
+- [ ] `cargo test foundation::draft_ordinal_is_unique_per_attempt` 通过——同一尝试内两条草稿用同一个 `source_ordinal` 时插入被拒（§3.6「位置是 agent 报的」）
+- [ ] `cargo test foundation::utterance_draft_requires_span` 通过——`kind = utterance` 的草稿缺 `evidence_span_*` 时被拒；`file` 的草稿带 span 时被拒
+- [ ] `cargo test foundation::span_bounds_rejected` 通过——`start == end`、`start > end`、`end > code_point_length(text)`、负数四种越界都被拒（§3.6 第一条校验）；**只实现 substring 相等检查会漏掉全部四种**
+- [ ] `cargo test foundation::span_is_code_point_indexed` 通过——转写文本含 emoji 与中文时，`slice_by_code_points(text, start, end) == evidence_text`；**改用字节偏移或 UTF-16 索引的实现必须让该用例变红**（§3.6「span 用哪套坐标」）
+- [ ] `npm test -- bridge/span-roundtrip` 通过——同一份含 emoji 的文本与同一对 `(start, end)`，Rust 与 TS 两端切出的子串**逐字相等**
+- [ ] `rg -n 'as_bytes\(\)|\.slice\(|&s\[' src-tauri/src src` 的命中都不在 span 计算路径上（§3.6：Rust 用 `.chars()`、TS 用 `Array.from`）
+- [ ] `cargo test foundation::unknown_currency_rejected` 通过——币种码不在 ISO 4217 表内时返回 `data.unsupported_currency` 且**不写库**；**回退到 exponent 2 的实现必须让该用例变红**
+- [ ] `cargo test foundation::drafted_json_is_immutable` 通过——草稿被行内编辑后 `drafted_json` 逐字节不变，而 `amount_minor` 等列已改（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
+- [ ] `rg -n 'drafted_json' src-tauri/src` 的命中中**不存在** `UPDATE`（与 `audit_log` 同级的 append-only 检查）
+- [ ] `cargo test foundation::attempt_records_provenance` 通过——一次解析后 `parse_attempts` 恰好多一行，`prompt_hash` / `tool_surface_version` / `app_version` 均非空
+- [ ] `cargo test foundation::retry_creates_new_attempt` 通过——同一来源解析两次产生**两行** `parse_attempts`，第一行不被覆盖，`sources.latest_attempt_id` 指向第二行
 - [ ] `cargo test foundation::draft_triple_all_or_nothing` 通过——草稿三元组只填部分时 CHECK 拒绝
 - [ ] `cargo test foundation::confirm_requires_complete_triple` 通过——三元组不齐的草稿确认时返回 `review.incomplete_triple`
 - [ ] `cargo test foundation::transaction_traces_to_draft` 通过——由草稿确认而来的 `transactions` 行，`source_draft_id` 指向该草稿且该草稿 `consumed_at` 非空
@@ -324,7 +587,22 @@ memory_rules · audit_log
 
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+| 日期 | 回流内容 | 依据 |
+|---|---|---|
+| 2026-08-10（四轮） | **`evidence_span` 只写了「字符区间」，而「字符」在 Rust 与 TS 之间有四种互不相同的含义**（UTF-8 字节 / UTF-16 code unit / code point / grapheme）。**中文夹一个 emoji 就会立刻错位**，且表现为「高亮选错半句话」，看起来像模型报错了位置。定死：零起、左闭右开、**Unicode code point**、对象是未经 normalize 的落盘文本；Rust 用 `.chars()`、TS 用 `Array.from`，**不许用原生字符串索引**；写入时强制两条校验。退路（`evidence_occurrence`）登记为 R10 | 文档审查（四轮） |
+| 2026-08-10（四轮） | 新增 R11：**M3 的 ordinal 跨表唯一**——两张草稿表各自的 `UNIQUE(attempt_id, source_ordinal)` 保证不了跨表唯一，而同一段口述会同时产出两类草稿。不阻塞 M0，登记以免被沉默填掉 | 文档审查（四轮） |
+| 2026-08-10（三轮） | **eval 的条目对齐在 `file` 来源上写不出来**：[07 §3.2](./07-eval.md) 要求预测侧也有位置，而它写的是「草稿按 `evidence_text` 在原件上的位置排序」——**系统里没有 OCR 也没有坐标**，这与同一份文档承认的「子串断言对图像来源无法实现」是同一个事实，上一版只认了一半。改为**位置由 agent 起草时一并报告**：`draft_transactions` 新增 `source_ordinal`（两种来源都必填、`(attempt_id, ordinal)` 唯一、允许跳号）与 `evidence_span_*`（`utterance` 必填）。同步 [01 §3.2](./01-agent-runtime.md) 工具参数、[07 §3.2](./07-eval.md) 对齐算法、[03 §3.4](./03-review.md) 排序 | 文档审查（三轮） |
+| 2026-08-10（三轮） | **未知币种回退到 exponent 2 会产出「带告警但已入账的错误金额」。** 币种的取值域已被定义为 ISO 4217，域外值只有读错/拼错/新代码三种来源，没有一种适合猜。`currency_exponent` 改为返回 `Result`，未知即 `data.unsupported_currency` 并拒绝写入 | 文档审查（三轮）；与「有记录但没拦住 = 没记录」同一条原则 |
+| 2026-08-10（三轮） | 三处机械漂移：M0 表数「四→五」改为「四→六」；`accounts` 表「M2 建」改为「M0 建骨架」；**列级写入权限那句「其余列与全部其他表由 Rust 写」字面上排除了 `draft_*`**，改为说全 agent 能写的两处 | 文档审查（三轮） |
+| 2026-08-10（二轮） | **`declared_total_*` 放在 `sources` 上是放错了地方。** 那四个值不是原件的属性，是**某一次 agent 解析的输出**。放在来源上导致三种坏情况：① 尝试超时后草稿按 `attempt_id` 作废而合计留了下来；② 重试时新尝试被「一来源一次成功调用」挡住，或默默沿用上次可能读错的值；③ 一个来源被成功解析两次时，「全部未作废草稿」混进两次尝试的输出。改为四列改名 `reported_total_*` 移入 `parse_attempts`，**总额校验入参改为 `attempt_id`**，`sources.latest_attempt_id` 决定当前受审的是哪次输出。agent 对 `sources` 的写入权限随之归零 | 文档审查（二轮）；生命周期必须与产出它的那次尝试闭合 |
+| 2026-08-10（二轮） | **`transactions.account_id REFERENCES accounts(id)` 会让 M0 的第一条 `INSERT` 直接失败。** sqlite 3.45.3 实测：`PRAGMA foreign_keys = ON` 下父表不存在时，**即使 `account_id` 是 `NULL`** 也报 `no such table: main.accounts`（SQLite 在写子表时才解析父表，`CREATE TABLE` 阶段不报错，所以问题推迟到运行时）。**M0 加一张 `accounts` 骨架表（四列，不写行、UI 不呈现），M0 由五表改为六表** | 实测；备选「M0 不声明 FK、M2 重建 `transactions`」与「留列是为了避免返工」的理由自相矛盾 |
+| 2026-08-10（二轮） | **「TS `number`」与约束 6「任何位置禁止浮点」直接打架**——JS 的 `number` 就是 IEEE-754 双精度，branded type 挡得住单位混用、挡不住精度。真实失败路径是 `JSON.parse` 把超 `2^53` 的值**静默舍入**，而这个值正是 agent 把截图数字读错成 20 位时产生的。改为 **IPC 传十进制字符串 + `\|v\| ≤ 10^15` 范围不变式 + 两侧各校验一次**，新增 `data.amount_out_of_range`。约束 6 的措辞同步改准；全链路 `bigint` 登记为 R9 的后路 | 产品决定（2026-08-10）：IPC 传字符串，TS 内部仍 number |
+| 2026-08-10 | **§3.4 的金额与汇率约定在非 2 位小数币种上是错的。** 「最小货币单位」被直接写作「分 / cent」、换算公式直接乘 `rate_ppm / 1e6`——对 JPY（exp 0）/ KWD（exp 3）会差 10^\|Δexp\| 倍。补 `currency_exponent()` 与含 exponent 的换算公式；格式化不得写死 `/ 100`。**这不是改决定，是补一直漏掉的那一项**（同 exponent 时逐位相同）。同步 [ADR-0004 §2/§3](../adr/0004-data-model-sqlite-integer-money.md)、[04 交易 §3.2](./04-transactions.md)、[`.claude/rules/money-and-data.md`](../../.claude/rules/money-and-data.md)、[`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) | 文档审查；与 [`docs/PRD.md` §3.1](../PRD.md)「解析能力与国家/币种无关」冲突——写死两位小数就是把地域假设塞回 schema |
+| 2026-08-10 | **`utterance` 用内容哈希永久去重会静默吞掉真实交易。** 跨天各说一句「今天咖啡 5 元」文本逐字相同，第二笔被判重复直接消失。改为：`content_hash` 的唯一约束收窄到 `kind = 'file'`，`utterance` 用一次提交一个 `idempotency_key`，文本重复只提示不阻止。同步 [02 导入 §3.2](./02-ingest.md) | 文档审查；原理由（「重说一遍通常意味着以为没记上」）只在几分钟尺度成立 |
+| 2026-08-10 | **新增 `parse_attempts` 表（M0）与 `draft_transactions.drafted_json`（M0）。** 前者：`sources.agent_session_id` 只存最近一次，重试即覆盖，[07 评测 §3.5](./07-eval.md) 的「模型退步 vs 提示词改坏」无从区分；`backend_id` / `model_id` 随之从草稿表移到尝试表，同一事实只留一个出处。后者：[03 审核 §3.5](./03-review.md) 的行内编辑会就地改写草稿，[07 §3.2](./07-eval.md)「草稿保留原始起草值」因此**不成立**，eval 真值恒等于人的答案。同步 [`docs/PRD.md` §9.2/§9.3](../PRD.md)、[01 §3.4](./01-agent-runtime.md)、[07 §3.2](./07-eval.md) | 文档审查 + 产品决定（2026-08-10）：接受为此扩大 M0 |
+| 2026-08-10 | **`sources` 新增 `declared_total_kind`。** 单个 scalar 表达不了「消费合计 / 收入合计 / 净变动」，而三者对应三条不同等式；一张含退款的账单按旧写法必然 `failed`，看起来像 agent 读错。同步 [ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)、[01 §3.2](./01-agent-runtime.md)、[03 §3.3](./03-review.md) | 文档审查 |
+| 2026-08-10 | **`transactions` 新增 `account_id`（M0/M1 恒空，M2 启用）+ `accounts` 进全表清单。** [`docs/PRD.md` §2](../PRD.md) 以多账户为首要验证场景，而 schema 只有 `channel`（支付方式类别），「哪张卡」无法表达，[02 §3.6](./02-ingest.md) 跨图去重与 [04 §5](./04-transactions.md) R3 转账双边因此没有落点。同步 [04 §3.1/§3.4](./04-transactions.md) | 产品决定（2026-08-10）：现在留字段，M2 实现 |
+| 2026-08-10 | **§3.7 补 6 个 `agent.*` 错误码。** 其中 `agent.interrupted` 早在 [02 导入 §3.4](./02-ingest.md) 被使用却从未登记——本表自称「全仓库唯一出处」，漏登记即缺陷 | 文档审查 |
 
 ---
 
@@ -333,6 +611,11 @@ memory_rules · audit_log
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：存储引擎与数据目录、标识/时间/金额/汇率约定、迁移策略、M0 四表与 v1 全表清单、命令契约与 `AppError` 形状、TS 桥；否决方案六条；待决 R1–R5；验收标准 11 条可执行 + 1 条人工 |
+| v0.10 | 2026-08-10 | **文档审查第五轮回流**：`effective_tool_surface_hash` **改名 `effective_capability_hash`** 并扩到非工具型能力（[01 §3.7](./01-agent-runtime.md)）；§6 补 span 的四种越界用例 |
+| v0.9 | 2026-08-10 | **文档审查第四轮回流。** ① **`evidence_span` 的坐标系定死**（零起、左闭右开、Unicode code point、未 normalize 的落盘文本，两端实现方式指定）——原文「字符区间」在 Rust/TS 之间有四种解释，中文夹 emoji 即错位；写入时强制 `slice_by_code_points(...) == evidence_text`，顺带让 `utterance` 的 `evidence_text` 变成可独立核验的。② 新增错误码 `agent.unexplained_gap`。③ §5 新增 R10（span 报不准的退路）与 R11（M3 ordinal 跨表唯一）。§6 新增 4 条验收 |
+| v0.8 | 2026-08-10 | **文档审查第三轮回流。** ① `draft_transactions` 新增 **`source_ordinal`**（两种来源必填）与 **`evidence_span_*`**（`utterance` 必填）——没有它 [07](./07-eval.md) 的条目对齐在 `file` 来源上根本写不出来（没有 OCR、没有坐标）。② **未知币种由「回退 2 + 告警」改为 `data.unsupported_currency` 拒绝**。③ 三处机械漂移：M0 表数、`accounts` 建表时机、列级写入权限的措辞。§6 新增 3 条验收 |
+| v0.7 | 2026-08-10 | **文档审查第二轮回流，三处硬缺陷。** ① **`declared_total_*` 由 `sources` 移到 `parse_attempts` 并改名 `reported_total_*`**——合计是某次尝试的输出，不是原件的属性；旧位置让它在重试后与草稿生命周期脱钩。总额校验入参改为 `attempt_id`；agent 对 `sources` 的写入权限归零。② **M0 加 `accounts` 骨架表（五表→六表）**——`account_id` 的 FK 指向不存在的父表时，SQLite 在 `foreign_keys = ON` 下**连插入 `NULL` 都会失败**（实测）。③ **金额与汇率在 IPC 上改为十进制字符串** + `\|v\| ≤ 10^15` 范围不变式 + 两侧校验，新增 `data.amount_out_of_range`——原写法（TS `number`）与约束 6 字面冲突，且 `JSON.parse` 的静默舍入正好落在「agent 读错数字」这条路径上。§5 新增 R9；§6 新增 7 条验收、改写 3 条 |
+| v0.6 | 2026-08-10 | **文档审查回流，六处。** ① §3.4 补**币种 exponent** 与含 exponent 的换算公式（JPY/KWD 会差 100 倍）。② §3.6 `sources`：`content_hash` 唯一约束收窄到 `kind = 'file'`、新增 `idempotency_key`——口述用内容哈希永久去重会**静默吞掉跨天的真实重复交易**。③ §3.6 新增 **`parse_attempts` 表**（M0 第五张）并把 `backend_id` / `model_id` 从草稿表移入；`sources.agent_session_id` 改为 `latest_attempt_id`。④ §3.6 `draft_transactions` 新增 **`drafted_json`**（不可变起草快照）与 `voided_at`——行内编辑会就地改写草稿，[07 §3.2](./07-eval.md) 的 eval 真值原本不成立。⑤ §3.6 `sources` 新增 **`declared_total_kind`**、`transactions` 新增 **`account_id`**。⑥ §3.7 补 6 个 `agent.*` 码（含早被使用却未登记的 `agent.interrupted`）。§5 新增 R7（一来源多条合计）R8（跨 exponent 汇率精度）；§6 新增 11 条验收。详见「7. 回流记录」 |
 | v0.5 | 2026-08-08 | 公开仓库去个人化：§5 待决表与本表的决策署名统一为「产品决定」，去掉工具与会话指代；`owner` 改为 `@maintainer`。**决定、schema 与验收标准未变** |
 | v0.4 | 2026-08-08 | **设计评审回流。** ① `sources` 新增 **`kind`（`file` \| `utterance`）** 并加「来源不等于文件」小节：闸门 2 要的是「痕迹 + 原文」而非「文件」；此前的隐含假设造成硬墙——`draft_transactions.source_id` 非空而口述无文件，导致 [ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md) 自己举的跨实体口述例子**在结构上落不了地**。转写文本落盘成 `.txt` 与截图同等对待，`original_filename` 随之改为可空。② `draft_transactions` 新增 **`backend_id` / `model_id`**——[07 评测](./07-eval.md) 的 eval 集是「草稿 ← 交易」join，不记后端与模型则基线不可解释。③ §6 新增 3 条验收 |
 | v0.3 | 2026-08-07 | **M0 开工评审 → `status: ready`。** ① §3.6 四张 M0 表**逐列定死**（此前只有「关键约束」，本节自己注明「详细字段开工前补」——现在补上）：`sources` 新增 `state` / `evidence_relpath` / `parse_error_code` / `agent_session_id` 与 **`declared_total_currency`+`declared_total_evidence_text`**（原设计只有金额没有币种，无法校验；且校验基准本身必须可核对）；`draft_transactions` 明确三元组**草稿可空、确认必填**；`transactions` 新增 **`source_draft_id` 溯源列**（兑现 [03 §3.1](./03-review.md) 的审计承诺，原先无落点）；`audit_log.actor` **新增 `system`**（超时作废等代码触发的动作原先无合法取值）；新增 agent 对 `sources` 的**列级写入权限**收窄。② §3.7 补全**权威错误码集** 18 条——此前只登记 `data.*`，而 `.claude/rules/` 已在示例中使用未登记的 `review.*` 码。③ §5 新增 R6（证据坐标字段，随 [03](./03-review.md) R1 决，不阻塞 M0）。④ §6 新增 6 条验收 |

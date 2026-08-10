@@ -4,7 +4,7 @@
 
 **仓库处于骨架阶段（2026-08-06 建立）**：约束已就位，`src/` 与 `src-tauri/` **尚未创建**。设计文档是产品与架构的事实源——**版本号不在本文登记**（会腐烂），各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 的状态总览表为准。第一个里程碑是 **M0 端到端点亮**（见 [`docs/PRD.md`](./docs/PRD.md) 里程碑表）。
 
-> ⚠️ **M0 当前被一个 spike 阻塞**：[`docs/prd/01-agent-runtime.md`](./docs/prd/01-agent-runtime.md) 已于 2026-08-09 退回 `status: draft`——「MCP server 在 Tauri 主进程内 + agent CLI 以 stdio 连上来」物理上不成立（stdio 型 server 由 CLI 自己 `fork/exec`）。候选方案与 spike 要求见该文 §5 R6。**开工前先解这条。**
+> ⚠️ **M0 当前被一个 spike 阻塞**：[`docs/prd/01-agent-runtime.md`](./docs/prd/01-agent-runtime.md) 已于 2026-08-09 退回 `status: draft`——「MCP server 在 Tauri 主进程内 + agent CLI 以 stdio 连上来」物理上不成立（stdio 型 server 由 CLI 自己 `fork/exec`）。候选方案与 spike 要求见该文 §5 R6，**2026-08-10 增加第 ④ 项检查：密封启动配置与有效工具集探测**（约束 9 的另一半，关不掉 CLI 的内置工具则闸门 1 在进程层不成立，这会反过来影响候选方案的取舍）。**开工前先解这条。**
 
 ### 常用命令
 
@@ -25,8 +25,13 @@
 - `node docs/prd/check-docs.mjs` — `docs/prd/` 的 frontmatter 必填字段 + 相对链接可达
 - `node scripts/check-links.mjs` — 全仓库 `.md` 相对链接可达（ADR、总 PRD、`CLAUDE.md`、`.claude/rules/` 等 `check-docs` 覆盖不到的部分），并禁止 `file://` 绝对路径
 - `node scripts/check-readme-sync.mjs` — [`README.en.md`](./README.en.md) 不落后于 [`README.md`](./README.md)（判据见「文档层级」的同步规则）
+- `node scripts/check-spec-invariants.mjs` — **现行章节里不得残留已被推翻的结论**（禁用表见脚本内，每条都注明它防的是哪一次真实回退）
 
-三条都由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
+四条都由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
+
+> **第四条为什么存在**（2026-08-10 建立）：前三条查的是格式、链接可达性与提交关系。**一轮把「口述合计恒为空」改成「通常为空、说了就对账」的改动之后，它们全是绿的，而七处文档仍在说旧结论**——其中一处还写在 agent 提示词里，会直接把实现者引回错误的做法。**跨文档一致性（[`docs/prd/CLAUDE.md`](./docs/prd/CLAUDE.md) 硬规则 5）此前完全靠人记得 grep**，而这正是最容易忘的一步。 <!-- legacy -->
+>
+> 它不理解语义，只把几条最容易复发的旧措辞列成禁用表。**「变更记录」与「回流记录」整段跳过**（那两节的职责就是引用旧结论）；现行正文里确需引用旧措辞时，**在行尾加 `<!-- legacy -->` 显式标注**——不提供隐式启发式，那会让检查器在最该报警的地方闭嘴。
 
 ## 产品事实
 
@@ -42,12 +47,15 @@
 1. 桌面壳使用 **Tauri v2**；界面使用 **React + TypeScript**；系统能力、本地存储与进程管理由 **Rust/Tauri command** 提供。不创建 Electron、内嵌 Node.js 本地服务或 `localhost` HTTP API，除非先通过 ADR 修改平台决策（见 [ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)）。
 2. **数据不出本机**：不引入任何云服务、后端 API、账号体系、遥测、崩溃上报或第三方分析。唯一允许的出站流量是用户自己的 agent CLI 与其模型服务商之间的通信（由该 CLI 自行发起，应用不代理、不转发、不记录）。
 3. **AI 永不直接写入账本**（[ADR-0002](./docs/adr/0002-ai-never-writes-directly.md)）：agent 只能产出**待确认草稿**（`draft_*` 表），经人工确认后才由确认动作写入事实表。任何绕过草稿区的写入路径都是缺陷。
-4. **证据链强制**：每一条草稿必须挂载来源——`source_id`（**哪张截图、哪个文件，或哪段口述文本**；口述走 `kind = utterance`，转写文本落盘成 `.txt` 与截图同等对待）+ 原文片段。审核界面必须把原文与解析结果并排呈现。无证据的草稿不得入库，**全部 `draft_*` 表一视同仁，没有例外**。
+4. **证据链强制**：每一条草稿必须挂载来源——`source_id`（**哪张截图、哪个文件，或哪段口述文本**；口述走 `kind = utterance`，转写文本落盘成 `.txt` 与截图同等对待）+ `evidence_text`。审核界面必须把**来源原件**与解析结果并排呈现。无证据的草稿不得入库，**全部 `draft_*` 表一视同仁，没有例外**。
+   > **`evidence_text` 是 agent 的抽取声明，不是独立证据**——它和被核对的金额出自同一次模型输出，模型读错时它跟着错，两者自洽却一起错。**证据是不可变原件**，`evidence_text` 只是「原件上的哪个位置」的指针；并排的必须是原件（[ADR-0002 闸门 2](./docs/adr/0002-ai-never-writes-directly.md)）。**agent 的原始起草值（`drafted_json`）不可变**，人的编辑不得覆盖它。
 5. **总额交叉校验**：从一个来源拆出的条目，其合计必须与该来源自身印着的**声明合计**核对；不符时必须显式报警并阻止批量入库。这是唯一能在无人工介入下捕获错误的机制，优先级高于解析准确率本身。**基准是声明合计，不是账户余额**——余额要当基准需要期初/期末/方向三项，schema 只存一个数字，只印余额时正确结果是 `unavailable`（[ADR-0002 闸门 3](./docs/adr/0002-ai-never-writes-directly.md)）。
-6. **金额一律以整数存储最小货币单位**（分 / cent）。任何位置禁止用浮点数表示金额，包括中间计算与 IPC 传输。
+   > 四条容易写错的细节（[03 审核 §3.3](./docs/prd/03-review.md)）：**① 入参是 `attempt_id`，求和范围是该次尝试全部未作废的草稿**——按「未消费」求和会让逐条确认一条后该来源永远回不到 `passed`，按 `source_id` 求和会把重试后两次尝试的草稿混在一起；**② 合计存在 `parse_attempts.reported_total_*`，不在 `sources` 上**——它是那次解析的输出，和草稿同生共死；**③ 合计带类型**（`expense_total` / `income_total` / `net_change`），三者是三条不同的等式，判不出类型就是 `unavailable`；**④ 结果是两个字段**——`reconciliation_status`（能不能对账，四态）与 `confirmation_policy`（能不能批量确认，三态），**放行批量的是后者**；`kind = file` 永远拿不到 `user_attested_batch`。
+6. **金额一律以整数存储与传输最小货币单位**。任何位置禁止用**小数/浮点**表示金额，包括中间计算与 IPC 传输。三条细则（[00 地基 §3.4](./docs/prd/00-foundation.md)）：**① 「最小单位」不恒等于「分」**——由 ISO 4217 的 exponent 决定（JPY/KRW 0 位、KWD/BHD/JOD 3 位），格式化除以 `10^exponent` 而非写死 100，汇率换算公式同样要带两边的 exponent；**② IPC 上金额与汇率是十进制字符串**——JSON 数字会让 `JSON.parse` 把超 `2^53` 的值静默舍入，而那正是 agent 读错数字时产生的值；**③ TS 的 `number` 只作为安全整数载体**，范围不变式 `|v| ≤ 10^15` 由 IPC 两侧各校验一次，超出返回 `data.amount_out_of_range`。**「TS 里没有浮点类型」做不到，所以这一条靠的是表示 + 范围，不是类型。**
 7. **多币种三元组**：每笔交易同时存**原币金额 + 本位币金额 + 当时汇率**。不得只存换算后的结果，也不得在录入时要求用户手算。
 8. **append-only 审计日志**：每一次 agent 写入、每一次人工修改都留一条「谁 / 何时 / 把什么改成了什么」。审计表只追加，不更新、不删除。
 9. **工具权限由代码强制，不靠 agent 自觉**：MCP 工具的写入范围在实现层面锁死（记账工具只能写**交易草稿表** `draft_transactions`，事项工具只能写**事项草稿表** `draft_items`，修正工具带硬规则）。**工具集里不存在任何能触及事实表的工具**（与约束 3 同一件事，不是两条）。不得提供通用的「执行任意 SQL」类工具。
+   > **这条只管我们注册的工具，另一半在启动参数里**（[01 §3.7](./docs/prd/01-agent-runtime.md)）：后端是通用编码 agent，自带执行命令与文件读写工具，一条 `sqlite3 daybook.db "INSERT INTO transactions …"` 就绕过全部四道闸门，**而遍历自己工具注册表的测试照样全绿**。因此 **agent 子进程必须以密封配置启动，且有效工具集在下发任务前实测**，不相等即 `agent.tool_surface_unsealed` 拒绝运行、不降级。**两半缺一，另一半就是装饰。**
 10. **单 agent + 多工具**，不按业务领域拆 agent。子 agent 只用于**上下文隔离**（如解析超长截图），不用于业务分工。产品运行时不引入多 agent 自主编排。
 11. **Agent 后端可插拔，但后端只能是「用户已配置好的外部进程」**：`claude -p` / `codex exec` / 本地模型进程，接口从第一天存在。应用**不打包任何厂商凭证、不存储用户的 API key、不提供第三方登录、不代理厂商鉴权、不自己发出站请求**；用户使用的是自己已安装并登录的 CLI。**「应用直连模型 API」不是可插拔接口的一个选项**——它会同时破掉本条与约束 2（唯一出站流量归 CLI），要做必须先写新 ADR 重定出站与凭证边界。
 12. **弱信号采集默认全关**（日历、git、浏览器历史、屏幕使用时间等）：逐项授权、可随时关闭、采集结果只留本机。窗口标题等高敏数据必须在 UI 上明示其敏感性。

@@ -25,6 +25,7 @@ The only commands that run today are the documentation gates, enforced by CI on 
 node docs/prd/check-docs.mjs        # frontmatter + links under docs/prd/
 node scripts/check-links.mjs        # Markdown links across the whole repo
 node scripts/check-readme-sync.mjs  # README.en.md is not behind README.md
+node scripts/check-spec-invariants.mjs  # no superseded conclusions left in current sections
 ```
 
 The frontend and Rust commands only exist once [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) lands; the full list is in [`CLAUDE.md`](./CLAUDE.md) under「常用命令」(common commands).
@@ -79,10 +80,10 @@ Vision models **really do read 168 as 1680**, and a single wrong number in a led
 
 | Gate | What it does |
 |---|---|
-| **Draft area** | The AI writes only to `draft_*` tables; nothing reaches the fact tables until a human confirms it |
-| **Evidence chain** | Every draft carries its origin — which screenshot (or which spoken utterance), and which line of source text — replacing "trust the AI" with "glance at the original" |
-| **Total cross-check** | The entries extracted from one source must add up to the total printed on that source itself; a mismatch raises an alarm without anyone asking |
-| **Append-only audit log** | Every AI write and every human edit leaves a trace |
+| **Draft area** | The AI writes only to `draft_*` tables; nothing reaches the fact tables until a human confirms it. The subprocess starts under a sealed configuration, and **the tools it can actually reach** are probed before any task is dispatched |
+| **Evidence chain** | Every draft carries its origin — which screenshot (or which spoken utterance), and which passage the model claims it read — and what you get side by side when reviewing is **the original itself**, replacing "trust the AI" with "glance at the original" |
+| **Total cross-check** | The entries extracted from one source must add up to the total printed on that source itself; a mismatch raises an alarm without anyone asking. When a source has no printed total by its very nature (a sentence you spoke, say), that gate is swapped for another: the full transcript shown beside every extracted entry, and your single confirming keystroke |
+| **Append-only audit log** | Every AI write and every human edit leaves a trace; **the AI's original draft is kept forever** |
 
 ---
 

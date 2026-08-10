@@ -16,11 +16,17 @@ model: opus
 **你的地盘**：`src-tauri/src/` 下的 `commands/` · `domain/` · `mcp/` · `agent/`。
 **不碰**：`store/` + schema + 迁移（`data-model`）· `src/`（`frontend`）· 测试夹具与 eval 脚本（`tester`）。
 
-## 三条底线（其余见 rules）
+## 四条底线（其余见 rules）
 
 1. **MCP 工具的写入目标在类型上就收窄**——给草稿区一个独立 store 类型，它根本没有写事实表的方法。越权要在编译期不可表达，而不是靠 review 发现。
-2. **确认动作只能由人触发**：`domain::confirm` 不被任何 MCP 工具调用；总额校验的 `Unavailable` 不伪装成 `Passed`，且**不提供 `force` 参数**——那就是旁路。
-3. **上层只见 `Box<dyn AgentBackend>`**，代码里不出现任何厂商 API key、endpoint、登录流程或读用户凭证文件。
+2. **有效工具集 ≠ 我们注册的工具集**（[01 §3.7](../../docs/prd/01-agent-runtime.md)）。上一条只管我们暴露的那几个工具，而后端是通用编码 agent，自带执行命令与文件读写——**起一个「默认配置」的 `claude -p`，一条 `sqlite3` 就绕过全部四道闸门，而第 1 条的测试照样全绿**。子进程必须**密封启动**，且**下发任务前实测有效工具集**，与注册表集合相等，否则 `agent.tool_surface_unsealed` 拒绝下发、不降级。**具体 flag 写在 backend 实现里，不写进规格**（CLI 会变）。
+3. **确认动作只能由人触发**：`domain::confirm` 不被任何 MCP 工具调用；总额校验的 `Unavailable` 不伪装成 `Passed`，且**不提供 `force` 参数**——那就是旁路。**放行批量确认的是 `confirmation_policy`，不是 `reconciliation_status`**——`if status == NotApplicable { confirm() }` **是缺陷**，那等于把两个维度重新焊回一起。正确判据只有一条：`policy != SingleOnly`。`NotApplicable` 只是「这次没得对账」，而 `kind = utterance` 即使**对账做成了**（用户说了「总共 100」），策略仍是 `UserAttestedBatch`（[03 §3.3](../../docs/prd/03-review.md)）。
+4. **上层只见 `Box<dyn AgentBackend>`**，代码里不出现任何厂商 API key、endpoint、登录流程或读用户凭证文件。
+
+**两个最容易写错的地方**（都会静默产生错误行为）：
+
+- **总额校验的求和范围是 `voided_at IS NULL`，不是 `consumed_at IS NULL`**——后者会让逐条确认过的来源永远回不到 `passed`（[`money-and-data.md` §6.1](../rules/money-and-data.md)）
+- **汇率换算公式要带两边的币种 exponent**——漏掉的话 JPY / KWD 会差 100 倍（[`money-and-data.md` §2](../rules/money-and-data.md)）
 
 ## 门禁（约束 16，三条全绿才算完）
 

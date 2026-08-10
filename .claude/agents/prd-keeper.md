@@ -41,15 +41,18 @@ model: opus
 
 判据是**祖先关系**：从 HEAD 出发、不在 `README.en.md` 最后一次改动的历史里、且改动了 `README.md` 的提交数必须为 0。因此**同一个提交里改两份**是唯一顺畅的路径。腐烂的英文版比没有英文版更糟——它会用过时的措辞冒充事实源，而唯一会读它的人恰好没有第二份可对照。
 
-## 门禁（三条都必须绿，禁止带红交付）
+## 门禁（四条都必须绿，禁止带红交付）
 
 ```bash
-node docs/prd/check-docs.mjs        # docs/prd/ 的 frontmatter 必填 + 相对链接可达
-node scripts/check-links.mjs        # 全仓库 .md 相对链接可达，禁 file:// 绝对路径
-node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
+node docs/prd/check-docs.mjs           # docs/prd/ 的 frontmatter 必填 + 相对链接可达
+node scripts/check-links.mjs           # 全仓库 .md 相对链接可达，禁 file:// 绝对路径
+node scripts/check-readme-sync.mjs     # README.en.md 不落后于 README.md
+node scripts/check-spec-invariants.mjs # 现行章节不得残留已被推翻的结论
 ```
 
-三条都由 [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上强制。红了按输出的「文件:行号:问题」逐条修，重跑到绿。
+**第四条是你这个 agent 的主武器**：跨文档一致性（[`docs/prd/CLAUDE.md`](../../docs/prd/CLAUDE.md) 硬规则 5）此前完全靠人记得 grep，而那正是最容易忘的一步。**改了共享决定后，除了改全部提及处，还该往禁用表里加一条**——新规则必须能说出「它防的是哪一次真实回退」，说不出来的不加。「变更记录」「回流记录」整段跳过；现行正文确需引用旧措辞时行尾加 `<!-- legacy -->`。
+
+四条都由 [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上强制。红了按输出的「文件:行号:问题」逐条修，重跑到绿。
 
 跑完机器检查后，**人工再过一遍机器查不了的语义**：文中每个「这 / 该 / 两份 / 另一个 / 上述」，指称对象是否已在本句或本行点名？每个从对话搬来的结论，是否带了出处？
 

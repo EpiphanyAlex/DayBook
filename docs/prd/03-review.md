@@ -2,8 +2,8 @@
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
 status: ready
 owner: "@maintainer"
-date: 2026-08-08
-version: v0.4
+date: 2026-08-10
+version: v0.8
 ---
 
 # 03 · 审核与草稿区
@@ -56,45 +56,164 @@ version: v0.4
 |---|---|
 | 草稿有 `source_id` 且 `evidence_text` 非空 | `review.missing_evidence` |
 | 草稿三元组齐全（`base_amount_minor` / `base_currency` / `rate_ppm` 均非空） | `review.incomplete_triple` |
-| 批量确认时该来源总额校验为 `passed` | `review.total_mismatch` / `review.total_unavailable` |
+| 批量确认时 `confirmation_policy` 不为 `single_only`（§3.3） | `review.total_mismatch` / `review.total_unavailable` |
 
 三元组那条对应 [00 地基 §3.6](./00-foundation.md)「草稿可空、确认必填」与 [04 交易 §3.2](./04-transactions.md)「缺汇率不入库」。
 
 ### 3.2 证据链呈现
 
+#### 证据是原件，`evidence_text` 是抽取声明（2026-08-10 收紧，[ADR-0002 闸门 2](../adr/0002-ai-never-writes-directly.md)）
+
+本节 v0.1–v0.4 把 `evidence_text` 称作「原文」，与「来源原件」混用。**两者的可信性不同级，混用会让闸门 2 在 M0 变成一个空动作**：
+
+| | 是什么 | 谁产出 | 能不能当核对基准 |
+|---|---|---|---|
+| **来源原件** | 截图字节 / `utterance` 的转写文本 | 导入时逐位落盘，之后谁也不改 | **能。这是证据** |
+| **`evidence_text`** | 「我读的是这一段」 | **和金额同一次模型输出** | **不能。它是抽取声明** |
+
+**模型把 168 读成 1680 时，它同样可能把 `evidence_text` 写成「1680」——两者自洽，却一起错。** 于是「原文与解析结果并排」如果并排的是 `evidence_text`，用户核对的是模型和它自己，闸门 2 什么也没挡住。
+
+**因此 `evidence_text` 的定位是「原件上的哪个位置」，不是「原件上写的是什么」。**
+
+#### 硬要求
+
 - 每条草稿必带 `source_id` + `evidence_text`（数据层非空，见 [00 地基 §3.6](./00-foundation.md)）
-- **审核界面必须把原文与解析结果并排呈现**——不是「点开看大图」，是默认可见
-- 点任一条 → 证据面板高亮该条对应的原图区域；**若无法定位到区域，至少显示原文片段**（区域定位是加分项，原文片段是底线）
+- **审核界面必须让来源原件本身可见**：截图渲染出来、`utterance` 的转写文本原样显示。**不是「点开看大图」，是默认可见**
+- **M0 就要有原件**（2026-08-10 改）：此前 [`docs/PRD.md` §9.2](../PRD.md) 把「证据图面板」整体推到 M1，M0 只渲染 `evidence_text` 那一列——那样 M0 验的是「模型抄得像不像」，验不出「模型读得对不对」，而后者正是 M0 存在的理由。**M0 的最小形态是「原图缩略图 + 点击看原图 + `evidence_text` 同屏」**，一个 `<img>` 的成本。**M1 推迟的是区域高亮，不是原件本身**
+- 点任一条 → 证据面板高亮该条对应的原图区域；**若无法定位到区域，至少把 `evidence_text` 与原件并列**（区域定位是加分项，§5 R1）
 - **无证据的草稿不得入库**——确认动作在服务端再校验一次，不依赖 UI
 
 ### 3.3 总额交叉校验
 
 **这是唯一能在无人工介入下捕获错误的机制，优先级高于解析准确率本身**（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 3）。
 
-#### 校验式（2026-08-07 M0 开工评审定死）
+#### 校验的对象是「解析完整性」，不是「这一批要确认什么」（2026-08-10 修正）
 
-原文只写「`SUM(该来源的草稿金额) == sources.declared_total_minor`」，**「草稿金额」是原币还是本位币没说**——外币账单的声明合计是外币，而逐笔折算后求和还会引入舍入误差。不定死则 M0/M1 必错。
+**这是一个会在 M0 第一次逐条确认时就复现的缺陷。** 本节 v0.2–v0.4 写的求和范围是「该来源下每条**未消费**草稿」。而 `failed` 时用户仍可逐条确认（见下方结果表），**确认第一条之后它就变成已消费、退出求和范围**——剩下的和永远小于声明合计，该来源从此**再也回不到 `passed`**。全部确认完后求和为 0，校验结果仍是 `failed`。
 
-**校验在「来源声明合计的那个币种」（`declared_total_currency`）上做。** 对该来源下每条**未消费**草稿，取它在该币种下的金额：
+**病根是把两件正交的事捆在了一起**：
+
+| 问题 | 求和范围 | 什么时候变 |
+|---|---|---|
+| **解析完整性**——agent 这一次从来源读出来的东西，合起来对不对得上它这一次报告的合计 | **全部未作废**草稿，**不论是否已消费**（范围还要再按尝试收窄，见下一小节） | 只随解析与用户编辑变，**不随确认变** |
+| **这一批能不能确认** | 用户当前勾选的那些 | 每次勾选都变 |
+
+**决定：总额校验只回答第一个问题，求和范围是「该次尝试全部 `voided_at` 为空的草稿」**（[00 地基 §3.6](./00-foundation.md)）。它是**那次解析尝试的一个属性**，确认动作不改变它。批量确认的闸门是「读一下这个属性」，不是「拿这一批去算一遍」。
+
+#### 入参是 `attempt_id`，不是 `source_id`（2026-08-10 修正）
+
+上一段的初稿写的是「该**来源**全部未作废草稿」。**那还不够**——它修好了「确认会改变校验结果」，没修好「**重试会把两次尝试的输出混在一起**」：
+
+- 一个来源被成功解析两次（用户重新解析了一遍），两次的草稿都没被作废 ⇒ 求和把 24 条当成 12 条来源的输出，必然 `failed`
+- 合计原本存在 `sources` 上，第一次尝试超时后草稿按 `attempt_id` 作废、**而合计留了下来**，于是拿第一次的合计去校验第二次的草稿
+
+**病根同上一条：把某次尝试的输出记在了来源上。** 合计已随 [00 地基 §3.6](./00-foundation.md) 移到 `parse_attempts.reported_total_*`，校验的入参因此也是 `attempt_id`：
+
+```
+total_check(attempt_id) → { reconciliation_status, confirmation_policy, … }
+```
+
+**`sources.latest_attempt_id` 决定审核界面当前看的是哪一次的输出。** 旧尝试的草稿与合计原样留在库里——它们是 [07 评测](./07-eval.md) 最想要的失败样本，不删。
+
+#### 校验式
+
+**校验在「本次尝试报告的合计所用的那个币种」（`reported_total_currency`）上做**，且**按 `reported_total_kind` 选等式**（2026-08-10 新增，[00 地基 §3.6](./00-foundation.md)「合计必须带类型」）。
+
+第一步，对该次尝试下每条未作废草稿，取它在该币种下的金额：
 
 | 情形 | 取值 |
 |---|---|
-| 草稿原币 == `declared_total_currency` | `amount_minor` |
-| 草稿原币 != `declared_total_currency` | `base_amount_minor`，**且要求 `base_currency == declared_total_currency`** |
-
-求和后与 `declared_total_minor` **整数精确相等**，无容差（这是禁用浮点的直接理由，见 [00 地基 §3.4](./00-foundation.md)）。
+| 草稿原币 == `reported_total_currency` | `amount_minor` |
+| 草稿原币 != `reported_total_currency` | `base_amount_minor`，**且要求 `base_currency == reported_total_currency`** |
 
 > **为什么这样取**：账单的合计必然以账单自身的币种印刷，而账单上的外币消费**同时印着折算后的本币金额**——这正是 [04 交易 §3.2](./04-transactions.md) 汇率路径 1「从截图反推」的适用场景。取 `base_amount_minor` 才能让外币行参与合计，取原币则永远对不上。
 
-#### 三种结果
+第二步，按 `reported_total_kind` 求和：
 
-| 结果 | 条件 | 行为 |
+| `reported_total_kind` | 等式 |
+|---|---|
+| `expense_total` | Σ（`direction = expense` 的条目）== `reported_total_minor` |
+| `income_total` | Σ（`direction = income` 的条目）== `reported_total_minor` |
+| `net_change` | Σ(`income`) − Σ(`expense`) == `reported_total_minor` |
+
+**整数精确相等，无容差**（这是禁用浮点的直接理由，见 [00 地基 §3.4](./00-foundation.md)）。
+
+> **`direction = transfer` 的条目怎么办**：**它让结果变成 `unavailable`**，不是被忽略也不是被当成支出。转账在单账户视角下的方向取决于它是转出还是转入，而 `direction` 只有一个 `transfer` 值、没有符号——**这个信息 schema 里就没有，硬算等于编一个**。真实账单里转账行常见，所以这不是边缘情况；它并入 [00 地基 §5](./00-foundation.md) R7（一来源多条 claim）在 M2 一起处理。
+>
+> **为什么不是「无差别求和」**：一张同时含消费与退款的账单，底部印着「本期消费合计」，无差别求和必然对不上——而它会以 `failed` 报出来，**看起来像 agent 读错了**。用错误的等式产生的报警，比不报警更糟：它训练用户忽略报警。
+
+#### 两个维度，不是一个枚举（2026-08-10 拆开）
+
+`total_check` 返回**两个字段**，因为它回答的本来就是两个问题：
+
+```
+reconciliation_status:  passed | failed | unavailable | not_applicable   ← 能不能做总额校验
+confirmation_policy:    reconciled_batch | user_attested_batch | single_only   ← 能不能批量确认
+```
+
+**为什么必须拆**：初稿让 `not_applicable` 自己就意味着「允许批量」，那是把「校验不适用」和「换一道人工闸门就放行」焊死在一个值上。三个已经看得见的场景会立刻把它撑破： <!-- legacy -->
+
+- 用户在口述里**明确说了「总共 100」** —— 这时对账其实可做（`report_source_total` 照常调，[00 地基 §3.6](./00-foundation.md)「来源不等于文件」第 2 条），结果是 `passed` / `failed`，而确认策略仍是用户背书那一档。**白拿一道校验，且不改变放行方式**
+- 一张**只有一笔、没印合计**的截图 —— 直觉上「对账不适用」，但它是 `file`，**既不该因此获得批量放行，M0 也不该判它 `not_applicable`**。理由见下方专门一段
+- M3 的一段口述**同时产生交易与事项** —— 两类条目的确认路径不同，一个枚举表达不了
+
+#### `file` 为什么永远不判 `not_applicable`（2026-08-10 补上真正的理由）
+
+上一版拿「单笔截图没有合计」当例子时，隐含了一句「它理论上确实对账不适用」。**那个说法把问题的位置放错了。** 真正的理由与「这张图该不该有合计」无关，而是——
+
+**我们手上唯一的信号是 `reported_total_* IS NULL`，而这一个信号对应三种完全不同的现实：**
+
+1. 原件**结构性没有**合计（真的只印了一笔）
+2. agent **漏读了**那一行合计
+3. 用户截图时**把底部裁掉了**
+
+**从「没读到」反推「本来就没有」，是把第 2、3 种伪装成第 1 种。** 而第 2 种正是闸门 3 存在的全部理由，第 3 种是用户能自己修好的问题——两者都必须被看见。
+
+**所以 M0 保守判：`file` + 没报合计 ⇒ `unavailable` + `single_only`。** 代价是那张真的只有一笔的截图也要逐条确认——**一条而已，而误判的代价是一整类漏读变得不可见。**
+
+**将来真要支持 `file` 的 `not_applicable`，需要一个明确的适用性信号**（来源画像、或 agent 显式声明「这张图的版式里不存在合计行」并附证据），**不能从字段为空推出来**。这与「余额不当合计用」「类型判不出就不填」是同一条纪律：**缺少信息时不许猜一个语义出来。** 登记为 §5 R7。
+
+**M0 不落成数据库字段**：两者都由 `total_check` 当场算出并一起返回。落字段是 M2 的事（真出现「口述里说了合计」这类情形时）。**但概念现在就分开**，否则 UI 与 domain 会围着一个混合语义的枚举写一遍，将来两次返工。
+
+**`reconciliation_status` 的四个值：**
+
+| 值 | 条件 | 行为 |
 |---|---|---|
-| `passed` | 合计精确相等 | 允许批量确认 |
-| `failed` | 合计不等 | **显式报警并阻止批量入库**（`review.total_mismatch`）；用户仍可逐条确认（逐条是用户自己核对过的） |
-| `unavailable` | ① 来源未声明合计（`declared_total_*` 为空）；**或** ② 存在草稿取不到该币种下的金额（缺三元组、或 `base_currency` 与声明币种不匹配） | UI 明确标注**无法校验**并**列出是哪几条导致的**；批量确认被拒（`review.total_unavailable`）。**不伪装成通过，也不谎报 failed**——「算不出来」和「算出来不对」是两回事 |
+| `passed` | 按上式精确相等 | — |
+| `failed` | 不等 | **显式报警**（`review.total_mismatch`） |
+| `unavailable` | ① 来源**本该有**合计而本次尝试没拿到（`reported_total_*` 为空且 `kind = file`）；**或** ② 存在草稿取不到该币种下的金额（缺三元组、或 `base_currency` 与合计币种不匹配）；**或** ③ 存在 `direction = transfer` 的条目 | UI 明确标注**无法校验**并**列出是哪几条导致的**。**不伪装成通过，也不谎报 failed**——「算不出来」和「算出来不对」是两回事 |
+| `not_applicable` | 来源**结构性没有合计**：`kind = utterance` 且本次尝试没报合计（[00 地基 §3.6](./00-foundation.md)）。**口述里明说了「总共 100」时不落在这里**——那时对账照常做，结果是 `passed` / `failed` | — |
 
-- **不提供 `--force` / 「忽略警告继续」类旁路**（[ADR-0002](../adr/0002-ai-never-writes-directly.md)「对实现的硬性要求」第 3 条）
+**`confirmation_policy` 的三个值：**
+
+| 值 | 何时 | 批量确认 |
+|---|---|---|
+| `reconciled_batch` | `reconciliation_status == passed` | **可以**，理由是机器对上了账 |
+| `user_attested_batch` | `kind = utterance` 且下方三条 UI 硬要求全部满足。**与对账结果无关**——口述说了合计、对上了或没对上，策略都是这一档 | **可以**，理由是**人对着整段原文背书了** |
+| `single_only` | 其余一切 | **不可以**，只能逐条（`review.total_mismatch` / `review.total_unavailable`） |
+
+- **`kind = file` 永远拿不到 `user_attested_batch`**（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)）。一张账单取不到合计是一个**信号**——要么 agent 漏读了、要么图不完整——它必须落到 `single_only` 里被看见
+- **真正放行批量的是 `confirmation_policy`，不是 `not_applicable`。** 这正是拆开的意义：口述里说了合计时，`reconciliation_status` 可以是 `passed` 或 `failed`，而策略仍按口述那一档走
+- **不提供 `--force` / 「忽略警告继续」类旁路**（[ADR-0002](../adr/0002-ai-never-writes-directly.md)「对实现的硬性要求」第 3 条）。**`user_attested_batch` 不是旁路**：它没有放松任何东西，只是把校验动作从「机器比对合计」换成了「人比对整段原文」
+
+#### `user_attested_batch` 换的是另一道闸门（2026-08-10 新增，产品决定）
+
+**背景**：[`docs/PRD.md` §1.1](../PRD.md) 把「说一段话 → agent 拆成多笔 → **一次批量确认**」作为相对竞品语音速记的唯一差异。而本节 v0.2–v0.4 让 `utterance` 恒为 `unavailable`、批量确认必被拒——**产品的核心差异被自己的闸门挡死了**，`docs/PRD.md` §9.3 第 9 步甚至把「批量确认被拒」写成了 M0 验收。两边不能都留。
+
+**决定：给 `utterance` 独立的信任策略。** 理由是这两种来源缺合计的**原因不同**：
+
+- 一张账单**本该**印着合计，取不到 ⇒ 出问题了 ⇒ 该挡
+- 一段口述**从构造上**就没有合计 ⇒ 永远挡 ⇒ 这道闸门对它不产生任何信息，只产生摩擦
+
+**但闸门不能凭空少一道，所以换一道人工的。** `user_attested_batch` 允许批量确认，代价是三条 UI 硬要求（**缺一则确认策略退回 `single_only`**）：
+
+1. **整段转写原文全文可见**——不是片段、不是折叠、不是「点开看」。用户按下批量确认前，看到的是他说过的**整段话**
+2. **全部拆分结果与原文并排**，条数显式呈现（「这段话拆出了 5 条」）
+3. **每条的 `evidence_text` 在原文中的位置可对照**——哪半句变成了哪一条
+
+**这道人工闸门比合计校验更强还是更弱，如实说**：更弱。合计校验能捕获「逐笔读错但合计读对」，人眼扫一遍不能保证。但**口述来源的原文是用户自己刚说出口的**，他对内容有第一手记忆——这是截图来源不具备的条件（截图是别人排版的、几周前的）。**这个差别是本决定成立的全部依据**，它不迁移到任何其他来源类型。
+
+**M0 就要验这条**：[`docs/PRD.md` §9.3](../PRD.md) 第 9 步相应改写。
 
 #### 基准值本身必须可核对
 
@@ -102,7 +221,7 @@ version: v0.4
 
 对策是让基准值也接受人的检查：
 
-- `report_source_total` 强制携带 `declared_total_evidence_text`（合计在来源上的原文片段），数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)）
+- `report_source_total` 强制携带 `reported_total_evidence_text`（合计在来源上的原文片段），数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)）
 - **审核界面把声明合计与它的原文片段并排显示在批量确认按钮附近**——用户按下批量确认前，最后看到的一眼就是「账单上印的合计是 1847.20，系统读到的也是 1847.20」
 - 来源上没印合计时 agent 不得自己算一个（[01 Agent 运行时 §3.2](./01-agent-runtime.md)），结果如实为 `unavailable`
 
@@ -113,7 +232,7 @@ version: v0.4
 排序优先级（高 → 低）：
 
 1. 总额校验 `failed` 的来源下的全部条目
-2. **`kind = utterance` 来源的条目**（2026-08-08 新增）——闸门 3 对语音天然失效（无声明合计，恒为 `unavailable`），它们只受三道闸门保护。UI 明示「语音来源，无合计可校验」，**不让它们看起来和已校验过的截图草稿一样安全**
+2. **`kind = utterance` 来源的条目**（2026-08-08 新增，2026-08-10 改述）——它们的确认策略恒为 `user_attested_batch`，靠的是「整段原文并排 + 一次人工确认」那道闸门，而**不是**机器对账。UI 文案随对账结果分两种：**没报合计**（`not_applicable`）→「语音来源，无合计可校验，请对着原文过一遍」；**报了合计**（`passed` / `failed`）→ 照常显示对账结果，但仍提示「确认前请对着原文过一遍」。**两种都不让它们看起来和已通过合计校验的截图草稿一样安全**
 3. 跨图疑似重复（[02 导入 §3.6](./02-ingest.md)）
 4. agent 标注的低置信条目
 5. 与记忆规则冲突的条目（例：这家商户历史上一直归「餐饮」，这次被起草成「购物」）。**这一档要求 domain 侧也能读 `memory_rules`**——但那是**标记冲突**，不是**覆盖分类**，不违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15（见 [06 记忆 §3.4](./06-memory.md)）
@@ -138,13 +257,15 @@ version: v0.4
 - **默认全选**——多数条目是对的，用户的动作应该是「取消掉不对的」而不是「勾选对的」
 - 行内编辑直接改金额/商户/分类/日期，不弹模态框
 
+**行内编辑不得覆盖 `drafted_json`**（2026-08-10 新增，[00 地基 §3.6](./00-foundation.md)、[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）：编辑改的是草稿行的业务列，那列不可变快照原样保留。**否则「AI 当初起草成什么样」在用户改完的一瞬间就没了**——[07 评测 §3.2](./07-eval.md) 的整套真值机制建立在它上面，而 §3.1 承诺的「审计能回答当初起草成什么样」也只兑现了一半（`source_draft_id` 只指得到行，指不到行的原始内容）。
+
 ### 3.6 每次纠正都留痕并投递记忆
 
 - 用户对草稿的任何修改 → 写 `audit_log`（`actor = "human"`，含 before/after，[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 4）
 - **必须支持「改实体类型」**（2026-08-08 新增，M3 起）：把一条交易草稿转成事项草稿，或反之。
   理由：一句口述里的交易与事项由 agent 判断归属（[05 事项 §3.1](./05-items.md) 的「钱是否已流动」规则），**分类错是高可见、低损害的错误**——用户一眼就看出「这条不该在这」。但草稿分两张表，改类型物理上是「删一条 + 建一条」。若 UI 不提供一键转换，用户只能丢弃后重说一遍，**批处理省下的时间会在这一下被吃掉**。
-  转换写两条审计（原表 `discard` + 新表 `create`），并保留 `source_id` / `evidence_text` / `agent_session_id` 不变——证据链不因用户改分类而断。
-  M0 只有交易表，此项无从实现；`03` 的 M0 验收不含它
+  转换写两条审计（原表 `discard` + 新表 `create`），并保留 `source_id` / `evidence_text` / `attempt_id` 不变——证据链不因用户改分类而断。
+  **`draft_items` 是 M3 的表**（[00 地基 §3.6](./00-foundation.md)），所以本项 **M0 与 M1 都无从实现，验收在 M3**（2026-08-10 修正：§6 此前把 `review/entity-type-switch` 放在「M1 必过」，而 M1 时目标表还不存在——那条验收在 M1 必然挂）
 - 同时投递一个**纠正事件**给 [06 记忆](./06-memory.md)：`(来源商户文本, 原分类, 改后分类)` 等
 - **记忆的写入不阻塞确认**——记忆失败不能挡住入库
 
@@ -175,6 +296,7 @@ version: v0.4
 | R3 | 前端状态管理选型（[`docs/architecture.md` §8](../architecture.md) 未决 A4） | 本文全部 UI | M1 开工前，产品决定 |
 | R4 | 「40 笔 30 秒」如何客观测量——秒表人测的方差可能大于优化幅度 | 本文 §6 人工验收 | M1 开工前定测量协议，**写进本文 §6** |
 | R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 4 档 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
+| R7（**新增 2026-08-10**） | **`file` 来源的「适用性」信号**——§3.3 现在保守判：`file` + 没报合计 ⇒ `unavailable`，因为 `reported_total_* IS NULL` 分不清「结构性没有」「agent 漏读」「截图裁掉了」。真要支持 `file` 的 `not_applicable`，需要一个**独立于字段为空**的适用性信号（来源画像，或 agent 显式声明「这版式里不存在合计行」并附证据） | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) | M2 拿到真实单笔小票样本后决。**M0/M1 保守判**——误判的代价是一整类漏读变得不可见 |
 | R6（**新增 2026-08-07**） | §3.3 的舍入敏感性——逐笔 `base_amount_minor` 各自舍入后求和，与账单印刷的合计可能差几分（[00 地基 §5](./00-foundation.md) R3 的具体失败模式） | 本文 §3.3 校验式 | M2 实测真实外币账单；若系统性偏差成立，可能需要在**外币行参与合计**这条路径上另立规则，**结果回流本文与 [00 地基](./00-foundation.md)** |
 
 ## 6. 验收标准
@@ -190,10 +312,23 @@ version: v0.4
 - [ ] `cargo test review::confirm_rejects_incomplete_triple` 通过——三元组不齐时返回 `review.incomplete_triple`（§3.1 完整性校验）
 - [ ] `cargo test review::total_check_exact_equality` 通过——差 1 分即 `failed`
 - [ ] `cargo test review::total_check_uses_declared_currency` 通过——原币 == 声明币种时取 `amount_minor`、不等时取 `base_amount_minor`，混合币种来源能正确求和（§3.3 校验式）
-- [ ] `cargo test review::total_check_unavailable_when_not_declared` 通过——`declared_total_*` 为空时结果为 `unavailable`，批量确认路径不把它当 `passed`
-- [ ] `cargo test review::utterance_source_is_always_unavailable` 通过——`kind = utterance` 的来源，总额校验恒为 `unavailable`（**不是 `failed`**），批量确认被拒、逐条确认可用
+- [ ] `cargo test review::total_check_unavailable_when_not_reported` 通过——`kind = file` 且本次尝试 `reported_total_*` 为空时 `reconciliation_status == unavailable`、`confirmation_policy == single_only`
+- [ ] `cargo test review::total_check_survives_partial_confirm` 通过（**§3.3 修正的回归**）——`failed` 的尝试逐条确认掉一条后**再次校验结果不变**；全部确认完后结果仍不变。**把求和范围改回「未消费草稿」时该用例必须变红**
+- [ ] `cargo test review::total_check_is_scoped_to_attempt` 通过——同一来源成功解析**两次**、两次草稿都未作废时，各自的校验只算自己那次的草稿；**按 `source_id` 求和的实现必须变红**（§3.3「入参是 `attempt_id`」）
+- [ ] `cargo test review::retry_uses_new_reported_total` 通过——第一次尝试超时（草稿作废）后重试，校验用的是**第二次**报告的合计，不是第一次残留的那个
+- [ ] `cargo test review::total_check_excludes_voided_drafts` 通过——被作废的草稿（`voided_at` 非空）不进求和
+- [ ] `cargo test review::total_check_uses_reported_kind` 通过——同一批草稿（含 `expense` 与 `income`）在 `expense_total` / `income_total` / `net_change` 三种 `kind` 下分别命中三条不同等式（§3.3）
+- [ ] `cargo test review::total_check_unavailable_on_transfer` 通过——含 `direction = transfer` 的条目时 `reconciliation_status == unavailable`，**不是把它按支出算进去**
+- [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——`kind = utterance` 且未报合计时 `reconciliation_status == not_applicable` 且 `confirmation_policy == user_attested_batch`，**批量确认可用**
+- [ ] `cargo test review::utterance_with_stated_total_reconciles` 通过——口述里报了合计时 `reconciliation_status` 为 `passed` / `failed`（**不是 `not_applicable`**），而 `confirmation_policy` **仍是** `user_attested_batch`（§3.3「两个维度」）
+- [ ] `cargo test review::file_source_never_user_attested` 通过——`kind = file` 在任何输入下都拿不到 `user_attested_batch`，也拿不到 `not_applicable`
+- [ ] `cargo test review::file_without_total_is_unavailable_not_na` 通过——**只有一条草稿**且没报合计的 `file` 来源，结果是 `unavailable` + `single_only`（**不是 `not_applicable`**）——§3.3「`file` 为什么永远不判 `not_applicable`」
+- [ ] `cargo test review::batch_gate_reads_policy_not_status` 通过——批量确认的准入只看 `confirmation_policy`；构造一个 `reconciliation_status == passed` 但策略为 `single_only` 的输入，批量仍被拒（§3.3「两个维度」）
+- [ ] `npm test -- review/utterance-batch-gate` 通过——`user_attested_batch` 的批量确认按钮，在「整段原文全文可见 + 拆分结果并排 + 条数显式」三者任一缺失时不可点（§3.3 的三条 UI 硬要求）
+- [ ] `npm test -- review/completed-with-gaps-banner` 通过——`parse_attempts.outcome == "completed_with_gaps"` 时审核界面显眼呈现 `unparsed_note`，与普通 `completed` 视觉上可区分（[01 §3.2](./01-agent-runtime.md)）
 - [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `cargo test review::total_check_unavailable_when_amount_unobtainable` 通过——存在缺三元组或 `base_currency` 不匹配的草稿时结果为 `unavailable`（**不是 `failed`**），且返回体列出是哪几条
+- [ ] `cargo test review::inline_edit_preserves_drafted_json` 通过——行内改一条草稿的金额后，`drafted_json` 逐字节不变（§3.5、[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
 - [ ] `cargo test review::batch_confirm_blocked_when_total_failed` 通过——返回 `review.total_mismatch`
 - [ ] `cargo test review::batch_confirm_blocked_when_total_unavailable` 通过——返回 `review.total_unavailable`
 - [ ] `cargo test review::no_force_bypass_exists` 通过——确认相关命令的参数里不存在 force/ignore 类旁路
@@ -204,20 +339,36 @@ version: v0.4
 
 **M0 人工验收**：
 
-- [ ] 每条草稿的原文片段与解析结果在同一屏可见，无需额外点击
+- [ ] **来源原件本身在审核屏上可见**——截图能看到图、`utterance` 能看到整段转写文本，不是只有 `evidence_text` 那一列（§3.2，2026-08-10 新增）
+- [ ] 每条草稿的 `evidence_text` 与解析结果在同一屏可见，无需额外点击
 - [ ] 声明合计与它的原文片段显示在批量确认按钮附近（§3.3「基准值本身必须可核对」）
 - [ ] 总额不符或无法校验时，提示可见且批量确认按钮不可点
+- [ ] 一段口述拆出的多条草稿，**能一次批量确认**，且确认前整段原文与全部条目同屏（§3.3 `not_applicable`）
 
 #### M1 必过（在 M0 全部通过之上）
 
 - [ ] `npm test -- review/sorting` 通过——异常前置的六级排序按 §3.4 优先级
-- [ ] `npm test -- review/entity-type-switch` 通过——一条交易草稿转成事项草稿后，`source_id` / `evidence_text` / `agent_session_id` 不变，且写了两条审计（§3.6）
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
 - [ ] **40 笔真实草稿，从打开审核界面到全部入库，不碰鼠标，≤ 30 秒**（测量协议见 §5 待决 R4，**M1 开工前必须先把协议写进本节**）
 
+#### M3 必过
+
+- [ ] `npm test -- review/entity-type-switch` 通过——一条交易草稿转成事项草稿后，`source_id` / `evidence_text` / `attempt_id` 不变，且写了两条审计（§3.6）。**2026-08-10 由「M1 必过」移到此处**：目标表 `draft_items` 在 M3 才建（[00 地基 §3.6](./00-foundation.md)），放在 M1 那条验收必然挂
+
 ## 7. 回流记录
 
-*（尚无——本 sub-PRD 未开工。实现证伪规格时先回写这里，再改代码。）*
+| 日期 | 回流内容 | 依据 |
+|---|---|---|
+| 2026-08-10（五轮） | **§3.3 拿「单笔截图没有合计」当论据时，隐含了「它理论上确实对账不适用」——那把问题的位置放错了。** 真正的理由是：`reported_total_* IS NULL` **这一个信号对应三种现实**（结构性没有 / agent 漏读 / 截图裁掉了），**从「没读到」反推「本来就没有」是把后两种伪装成第一种**，而第二种正是闸门 3 存在的全部理由。M0 保守判 `unavailable` + `single_only`；适用性信号登记为 R7。同步 [ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md) | 文档审查（五轮） |
+| 2026-08-10（五轮） | §3.4 异常前置第 2 档的 UI 文案随「口述也可能报合计」分成两种；§6 新增 2 条验收 | [00 地基 §3.6](./00-foundation.md) v0.9 |
+| 2026-08-10（三轮） | **§3.3 拿「口述里说了总共 100」当拆两个维度的论据，而 [00 地基 §3.6](./00-foundation.md) 同时规定 `utterance` 的 `reported_total_*` 恒为空**——同一轮改动里留下的自相矛盾。改定：**口述明说合计时照常对账**（`passed` / `failed`），**确认策略不变**（恒 `user_attested_batch`）。这正是两个维度各自独立的实例 | 文档审查（三轮） |
+| 2026-08-10（二轮） | **同一轮里改成的「该来源全部未作废草稿」仍不够，还得按尝试收窄。** 它修好了「确认改变校验结果」，没修好「**重试把两次尝试的输出混在一起**」：一个来源被成功解析两次时求和会把 24 条当成 12 条的输出；而合计原本存在 `sources` 上，第一次超时后草稿按 `attempt_id` 作废、合计却留了下来。**校验入参改为 `attempt_id`**，`sources.latest_attempt_id` 决定当前受审的是哪次输出 | 文档审查（二轮）；[00 地基 §3.6](./00-foundation.md) v0.7 把合计移入 `parse_attempts` |
+| 2026-08-10（二轮） | **一个 `not_applicable` 同时表达了两个维度**——「能不能对账」与「能不能批量确认」被焊在一个值上。三个场景会撑破它：口述里明确说了「总共 100」（对账可做，但策略仍是用户背书）· 一张只有一笔、没有合计的单笔截图（对账不适用，但**不该因此获得批量放行**）· M3 一段口述同时产生交易与事项。拆成 **`reconciliation_status`**（4 值）+ **`confirmation_policy`**（3 值），**真正放行批量的是后者**。M0 不落成数据库字段，两者由 `total_check` 一起返回 | 文档审查（二轮） |
+| 2026-08-10 | **§3.3 的求和范围「未消费草稿」有逻辑缺陷，M0 第一次逐条确认就复现。** `failed` 时允许逐条确认，而确认一条即退出求和范围 ⇒ 剩余和恒小于声明合计 ⇒ 该来源**再也回不到 `passed`**；全部确认完后和为 0 仍报 `failed`。病根是把「解析完整性」与「这一批要确认什么」捆在一起。改为：求和范围是该来源**全部未作废**草稿，校验是**来源的属性**，确认动作不改变它 | 文档审查；[00 地基 §3.6](./00-foundation.md) `voided_at` |
+| 2026-08-10 | **§3.3 的校验式没有方向，把不同概念的合计当成同一个数。** 补 `declared_total_kind` 的三条等式（`expense_total` / `income_total` / `net_change`），并规定 `direction = transfer` 的条目让结果变 `unavailable`——转账的方向信息 schema 里就没有，硬算等于编。**用错误的等式产生的报警比不报警更糟：它训练用户忽略报警。** 同步 [ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)、[00 地基 §3.6](./00-foundation.md)、[01 §3.2](./01-agent-runtime.md) | 文档审查 |
+| 2026-08-10 | **新增第四态 `not_applicable`，解开语音批量确认与闸门 3 的死结。** [`docs/PRD.md` §1.1](../PRD.md) 把「一次批量确认」作为对竞品的唯一差异，而本文 v0.2–v0.4 让 `utterance` 恒为 `unavailable`、批量确认必被拒——产品的核心差异被自己的闸门挡死。区分「结构性没有合计」（口述）与「本该有却取不到」（截图），前者允许批量确认，**换成三条 UI 硬要求构成的人工闸门**，并如实写明这道闸门更弱、以及它为什么只对口述成立。`kind = file` 永不判为 `not_applicable`。同步 [ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)、[`docs/PRD.md` §9.3](../PRD.md)、[00 地基 §3.6](./00-foundation.md)、[02 导入 §3.1](./02-ingest.md) | 产品决定（2026-08-10）：给 utterance 独立信任策略 |
+| 2026-08-10 | **§3.2 把 `evidence_text` 当「原文」，闸门 2 在 M0 因此形同虚设。** `evidence_text` 与被核对的金额**出自同一次模型输出**——模型把 168 读成 1680 时也会把它写成「1680」，两者自洽却一起错。区分「证据 = 不可变原件」与「`evidence_text` = 抽取声明」，并把「M0 不做证据面板」收窄为「M0 不做区域高亮」——**原件本身 M0 就要可见**，否则 M0 验的是「模型抄得像不像」。同步 [ADR-0002 闸门 2](../adr/0002-ai-never-writes-directly.md)、[`docs/PRD.md` §9.2](../PRD.md) | 文档审查 |
+| 2026-08-10 | **§3.5 的行内编辑会就地改写草稿，抹掉 AI 的原始起草值。** 补「不得覆盖 `drafted_json`」。§3.6 的「改实体类型」验收**由 M1 移到 M3**——目标表 `draft_items` 在 M3 才建，放在 M1 那条必然挂 | 文档审查；[00 地基 §3.6](./00-foundation.md) `drafted_json` |
 
 ---
 
@@ -225,6 +376,10 @@ version: v0.4
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.8 | 2026-08-10 | **文档审查第五轮回流两处。** ① **`file` 永不判 `not_applicable` 补上真正的理由**——不是「单笔截图理论上不适用」，而是 `reported_total_* IS NULL` 分不清「结构性没有 / 漏读 / 截图裁掉」三种现实，从「没读到」反推「本来就没有」会把漏读伪装成正常；适用性信号登记为 R7。② §3.4 的 UI 文案随「口述也可能报合计」分两种。§6 新增 2 条验收 |
+| v0.7 | 2026-08-10 | **文档审查第三轮回流**：口述里明说合计时**允许对账**（`passed` / `failed`），确认策略仍恒为 `user_attested_batch`——解开 §3.3 的论据与 [00](./00-foundation.md)「恒为空」的自相矛盾。§3.1 完整性校验那行改按 `confirmation_policy` 判；§6 新增 1 条验收 |
+| v0.6 | 2026-08-10 | **文档审查第二轮回流两处。** ① **总额校验的入参由 `source_id` 改为 `attempt_id`**——按来源求和会把重试后两次尝试的草稿混在一起，且合计与草稿的生命周期脱钩（合计已随 [00 地基](./00-foundation.md) v0.7 移入 `parse_attempts.reported_total_*`）。② **`not_applicable` 拆成两个维度**：`reconciliation_status`（能不能对账）+ `confirmation_policy`（能不能批量确认），**放行批量的是后者**；`kind = file` 永远拿不到 `user_attested_batch`。§6 验收新增 5 条、改写 6 条 |
+| v0.5 | 2026-08-10 | **文档审查回流五处。** ① §3.3 **求和范围由「未消费草稿」改为「全部未作废草稿」**——逐条确认一条后该来源永远回不到 `passed`。② §3.3 **校验式按 `declared_total_kind` 分三条等式**，`transfer` 条目让结果变 `unavailable`。③ §3.3 **新增第四态 `not_applicable`**：口述来源允许一次批量确认，换成三条 UI 硬要求构成的人工闸门；`kind = file` 永不适用。④ §3.2 区分**证据（原件）与 `evidence_text`（抽取声明）**，原件 M0 就要可见。⑤ §3.5 行内编辑不得覆盖 `drafted_json`；§3.6 实体类型切换验收由 M1 移到 **M3**。§6 验收新增 9 条、改写 2 条，人工验收新增 2 条 |
 | v0.1 | 2026-08-06 | 初版：两条写入路径的物理隔离、证据链呈现要求、总额校验三态（含 `unavailable` 不伪装成通过、无 force 旁路）、异常前置五级排序、键盘流键位表与默认全选、纠正留痕与记忆投递、虚拟滚动；否决方案八条；待决 R1–R5；验收标准 14 条可执行 + 3 条人工 |
 | v0.4 | 2026-08-08 | 公开仓库去个人化：§5 R3 与本表的决策署名改为「产品决定」，去掉工具与会话指代；`owner` 改为 `@maintainer`。**决定与验收标准未变** |
 | v0.3 | 2026-08-08 | **设计评审回流。** ① §3.4 异常前置**由五级扩为六级**，新增第 2 档「`kind = utterance` 来源」——闸门 3 对语音天然失效（无声明合计），UI 必须明示「无合计可校验」，**不让它们看起来和已校验的截图草稿一样安全**；第 5 档补注「domain 读 `memory_rules` 是为标记冲突、不是覆盖分类」（[06 §3.4](./06-memory.md) C′）。② §3.6 新增**「改实体类型」为硬要求**（M3 起）：一句口述里交易与事项的归属由 agent 判断，分类错是**高可见低损害**的错误，但草稿分两表、改类型物理上是删+建；无一键转换则用户只能重说一遍，**批处理省下的时间会在这一下被吃掉**。转换写两条审计且证据链字段不变。③ §6 新增 4 条验收 |

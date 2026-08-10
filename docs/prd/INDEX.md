@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-09
-version: v0.8
+date: 2026-08-10
+version: v0.13
 ---
 
 # sub-PRD 索引
@@ -16,20 +16,24 @@ version: v0.8
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型 | **`ready`** | v0.5 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、可插拔后端接口 | `draft` ⚠️ | v0.6 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排 | **`ready`** | v0.5 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、总额校验、审核界面 | **`ready`** | v0.4 |
-| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、分类、回顾 | `draft` | v0.5 |
-| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.4 |
-| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.3 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.3 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`ready`** | v0.9 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | `draft` ⚠️ | v0.10 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`ready`** | v0.7 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`ready`** | v0.7 |
+| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
+| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.5 |
+| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.5 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.7 |
 
 **M0 四份已于 2026-08-07 完成开工评审，进入 `ready`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。评审收敛了 5 处跨文档冲突与 8 处缺口，关闭待决 3 项、改期 2 项，各份变更记录有逐条说明。
 
 > ⚠️ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-09 退回 `draft`**：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。**这条阻塞 M0**，[01 §5 R6](./01-agent-runtime.md) 给了三条候选并要求开工前先做 spike。
+>
+> **2026-08-10 更新**：R6 的 spike **增加第 ④ 项——实测密封启动配置与有效工具集探测**（[01 §3.7](./01-agent-runtime.md)）。关不掉 CLI 的内置工具，就等于 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1 在进程层不成立，**这会反过来影响 R6 三条候选的取舍**，所以两件事必须在同一次 spike 里一起测。
 
-**下一步**（依据 [`CLAUDE.md`](../../CLAUDE.md)「PRD 体系与工作流」步骤 2）：**先做 [01 §5 R6](./01-agent-runtime.md) 的 MCP 进程模型 spike**，结论回流 01 并把它推回 `ready`；之后 agent 读 M0 四份 → 进 plan mode → 出 M0 实施计划 → 人审 → 批准后 `status: in-progress`。
+> **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
+
+**下一步**（依据 [`CLAUDE.md`](../../CLAUDE.md)「PRD 体系与工作流」步骤 2）：**先做 [01 §5 R6](./01-agent-runtime.md) 的 spike（四项检查）**，结论回流 01 并把它推回 `ready`；之后 agent 读 M0 四份 → 进 plan mode → 出 M0 实施计划 → 人审 → 批准后 `status: in-progress`。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -70,11 +74,18 @@ version: v0.8
 |---|---|
 | 金额怎么存、汇率怎么表示 | [ADR-0004](../adr/0004-data-model-sqlite-integer-money.md) + [00 地基](./00-foundation.md) |
 | **本位币可切换后的语义**（逐笔冻结 / 汇总分组） | [00 地基 §3.4](./00-foundation.md)「本位币切换语义」 |
-| **M0 四张表的逐列字段** | [00 地基 §3.6](./00-foundation.md) |
-| **权威错误码集**（18 条，新增码先改这里） | [00 地基 §3.7](./00-foundation.md) |
-| **总额校验比哪个金额**（原币 vs 本位币） | [03 审核 §3.3](./03-review.md)「校验式」 |
+| **M0 六张表的逐列字段** | [00 地基 §3.6](./00-foundation.md) |
+| **币种精度（exponent）与换算公式** | [00 地基 §3.4](./00-foundation.md)「币种精度」 |
+| **权威错误码集**（30 条，新增码先改这里） | [00 地基 §3.7](./00-foundation.md) |
+| **总额校验：入参、求和范围、按什么等式、两个结果字段** | [03 审核 §3.3](./03-review.md)「校验式」 |
 | **闸门 3 挡不住什么** | [03 审核 §3.3](./03-review.md)「基准值本身必须可核对」+ [01 §3.2](./01-agent-runtime.md)「`report_source_total` 可信性要求」 |
-| **M0 端到端脚本验什么** | [`docs/PRD.md` §9.3](../PRD.md) |
+| **口述为什么能一次批量确认** | [03 审核 §3.3](./03-review.md)「`user_attested_batch` 换的是另一道闸门」+ [`docs/PRD.md` §1.1](../PRD.md) 脚注 |
+| **有效工具集 / 密封启动配置** | [01 §3.7](./01-agent-runtime.md) + [ADR-0003 §3](../adr/0003-agent-runtime-and-pluggable-backend.md) |
+| **「解析完成」的判据** | [01 §3.2](./01-agent-runtime.md)「`complete_source`」+ [02 导入 §3.4](./02-ingest.md) |
+| **失败与降级都有哪些情况** | [02 导入 §3.5.1](./02-ingest.md)「降级与失败态矩阵」 |
+| **账户与渠道的区别** | [04 交易 §3.4](./04-transactions.md) |
+| **eval 的真值从哪来 / 条目怎么对齐** | [07 评测 §3.2](./07-eval.md) |
+| **M0 端到端脚本验什么 / M0 的 go-no-go 阈值** | [`docs/PRD.md` §9.3](../PRD.md) · [`docs/PRD.md` §9.4](../PRD.md) |
 | **工具的智能边界**（什么归 agent、什么归工具） | [ADR-0006](../adr/0006-smart-agent-dumb-tools.md) |
 | **日志落什么、不落什么** | [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) + [01 §3.4](./01-agent-runtime.md) |
 | **口述来源（`kind = utterance`）的语义** | [00 地基 §3.6](./00-foundation.md)「来源不等于文件」+ [02 §3.1](./02-ingest.md) |
@@ -100,4 +111,9 @@ version: v0.8
 | v0.5 | 2026-08-08 | **设计评审同步。** 新增 **[07 评测](./07-eval.md)**（此前没有任何 sub-PRD 负责「agent 读得准不准」，而 `PRD §9.1` 认定它是生死线）；版本同步 00→v0.4 · 01→v0.4 · 02→v0.4 · 03→v0.3 · 04→v0.4 · 05→v0.2 · 06→v0.2；里程碑映射补一段说明 07 不绑定单一里程碑；共享决定出处表新增 6 行（工具的智能边界、日志分级、口述来源语义、交易/事项边界、记忆应用、读对判据） |
 | v0.6 | 2026-08-08 | 随文档门禁进 CI 同步：07 → v0.2（夹具目录拆为 `fixtures/local/` 与 `fixtures/ci/` 两支）。文档门禁自此为两条——`docs/prd/check-docs.mjs` 与 `scripts/check-links.mjs`，由 `.github/workflows/docs.yml` 对所有 PR 强制 |
 | v0.7 | 2026-08-08 | **公开仓库去个人化同步**：八份 sub-PRD 版本 +0.1（00→v0.5 · 01→v0.5 · 02→v0.5 · 03→v0.4 · 04→v0.5 · 05→v0.3 · 06→v0.3 · 07→v0.3）；全目录 `owner` 改为 `@maintainer`；本表去掉工具与会话指代。**状态、依赖关系与共享决定出处表未变** |
+| v0.13 | 2026-08-10 | **第六轮文档审查同步**（00→v0.10 · 01→v0.11 · 02→v0.8 · 03→v0.8 · 05→v0.6 · 07→v0.7 · [`docs/PRD.md`](../PRD.md) v0.12）。**① 口述显式合计的改定补齐七处漏同步**（PRD §9.2、02 §3.1/§6、03 §3.4、05 §3.4、`.claude/agents/backend.md`）——最后一处会直接诱导后端把两个维度焊回一起。**② `file` 永不判 `not_applicable` 补上真正的理由**：`reported_total_* IS NULL` 分不清「结构性没有 / 漏读 / 截图裁掉」，从「没读到」反推「本来就没有」会把漏读伪装成正常（03 R7）。**③ 有效能力探测的比较对象由「工具清单」扩为 capability manifest**，hash 改名 `effective_capability_hash` 并覆盖 hook / 插件 / 权限模式——那三类没有名字也没有参数 schema，先前根本进不了比较集合。**④ 新增第四条文档门禁 `scripts/check-spec-invariants.mjs`**：前三条查格式、链接与提交关系，本轮的七处漂移全程是绿的 |
+| v0.12 | 2026-08-10 | **第五轮文档审查同步**（00→v0.9 · 01→v0.10 · 07→v0.7）。四处精度问题：**① `evidence_span` 的坐标系定死**——原文「字符区间」在 Rust（UTF-8 字节）与 TS（UTF-16 code unit）之间有四种解释，**中文夹一个 emoji 即错位**；改为零起、左闭右开的 **Unicode code point**，两端实现方式指定，写入时强制 `slice_by_code_points(...) == evidence_text`。**② ordinal 跳号由口头协议变成可验证的检查**（跳号 + 空说明 ⇒ `agent.unexplained_gap`）。**③ 有效工具集探测补第二条要件：清单必须对全部工具来源具有权威性**——只返回 MCP `tools/list` 的接口形式上完全合规，却看不见 `Bash`/`Read`/`Edit`。**④ eval 的配对术语更正为 ordinal 上的 full outer join**（不需要动态规划），降级集合匹配收窄为纯诊断。新增 R10（span 报不准的退路）R11（M3 ordinal 跨表唯一）与 01 R7（结构化 `unparsed_regions`） |
+| v0.11 | 2026-08-10 | **第四轮文档审查同步**（00→v0.8 · 01→v0.9 · 03→v0.7 · 07→v0.6，[`docs/PRD.md` v0.11](../PRD.md)）。三个真缺口：**① `draft_transaction` 新增必填 `source_ordinal`**——[07](./07-eval.md) 的条目对齐要预测侧的位置，而 `file` 来源没有 OCR 也没有坐标，系统算不出来；**② §3.7 的探测定死必须走结构化 introspection、不许问模型**（用模型自述验证对模型的约束是循环论证），拿不到即 R6 失败结论；**③ 未知币种由「回退 exponent 2 + 告警」改为拒绝**。另：`complete_source` 不写 `audit_log`（判据是会不会影响账目）、口述明说合计时允许对账（策略不变）、§9.4 干净来源率的口径冻结。机械漂移清理六处 |
+| v0.10 | 2026-08-10 | **第三轮文档审查同步（[`docs/PRD.md` v0.10](../PRD.md)）：八份 sub-PRD 版本再全部 +0.1**（00→v0.7 · 01→v0.8 · 02→v0.7 · 03→v0.6 · 04→v0.7 · 05→v0.5 · 06→v0.5 · 07→v0.5）。**状态仍未变。** 五个阻塞项已解：**① 声明合计由 `sources` 移入 `parse_attempts.reported_total_*`**、对账入参改为 `attempt_id`（重试后两次尝试的输出此前会混在一起）；**② `accounts` 骨架进 M0**（外键指向不存在的父表会让第一条 `INSERT` 直接失败，已实测）；**③ 金额过 IPC 改为十进制字符串** + `|v| ≤ 10^15` 范围校验；**④ eval 改为按位置保序对齐**（拿被评字段当匹配键会让字段准确率恒为 100%）；**⑤ `complete_source` 条目数不符改为可补救的拒绝**。另：`not_applicable` 拆成 `reconciliation_status` + `confirmation_policy` 两个维度；记忆的查询覆盖由告警改为可补救的拒绝、`last_affirmed_at` 收窄为三种明确动作。错误码集由 24 条增至 28 条，M0 表数由五张改为六张 |
+| v0.9 | 2026-08-10 | **第二轮文档审查同步（[`docs/PRD.md` v0.9](../PRD.md)）：八份 sub-PRD 版本全部 +0.1**（00→v0.6 · 01→v0.7 · 02→v0.6 · 03→v0.5 · 04→v0.6 · 05→v0.5 · 06→v0.4 · 07→v0.4）。**状态未变**——01 仍为 `draft`，且其 R6 spike 增加第 ④ 项（密封启动配置与有效工具集实测），与进程归属必须在同一次 spike 里一起测。共享决定出处表新增 8 行（币种精度、口述批量确认、有效工具集、完成判据、失败态矩阵、账户与渠道、eval 真值、go/no-go 阈值），错误码集由 18 条增至 24 条，M0 表数由四张改为五张 |
 | v0.8 | 2026-08-09 | **文档审查同步。** ① **[01 Agent 运行时](./01-agent-runtime.md) 退回 `draft`**（v0.6）——MCP server 的进程归属自相矛盾，新增 R6 并要求 M0 开工前 spike；状态总览与「下一步」相应改写。② [05 事项](./05-items.md) → v0.4：删除 `draft_items.source_id` 可空这条例外——它与 [ADR-0002](../adr/0002-ai-never-writes-directly.md)「草稿表 `source_id` 非空」直接冲突，且 2026-08-08 引入 `kind = utterance` 后口述事项本来就有来源可挂。③ **依赖关系图修正**：05 事项此前在图上是断开的（挂在一条已闭合的支线下），现改为与 04、06 并列挂在 03 之后；`07 评测` 单独成行；「其余六份」改为「其余七份」（共八份 sub-PRD，00 是前置）。**状态与共享决定出处表其余部分未变** |

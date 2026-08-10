@@ -57,11 +57,37 @@ type MinorUnits = number & { readonly __brand: 'MinorUnits' }
 <td>{formatMoney(tx.amountMinor, tx.currency)}</td>
 
 // ❌ 错误
-<td>{(tx.amount / 100).toFixed(2)}</td>   // 除法散落在组件里
+<td>{(tx.amount / 100).toFixed(2)}</td>   // 除法散落在组件里，且写死了两位小数
 const total = drafts.reduce((s, d) => s + d.amount / 100, 0)  // 浮点累加
 ```
 
-**IPC 传的是整数**——不是格式化字符串、不是浮点。`/ 100` 只允许出现在格式化函数里。
+**IPC 传的是「最小单位整数的十进制字符串」**（`"123450"`），不是格式化字符串（`"1,234.50"`）、不是 JSON 数字。**解析与范围校验只在 `call<T>` 里做一次**：
+
+```typescript
+// ✅ 正确 —— 桥接层解析并校验，组件拿到的已是安全整数
+const v = Number(raw)
+if (!Number.isSafeInteger(v) || Math.abs(v) > 1e15) throw appError('data.amount_out_of_range')
+
+// ❌ 错误 —— 组件里自己 Number()，或者根本不校验
+const amount = Number(dto.amountMinor)
+```
+
+**为什么不能直接传 JSON 数字**：`JSON.parse` 会把超过 `2^53 − 1` 的值**静默舍入**，而那个值正是 agent 把截图数字读错成 20 位时产生的（[`docs/prd/00-foundation.md` §3.4](../../docs/prd/00-foundation.md)「金额怎么过 IPC」）。除法只允许出现在格式化函数里。
+
+**除数由币种决定，不是恒定的 100**（[`money-and-data.md` §1.1](./money-and-data.md)）：ISO 4217 的 minor unit exponent 多数是 2，但 **JPY / KRW 是 0**、**KWD / BHD / JOD 是 3**。
+
+```typescript
+// ✅ 正确 —— 全前端唯一一处除法
+function formatMoney(amount: MinorUnits, currency: string): string {
+  const exp = currencyExponent(currency)
+  return `${(amount / 10 ** exp).toFixed(exp)} ${currency}`
+}
+
+// ❌ 错误 —— 在 JPY 上会把 9700 日元显示成 97.00 日元
+`${(amount / 100).toFixed(2)}`
+```
+
+**`amountMinor` 单看没有意义**，任何显示它的地方都必须同时拿到 `currency`。
 
 ## 5. 审核界面：键盘优先
 
@@ -83,7 +109,51 @@ const KEYMAP = {
 
 1. **默认全选**——多数条目是对的，用户的动作应该是「取消掉不对的」
 2. **行内编辑**，不弹模态框
-3. **原文与解析结果并排**，默认可见，不是「点开看大图」
+3. **来源原件与解析结果并排**，默认可见，不是「点开看大图」
+
+### 5.1 并排的必须是原件，不是 `evidence_text`
+
+**`evidence_text` 是 agent 的抽取声明，和被核对的金额出自同一次模型输出**（[ADR-0002 闸门 2](../../docs/adr/0002-ai-never-writes-directly.md)）。模型把 168 读成 1680 时，也会把它写成「1680」——**两者自洽却一起错**。
+
+```tsx
+// ❌ 错误 —— 用户核对的是模型和它自己，闸门 2 什么也没挡住
+<Row><Amount /><EvidenceText /></Row>
+
+// ✅ 正确 —— 原件在场，evidence_text 只当定位锚点
+<SourcePane src={source.evidenceUrl} kind={source.kind} />   // 截图渲染出来 / utterance 显示整段文本
+<Row><Amount /><EvidenceText />{/* 指向原件的哪一段 */}</Row>
+```
+
+**M0 就要有原件**（一个 `<img>` 的成本），M1 才做区域高亮（[`docs/prd/03-review.md` §3.2](../../docs/prd/03-review.md)）。
+
+### 5.2 总额校验有四种状态，不是三种
+
+`total_check` 返回**两个字段**，因为它回答两个问题（[`docs/prd/03-review.md` §3.3](../../docs/prd/03-review.md)）：
+
+```typescript
+// ✅ 正确
+const RECONCILIATION = {
+  PASSED: 'passed', FAILED: 'failed',
+  UNAVAILABLE: 'unavailable',           // 本该有合计却取不到
+  NOT_APPLICABLE: 'not_applicable',     // 结构性没有合计（口述）
+} as const
+
+const POLICY = {
+  RECONCILED_BATCH: 'reconciled_batch',       // 机器对上账了
+  USER_ATTESTED_BATCH: 'user_attested_batch', // 人对着整段原文背书
+  SINGLE_ONLY: 'single_only',
+} as const
+
+// 批量确认的准入只看策略
+const canBatchConfirm = check.confirmationPolicy !== POLICY.SINGLE_ONLY
+
+// ❌ 错误 —— 把「能不能对账」当成「能不能批量确认」
+const canBatchConfirm = check.status === 'passed' || check.status === 'not_applicable'
+```
+
+**`user_attested_batch` 放行的前提是三条 UI 硬要求全部满足**——整段转写原文全文可见、全部拆分结果并排、条数显式呈现。**做不到就不许放行**：它不是「口述可以免检」，是把机器校验换成了人的那一眼。
+
+**另外一条 UI 硬要求**：`parse_attempts.outcome === 'completed_with_gaps'` 时（agent 自己说「有一块我没读」），审核界面**必须显眼呈现 `unparsed_note`**，与普通成功视觉可区分——它存在的全部意义是让用户知道该去看原件的哪里（[`docs/prd/01-agent-runtime.md` §3.2](../../docs/prd/01-agent-runtime.md)）。
 
 ## 6. 性能
 

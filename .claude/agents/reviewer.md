@@ -32,7 +32,9 @@ model: sonnet
    rg -n 'SUM\(base_amount_minor\)' src-tauri/src                       # 每处都应带 GROUP BY base_currency
    rg -n 'UPDATE\s+audit_log|DELETE\s+FROM\s+audit_log' src-tauri/src   # 应无命中
    rg -n 'execute_sql|raw_query|write_file' src-tauri/src/mcp           # 应无命中
-   rg -n '/ 100|\* 100' src/                                            # 前端只应命中格式化函数
+   rg -n '/ 100|\* 100|100\.0' src-tauri/src src                        # 只应命中币种 exponent 表实现
+   rg -n 'UPDATE[^;]*drafted_json' src-tauri/src                        # 应无命中（起草值不可变）
+   rg -n 'consumed_at IS NULL' src-tauri/src/domain                     # 总额校验路径上应无命中
    rg -n 'unwrap\(\)|expect\(|panic!' src-tauri/src/commands            # command 层不应 panic 穿过 IPC
    ```
 
@@ -49,9 +51,10 @@ TS：null/undefined 访问、游离的 `any`、不安全的 `!`。
 
 - **AI 只写草稿**（约束 3，[ADR-0002](../../docs/adr/0002-ai-never-writes-directly.md)）：把 MCP 工具清单列出来，逐个问「**这个工具能不能让一条未经人确认的数据出现在 `transactions` 或 `items` 里？**」——能，就是缺陷。`domain::confirm` 被任何 MCP 工具调用即缺陷；名字叫 `confirm_draft` 的工具是「形式合规、实质绕过」。
 - **工具面收窄**（约束 9）：存在通用「执行任意 SQL」/ 任意文件写入 / 任意命令执行工具即缺陷。草稿区应有独立 store 类型（如 `DraftStore`），它**根本没有**写事实表的方法——越权在编译期不可表达，而不是靠 review 发现。
-- **证据链**（约束 4）：**全部 `draft_*` 表**的 `source_id` 与 `evidence_text` 都必须是必填（不是 `Option`），数据层也要有 `NOT NULL`——`draft_items` **没有例外**（口述走 `kind = utterance` 来源，2026-08-09 改定，见 [05 §3.4](../../docs/prd/05-items.md)）。审核界面必须原文与解析结果并排、默认可见。
-- **总额交叉校验无旁路**（约束 5）：任何 `force` / `ignore` / `skip_check` 参数即缺陷。`Unavailable` 不得被当成 `Passed`。
-- **整数金额**（约束 6）：全链路整数最小货币单位，中间计算与 IPC 传输都不许有浮点。`/ 100` **全仓库只应出现在前端的格式化函数里**。
+- **有效工具集**（约束 9 的另一半，2026-08-10 新增，[01 §3.7](../../docs/prd/01-agent-runtime.md)）：**探测必须走结构化 introspection**——实现里出现「向模型发一句请列出你的工具」再解析回复的路径**即缺陷**（用模型自述验证对模型的约束是循环论证）。**上一条只管我们注册的工具。** 检查 spawn 子进程的那段代码——**起了一个「默认配置」的 CLI 即缺陷**：它自带的执行命令与文件读写工具能直接打开 SQLite 写事实表。必须有密封启动配置 **+ 下发任务前的有效工具集探测**，与注册表**集合相等**（不是包含），不等则返回 `agent.tool_surface_unsealed` 拒绝下发。**只有「遍历自己工具注册表」的测试而没有真实子进程探测，是缺陷不是覆盖。**
+- **证据链**（约束 4）：**全部 `draft_*` 表**的 `source_id` 与 `evidence_text` 都必须是必填（不是 `Option`），数据层也要有 `NOT NULL`——`draft_items` **没有例外**（口述走 `kind = utterance` 来源，2026-08-09 改定，见 [05 §3.4](../../docs/prd/05-items.md)）。**审核界面并排呈现的必须是来源原件**，只渲染 `evidence_text` 那一列即缺陷——它和被核对的金额出自同一次模型输出，用户核对的会是模型和它自己（2026-08-10，[ADR-0002 闸门 2](../../docs/adr/0002-ai-never-writes-directly.md)）。**任何 `UPDATE` 触及 `drafted_json` 即缺陷**（起草值不可变）。
+- **总额交叉校验无旁路**（约束 5）：任何 `force` / `ignore` / `skip_check` 参数即缺陷。`Unavailable` 不得被当成 `Passed`。三条 2026-08-10 新增的判据：**① 求和范围必须是 `voided_at IS NULL`，写成 `consumed_at IS NULL` 即缺陷**（逐条确认后该来源永远回不到 `passed`）；**② 入参必须是 `attempt_id`**，按 `source_id` 求和会把重试后两次尝试的草稿混在一起；**③ 求和必须按 `reported_total_kind` 选等式**，无差别求和即缺陷；**④ 批量确认的准入只看 `confirmation_policy`**——拿 `reconciliation_status == NotApplicable` 当放行条件即缺陷（两者是两个维度），且 `file` 来源永远拿不到 `NotApplicable` / `UserAttestedBatch`。
+- **整数金额**（约束 6）：全链路整数最小货币单位，中间计算与 IPC 传输都不许有浮点。**写死的 `/ 100` 即缺陷**（2026-08-10）——除数是 `10^currency_exponent(currency)`，JPY 是 0 位、KWD 是 3 位；汇率换算公式漏掉两边的 exponent 项同样是缺陷（跨 exponent 币种会差 100 倍）。**未知币种回退到 exponent 2 也是缺陷**——要返回 `data.unsupported_currency` 拒绝，「带告警但已入账的错误金额」比拒绝更糟。**IPC 上金额走 JSON 数字而非十进制字符串**同样是缺陷（`JSON.parse` 静默舍入）。
 - **三元组自洽**（约束 7）：原币金额 + 本位币金额 + 当时汇率三者齐全；不满足返回 `data.money_inconsistent`。**原币 = 本位币时不设特例分支**（`rate_ppm = 1_000_000` 走同一条路）。任何 `SUM(base_amount_minor)` 必须带 `GROUP BY base_currency`，或带「结果集只含一种本位币」的显式断言。
 - **审计 append-only**（约束 8）：`UPDATE`/`DELETE` 针对 `audit_log` 即缺陷；agent 写草稿（`actor = "agent"`）与人工确认修改（`actor = "human"`）两条路径都要留痕。
 - **平台边界**（约束 1、2）：`TcpListener::bind`、`Command::new("node")`、应用自己发的 `reqwest`/`fetch`、任何遥测/崩溃上报/第三方分析 SDK ——各自都是缺陷。**允许 spawn 的子进程只有两类**：agent CLI（[ADR-0003](../../docs/adr/0003-agent-runtime-and-pluggable-backend.md)）与 v1.1 的 Swift sidecar（[ADR-0005](../../docs/adr/0005-voice-and-system-integration.md)）；其余一律是缺陷。
