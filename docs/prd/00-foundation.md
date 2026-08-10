@@ -3,7 +3,7 @@ title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契�
 status: ready
 owner: "@maintainer"
 date: 2026-08-10
-version: v0.10
+version: v0.11
 ---
 
 # 00 · 地基 Foundation
@@ -168,7 +168,7 @@ accounts · memory_rules · memory_rule_corrections · draft_memory_hits · audi
 
 **M0 建其中六张**：`sources` · `parse_attempts` · `draft_transactions` · `transactions` · **`accounts`（骨架）** · `audit_log`。其余随对应 sub-PRD 在后续里程碑建（`draft_items` / `items` 属 [05 事项](./05-items.md)，M3；`memory_rules` / `memory_rule_corrections` / `draft_memory_hits` 属 [06 记忆](./06-memory.md)，M3）。
 
-> **`parse_attempts` 为什么在 M0**（2026-08-10 加入，产品决定）：M0 的**全部目的**是度量「视觉模型读真实账单准不准」与「一段口述能不能可靠拆多笔」（[`docs/PRD.md` §9.1](../PRD.md)）。而 `sources.agent_session_id` 只存**最近一次**解析——重试一次就把上一次覆盖掉，失败历史、换过哪个模型、提示词改没改全部丢失，[07 评测 §3.5](./07-eval.md)「区分模型退步和我改坏了提示词」这条直接落空。**一张表换掉一次不可解释的 M0 基线，值。**
+> **`parse_attempts` 为什么在 M0**（2026-08-10 加入，产品决定）：M0 的**全部目的**是度量「视觉模型读真实账单准不准」与「一段口述能不能可靠拆多笔」（[`docs/PRD.md` §9.1](../PRD.md)）。而 `sources.agent_session_id` 只存**最近一次**解析——重试一次就把上一次覆盖掉，失败历史、换过哪个模型、提示词改没改全部丢失，[07 评测 §3.5](./07-eval.md)「区分模型退步与提示词变更导致的回归」这条直接落空。**一张表换掉一次不可解释的 M0 基线，值。**
 >
 > **`accounts` 骨架为什么也在 M0**（2026-08-10 修正）：`transactions.account_id` 声明为 `REFERENCES accounts(id)`，而 M0 不建 `accounts`——**这在 SQLite 上直接跑不起来**。开了 `PRAGMA foreign_keys = ON` 之后，**即使插入的 `account_id` 是 `NULL`**，只要父表不存在就报：
 >
@@ -611,6 +611,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：存储引擎与数据目录、标识/时间/金额/汇率约定、迁移策略、M0 四表与 v1 全表清单、命令契约与 `AppError` 形状、TS 桥；否决方案六条；待决 R1–R5；验收标准 11 条可执行 + 1 条人工 |
+| v0.11 | 2026-08-10 | **公开文档降噪。** §3.6 对评测目标的引用去掉第一人称会话式表述，schema 与验收标准未变 |
 | v0.10 | 2026-08-10 | **文档审查第五轮回流**：`effective_tool_surface_hash` **改名 `effective_capability_hash`** 并扩到非工具型能力（[01 §3.7](./01-agent-runtime.md)）；§6 补 span 的四种越界用例 |
 | v0.9 | 2026-08-10 | **文档审查第四轮回流。** ① **`evidence_span` 的坐标系定死**（零起、左闭右开、Unicode code point、未 normalize 的落盘文本，两端实现方式指定）——原文「字符区间」在 Rust/TS 之间有四种解释，中文夹 emoji 即错位；写入时强制 `slice_by_code_points(...) == evidence_text`，顺带让 `utterance` 的 `evidence_text` 变成可独立核验的。② 新增错误码 `agent.unexplained_gap`。③ §5 新增 R10（span 报不准的退路）与 R11（M3 ordinal 跨表唯一）。§6 新增 4 条验收 |
 | v0.8 | 2026-08-10 | **文档审查第三轮回流。** ① `draft_transactions` 新增 **`source_ordinal`**（两种来源必填）与 **`evidence_span_*`**（`utterance` 必填）——没有它 [07](./07-eval.md) 的条目对齐在 `file` 来源上根本写不出来（没有 OCR、没有坐标）。② **未知币种由「回退 2 + 告警」改为 `data.unsupported_currency` 拒绝**。③ 三处机械漂移：M0 表数、`accounts` 建表时机、列级写入权限的措辞。§6 新增 3 条验收 |

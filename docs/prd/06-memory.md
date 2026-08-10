@@ -3,7 +3,7 @@ title: 06 记忆 Memory — 商户映射、纠正沉淀与语境词表
 status: draft
 owner: "@maintainer"
 date: 2026-08-10
-version: v0.5
+version: v0.6
 ---
 
 # 06 · 记忆 Memory
@@ -19,9 +19,9 @@ version: v0.5
 
 降第一项的唯一办法：把用户已经做过的判断记住，下次不要再问。
 
-- 用户第一次把 `WOOLWORTHS 1234 SYDNEY` 改成「日用」——第二次就不该再猜错
-- 用户说「我妈」指的是家庭支出——系统该知道
-- 语音听写把「Coles」听成「call is」——该有专有名词表纠正
+- 用户第一次把 `SUPERMARKET 1234 CENTRAL` 改成「日用」——第二次就不该再猜错
+- 用户说「家里那笔」指的是家庭支出——系统该知道
+- 语音听写把「FreshMart」听成「fresh mart」——该有专有名词表纠正
 
 **没有记忆，产品在第 10 次使用时和第 1 次一样笨。** 那样它就只是「一个能读截图的 OCR」，而不是「越用越省事的助手」。
 
@@ -44,9 +44,9 @@ version: v0.5
 
 | 存 | 不存 |
 |---|---|
-| 「`WOOLWORTHS *` → 日用」这条映射 | 用户和 agent 说过的话 |
+| 「`SUPERMARKET *` → 日用」这条映射 | 用户和 agent 说过的话 |
 | 「用户把 X 改成了 Y，第 3 次了」这个计数 | 完整的解析上下文 |
-| 「『我妈』= 家庭支出」这条语境 | agent 的推理过程 |
+| 「『家里那笔』= 家庭支出」这条语境 | agent 的推理过程 |
 
 **理由**：
 
@@ -60,8 +60,8 @@ version: v0.5
 |---|---|---|---|
 | `merchant_category` | 商户文本模式 | 分类 | [03 审核与草稿区](./03-review.md) 的纠正事件 |
 | `merchant_normalize` | 商户原文模式 | 归一化名 | 纠正事件 |
-| `context_term` | 用户用语（「我妈」） | 语义（家庭支出） | 用户手工录入 |
-| `speech_term` | 易听错的词 | 正确写法（`Coles`） | 用户手工录入 + 听写纠正 |
+| `context_term` | 用户用语（「家里那笔」） | 语义（家庭支出） | 用户手工录入 |
+| `speech_term` | 易听错的词 | 正确写法（`FreshMart`） | 用户手工录入 + 听写纠正 |
 
 **统一存在 `memory_rules` 表**（列入 [00 地基 §3.6](./00-foundation.md) 全表清单，字段详情在此，M3 开工前补进 `00`）：
 
@@ -124,7 +124,7 @@ version: v0.5
 
 **三个状态全部由代码观察得出，不问 agent**：`retrieved` 来自工具调用的返回内容；`consistent_with_rule` 是「草稿写入时该字段值 == 规则的 `value`」；`overridden` 是「确认入库的值 != 规则的 `value`」。**这是观察，不是分类**——代码没有在做任何业务判断，因此不触碰 [`CLAUDE.md`](../../CLAUDE.md) 约束 15。
 
-> **中间那个状态 2026-08-10 由 `applied` 改名。** `applied` 读起来像「agent 因为这条规则才这么写」，**而我们观察不到因果**——值一致也可能是模型本来就会这么分（`WOOLWORTHS` 归日用不需要规则也猜得到）。名字里带因果，读数的人就会把相关当成因果去解释增益。**因果只能靠 `--no-memory` 对照测**（[07 评测 §3.4](./07-eval.md)），不能靠这一列。
+> **中间那个状态 2026-08-10 由 `applied` 改名。** `applied` 读起来像「agent 因为这条规则才这么写」，但系统观察不到因果——值一致也可能是模型本来就会这么分（`SUPERMARKET` 归日用不需要规则也猜得到）。名字里带因果，读数的人就会把相关当成因果去解释增益。**因果只能靠 `--no-memory` 对照测**（[07 评测 §3.4](./07-eval.md)），不能靠这一列。
 
 由此可算三个数：**一致率**（`consistent_with_rule` / `retrieved`，**相关，不是因果**）、**误导率**（`overridden` / `consistent_with_rule`）、**规则增益**（`--no-memory` 对照轮次的纠正率之差，**这一个才是因果**）。§3.6 的自动停用也从「数用户推翻了几次」变成一句对本表的查询。
 
@@ -134,7 +134,7 @@ version: v0.5
   1. **用户在审核界面的纠正**（[03 审核与草稿区 §3.6](./03-review.md) 投递纠正事件）
   2. **用户手工录入**
 - **纠正 → 规则的门槛**：同一个 (商户模式, 目标分类) 被纠正 **≥ 2 次**才升格为规则。一次可能是特例，两次是模式
-- **升格时通知用户**：「以后 `WOOLWORTHS *` 都归日用？」——**不静默学习**。用户必须知道系统学到了什么
+- **升格时通知用户**：「以后 `SUPERMARKET *` 都归日用？」——**不静默学习**。用户必须知道系统学到了什么
 
 ### 3.4 规则的应用
 
@@ -151,8 +151,8 @@ version: v0.5
 
 ```
 query_memory(
-  merchants: ["WOOLWORTHS 1234", "COLES 5678"],   // 抽取后：商户映射与归一化
-  terms:     ["我妈"]                              // 解析前：口语指代与个人语境
+  merchants: ["SUPERMARKET 1234", "GROCERY 5678"], // 抽取后：商户映射与归一化
+  terms:     ["家里那笔"]                           // 解析前：口语指代与个人语境
 )
   → 只返回这些键的规则
 ```
@@ -166,15 +166,15 @@ query_memory(
 
 #### 四类规则各自的调用时机（2026-08-10 补，§3.2 的 `context_term` 此前无处可用）
 
-§3.2 定了四类规则，但本节 v0.2–v0.3 只写了**商户**这一类的检索协议。`context_term`（「我妈」= 家庭支出）因此处在一个死角：它存在表里、记忆页看得见、**却没有任何时刻会被读出来**。
+§3.2 定了四类规则，但本节 v0.2–v0.3 只写了**商户**这一类的检索协议。`context_term`（「家里那笔」= 家庭支出）因此处在一个死角：它存在表里、记忆页看得见、**却没有任何时刻会被读出来**。
 
 | 规则类型 | 什么时候查 | 键从哪来 |
 |---|---|---|
-| `context_term` | **解析口述来源时，抽取字段之前** | agent 从转写文本里挑出的**口语指代与私人称谓**（「我妈」「老地方」），作为 `terms` 传入 |
+| `context_term` | **解析口述来源时，抽取字段之前** | agent 从转写文本里挑出的**口语指代**（「家里那笔」「老地方」），作为 `terms` 传入 |
 | `merchant_category` · `merchant_normalize` | **抽取出商户之后，起草之前** | 本次解析出的全部商户原文，作为 `merchants` 传入 |
 | `speech_term` | **v1 不查** | v1 用 macOS 系统听写，应用拿不到词表接口（§5 R4）。**v1 只存不用**，v1.1 换 sidecar 后在转写阶段接入 |
 
-**为什么 `context_term` 也走「按键查」而不是全量注入**：全量注入正是被否决的方案 A，且它会把用户的整份私人语境词表随每次请求发往模型服务商——**解析一张超市小票用不到「我妈」是谁**（[01 §3.2](./01-agent-runtime.md)「只读 ≠ 无限读」）。agent 读得到整段口述，挑出里面的指代词是它擅长的事，不需要我们替它猜。
+**为什么 `context_term` 也走「按键查」而不是全量注入**：全量注入正是被否决的方案 A，且它会把用户的整份私人语境词表随每次请求发往模型服务商——**解析一张超市小票用不到「家里那笔」的语义**（[01 §3.2](./01-agent-runtime.md)「只读 ≠ 无限读」）。agent 读得到整段口述，挑出里面的指代词是它擅长的事，不需要应用替它猜。
 
 **风险登记**：agent 可能认不出哪些词该查。**这条属实且无法在文档层解决**，实测后若命中率低，候选对策是「仅在 `kind = utterance` 的任务中，对 `context_term` 一类开放全量返回」——那是一个有明确边界的例外，不是取消原则。登记为 §5 R6。
 
@@ -227,7 +227,7 @@ query_memory(
 
 **同一个键匹配到多条规则时，按三级顺序裁决**（2026-08-10 改）：
 
-1. **匹配具体度高的优先**（`specificity`）——`WOOLWORTHS 1234 SYDNEY` 的专属规则压过 `WOOLWORTHS *` 的通配规则。**用户特意为某家分店定的规则，不该被一条泛规则盖掉**
+1. **匹配具体度高的优先**（`specificity`）——`SUPERMARKET 1234 CENTRAL` 的专属规则压过 `SUPERMARKET *` 的通配规则。**用户特意为某家分店定的规则，不该被一条泛规则盖掉**
 2. 具体度相同 ⇒ **`last_affirmed_at` 晚的优先**——用户最近一次**认可**这条规则的时间
 3. 仍相同 ⇒ `approved_at` 晚的优先
 
@@ -246,10 +246,10 @@ query_memory(
 |---|---|
 | 把对话历史当记忆持久化 | 未经提炼、含大量原始账目细节、不可读不可审——见 §3.1 三条理由 |
 | 让 agent 自主决定记什么 | 违反「控制流由代码决定」（[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）；且用户会失去对「系统记住了什么」的掌控 |
-| 一次纠正就立刻升格为规则 | 特例会污染规则库（一次去 Woolworths 买了礼品卡，不等于以后都归礼品） |
+| 一次纠正就立刻升格为规则 | 特例会污染规则库（一次在超市买了礼品卡，不等于以后都归礼品） |
 | 静默学习不通知用户 | 用户发现系统「自作主张」时的信任损失，远大于多一次确认的成本 |
 | 向量检索 / 嵌入做模糊匹配 | v1 规则量级几百条，直接模式匹配足够；向量库引入依赖、不可解释、且规则要能被用户读懂 |
-| 云端共享规则库（「大家都把 Woolworths 归日用」） | 违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「数据不出本机」 |
+| 云端共享规则库（「大家都把超市归日用」） | 违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「数据不出本机」 |
 | 记忆自动修正已入库的历史 | 事实表只由人工确认动作写入（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）；自动回溯修改会让审计失去意义 |
 
 ## 5. 待决与风险
@@ -275,7 +275,7 @@ query_memory(
 - [ ] `cargo test memory::domain_never_overwrites_category` 通过——domain 侧读规则只产生冲突标记，草稿的 `category` 值不被改写（§3.4）
 - [ ] `cargo test memory::rules_never_touch_fact_tables` 通过——规则的任何应用路径都不写 `transactions` / `items`（§3.5「学出来的东西永不成为事实源」）
 - [ ] `cargo test memory::rule_records_provenance` 通过——升格产生的规则在 `memory_rule_corrections` 里有 ≥2 行 `role = "promoted"`，每行的 `correction_id` 指向真实的 `audit_log` 行，且规则 `approved_at` 非空（§3.2）
-- [ ] `cargo test memory::specific_rule_beats_wildcard` 通过——`WOOLWORTHS 1234 SYDNEY` 的专属规则压过 `WOOLWORTHS *`，**即使后者 `last_hit_at` 更新**（§3.6 第 1 级）
+- [ ] `cargo test memory::specific_rule_beats_wildcard` 通过——`SUPERMARKET 1234 CENTRAL` 的专属规则压过 `SUPERMARKET *`，**即使后者 `last_hit_at` 更新**（§3.6 第 1 级）
 - [ ] `cargo test memory::same_specificity_prefers_recent_affirmation` 通过——具体度相同时取 `last_affirmed_at` 晚的，**不看 `last_hit_at`**（§3.6 第 2 级）
 - [ ] `rg -n 'last_hit_at' src-tauri/src/domain` 的命中都不在冲突裁决路径上（§3.6：`last_hit_at` 只供展示）
 - [ ] `cargo test memory::rule_auto_disabled_after_three_overrides` 通过——计数走 `memory_rule_corrections` 的 `role = "overridden"`
@@ -313,6 +313,7 @@ query_memory(
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.6 | 2026-08-10 | **公开文档降噪。** 商户与个人语境示例改为虚构、中性值；同时把现行正文中的作者视角改成系统职责表述。schema、规则语义与验收标准未变 |
 | v0.5 | 2026-08-10 | **文档审查第二轮回流三处，都是「同一轮里改得不够彻底」。** ① §3.4「查询覆盖是协议」**由告警改为可补救的拒绝**（`agent.memory_lookup_incomplete`）——告警不改变行为，等于没强制。② §3.2 `last_affirmed_at` **收窄为只由三种明确动作更新**——把「未被改动地确认」算作认可，等于把 `last_hit_at` 的自我强化原样搬过来。③ `draft_memory_hits.outcome` 的 `applied` **改名 `consistent_with_rule`**——因果观察不到，名字不该暗示它。§6 验收新增 2 条、改写 2 条 |
 | v0.4 | 2026-08-10 | **文档审查回流六处。** ① `source_correction_ids` 改为关系表 **`memory_rule_corrections`**（原列指向不存在的实体）。② 新增 **`draft_memory_hits`**——此前无从验证「记忆是唯一的复利」。③ §3.4 约束 4 由「靠提示词、不强制」改为**完成时校验查询覆盖**并记协议告警。④ §3.4 补**四类规则各自的调用时机**，`context_term` 此前无处可用。⑤ §3.6 冲突裁决由 `last_hit_at` 改为**具体度 → `last_affirmed_at` → `approved_at`** 三级。⑥ §3.5 的头一句改写为准确表述。§3.2 字段表随之增删；§5 新增 R6、R7；§6 验收新增 6 条、改写 2 条 |
 | v0.3 | 2026-08-08 | 公开仓库去个人化：§3.2 三组新增字段与 §3.5「学出来的东西永不成为事实源」**去掉外部参考仓库出处、把结论内联**（字段对应「用户确认的知识」应有的可追溯性；「反向污染」的完整表述）——**字段集与三条禁止本身未变**；本表去掉工具与会话指代；`owner` 改为 `@maintainer` |

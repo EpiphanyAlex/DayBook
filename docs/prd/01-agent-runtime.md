@@ -3,7 +3,7 @@ title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: draft
 owner: "@maintainer"
 date: 2026-08-10
-version: v0.11
+version: v0.12
 ---
 
 # 01 · Agent 运行时
@@ -100,7 +100,7 @@ version: v0.11
 
 两个具体后果：
 
-- **`query_memory` 若能列举全部规则**，agent 就能把用户的**个人语境词表**整个拉进上下文（「我妈 = 家庭支出」这类）。它对解析一张超市小票毫无用处，却会随请求发往模型服务商。因此本工具**只按键回答**：`query_memory(merchants: [...])` 返回这些商户的规则，**没有「全部列出」这个能力**。
+- **`query_memory` 若能列举全部规则**，agent 就能把用户的**个人语境词表**整个拉进上下文（如「家里那笔 = 家庭支出」）。它对解析一张超市小票毫无用处，却会随请求发往模型服务商。因此本工具**只按键回答**：`query_memory(merchants: [...])` 返回这些商户的规则，**没有「全部列出」这个能力**。
 - **`read_source` / `list_pending_sources` 收窄到「本次任务指派的来源」**。M0 的编排是代码侧串行下发（[02 导入 §3.5](./02-ingest.md)），agent 从不自己挑要解析什么，所以这个收窄不损失任何能力。M2 批量时一次任务可能指派多个来源，工具形态不变。
 
 **硬性禁令**（违反即缺陷，[ADR-0003 §3](../adr/0003-agent-runtime-and-pluggable-backend.md)）：
@@ -379,7 +379,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | agent 输出 JSON，应用解析 | ① 权限边界要在解析后再补一层校验，而 MCP 的边界就是工具签名 ② 做不到多轮编排（agent 无法「先查历史上这个商户归哪一类，再决定怎么起草」） ③ 失去「Claude Code 和 Codex 都支持 MCP」这条可插拔红利（[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)「理由」） |
 | HTTP 传输的 MCP server | 要开端口 → 本机其他程序可见的攻击面，与「数据不出本机」的姿态相悖；且生命周期不再天然绑定子进程 |
 | ~~MCP server 做成独立二进制~~ **已重开（2026-08-09）** | 原否决理由是「`rmcp` 允许进程内起，独立二进制凭空多一层进程管理与版本同步」。但 §3.1 的告示说明**进程内起这个前提可能根本不成立**——若成立不了，本行就是候选方案而非被否决的方案。**结论随 §5 R6 一起给出。** |
-| 按业务领域拆「记账 agent」+「事项 agent」 | 用户一句话经常跨域（「今天吃饭 180，明天交房租，上周那 400 是给我妈买茶叶」），拆开要先分派再合并，凭空多出错误面且闭不了环（[ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md)） |
+| 按业务领域拆「记账 agent」+「事项 agent」 | 用户一句话经常跨域（「今天吃饭 180，明天交房租，上周那 400 是给家里买茶叶」），拆开要先分派再合并，凭空多出错误面且闭不了环（[ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md)） |
 | 应用内置 API key / 让用户把 key 粘进应用 / 提供厂商登录 | 直接违反 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)：应用要存凭证、带 endpoint、自己发 HTTPS、代理鉴权，四件事各自是缺陷。**且产品不需要它**——用户已有付费订阅的 CLI。「用户自备 API key」已于 2026-08-09 从后端清单删除 |
 | v1 就实现多个后端 | 第二个后端的价值在厂商政策变化时才兑现；接口存在即可保住架构，实现推到 M4 |
 
@@ -392,7 +392,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定，**不阻塞 M0**（M0 单张截图） |
 | R7（**新增 2026-08-10**） | **`unparsed_note` 是自由文本，只能验证「说了」、验证不了「说得对」**（§3.2「跳号必须有说明」）。结构化形式是 `unparsed_regions: [{ source_ordinal, reason }]`，代码就能逐个核对跳掉的号是否都被覆盖 | 本文 §3.2、[00 地基 §3.6](./00-foundation.md) `parse_attempts` | **M0 后决**——要先实测 agent 到底怎么描述缺口才好定形状。M0 的自由文本版本已经把这条从口头协议变成一个会红的检查，够用 |
 | R4 | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效 | 全产品 | 对策已定（可插拔接口），**不需要额外决策**；登记以免被当成新问题重新讨论 |
-| **R6**（2026-08-09 新增，**阻塞 M0**） | **MCP server 的进程归属**：§3.1 要「主进程内起」，§3.4 要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥（理由见 §3.1 告示）。三条候选：① **独立 MCP helper 二进制**，由 CLI 按 `command + args` 拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**（`<数据目录>` 下的 socket 文件，不是 TCP 端口，因此不违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「不开 localhost API」）；② **应用自身二进制加一个 `--mcp-stdio` 子命令**，CLI 拉起的是同一个可执行文件的另一种模式，省掉版本同步；③ **改用 Agent SDK / 库内嵌**，不走 CLI + MCP 这条路（代价：放弃「用用户自己已登录的 CLI」这条产品支点，[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md) 需重写） | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **M0 开工前必须先做 spike**，四项检查缺一不可：① 拿 `claude -p` + 一个最小 `rmcp` server 实测三条候选的可行性与生命周期行为；② 确认 CLI 侧 MCP 配置的实际契约（`command + args` 怎么传、stdio 怎么握手）；③ **核实厂商现行条款**——第三方应用经 `claude -p` 调用是否仍走用户订阅额度、有无额外限制。[`docs/PRD.md` §12](../PRD.md) 记的那三个日期是立项时的观察且未核实，**核实后才允许把结论写回决定依据**；④ **实测密封启动配置**（2026-08-10 加入，§3.7）——定出具体 flag 组合，并验证「有效工具集恰好等于我们注入的那一组」这个探测**真的能做到**：拿不到有效工具清单，或关不掉内置工具，就等于闸门 1 在进程层不成立，那会反过来影响候选方案的取舍。第 ④ 项要回答的两个具体问题：**(a) 拿有效工具清单需不需要单独起一次进程**（§3.7 假定「需要」并据此规定探测 spawn 不产生 `parse_attempts` 行——**若实测发现能在解析会话内拿到，这条要回流改掉**）。**这一项还有一个失败判据**：清单必须**机器可读**、且**对全部工具来源具有权威性**（内置工具 + 全部 MCP server + 插件/hook/权限模式），**两条任一不满足就是本次 spike 的失败结论**，必须反过来影响三条候选方案的取舍。**特别注意**：一个只返回 MCP `tools/list` 的接口三条形式要件都占，却对 `Bash` / `Read` / `Edit` 一无所知——**那不是有效工具集探测**；**(b) 能力清单的机器表示取到什么粒度**——工具型条目至少 `kind + provider + name + input_schema`，**非工具型（hook / 插件 / 权限模式）至少 `kind + provider + capability`**；实测看 CLI 到底报得出哪些。**报不出非工具型能力，与报不出内置工具同等，都是失败结论**。**四项结论一并回流本文并同步 [ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)；flag 组合与已验证的 CLI 版本号写进 `.claude/features/agent-runtime.md`（待建），不写进本文。** 在此之前本文 `status: draft` |
+| **R6**（2026-08-09 新增，**阻塞 M0**） | **MCP server 的进程归属**：§3.1 要「主进程内起」，§3.4 要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥（理由见 §3.1 告示）。三条候选：① **独立 MCP helper 二进制**，由 CLI 按 `command + args` 拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**（`<数据目录>` 下的 socket 文件，不是 TCP 端口，因此不违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「不开 localhost API」）；② **应用自身二进制加一个 `--mcp-stdio` 子命令**，CLI 拉起的是同一个可执行文件的另一种模式，省掉版本同步；③ **改用 Agent SDK / 库内嵌**，不走 CLI + MCP 这条路（代价：放弃「用用户自己已登录的 CLI」这条产品支点，[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md) 需重写） | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **M0 开工前必须先做 spike**，四项检查缺一不可：① 拿 `claude -p` + 一个最小 `rmcp` server 实测三条候选的可行性与生命周期行为；② 确认 CLI 侧 MCP 配置的实际契约（`command + args` 怎么传、stdio 怎么握手）；③ **核实厂商现行条款**——确认第三方应用经 `claude -p` 调用是否仍走用户订阅额度、有无额外限制，并把出处与结论回流本文及 [`docs/PRD.md` §12](../PRD.md)；④ **实测密封启动配置**（2026-08-10 加入，§3.7）——定出具体 flag 组合，并验证「有效工具集恰好等于我们注入的那一组」这个探测**真的能做到**：拿不到有效工具清单，或关不掉内置工具，就等于闸门 1 在进程层不成立，那会反过来影响候选方案的取舍。第 ④ 项要回答的两个具体问题：**(a) 拿有效工具清单需不需要单独起一次进程**（§3.7 假定「需要」并据此规定探测 spawn 不产生 `parse_attempts` 行——**若实测发现能在解析会话内拿到，这条要回流改掉**）。**这一项还有一个失败判据**：清单必须**机器可读**、且**对全部工具来源具有权威性**（内置工具 + 全部 MCP server + 插件/hook/权限模式），**两条任一不满足就是本次 spike 的失败结论**，必须反过来影响三条候选方案的取舍。**特别注意**：一个只返回 MCP `tools/list` 的接口三条形式要件都占，却对 `Bash` / `Read` / `Edit` 一无所知——**那不是有效工具集探测**；**(b) 能力清单的机器表示取到什么粒度**——工具型条目至少 `kind + provider + name + input_schema`，**非工具型（hook / 插件 / 权限模式）至少 `kind + provider + capability`**；实测看 CLI 到底报得出哪些。**报不出非工具型能力，与报不出内置工具同等，都是失败结论**。**四项结论一并回流本文并同步 [ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)；flag 组合与已验证的 CLI 版本号写进 `.claude/features/agent-runtime.md`（待建），不写进本文。** 在此之前本文 `status: draft` |
 | ~~R5~~ **已关闭（2026-08-07）** | agent 会话 ID 的粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) schema | **结论：一个来源一个会话**（2026-08-10 精确为「一个来源**一次尝试**一个会话」）。理由是 §3.4 的作废语义要能只作废本次的草稿——若一次导入共用一个会话，批量导入时某一张超时会波及同批其他来源的草稿。落点由「两列 `agent_session_id`」改为 **`parse_attempts` 一行 + 草稿上的 `attempt_id`**（[00 地基 §3.6](./00-foundation.md)），会话 ID 现在只存在尝试行上；**结论未变，键更直接了**（重试同一来源会产生第二行，旧写法下两次重试的 `agent_session_id` 都挂在同一个 `sources` 行上，后者覆盖前者） |
 
 ## 6. 验收标准
@@ -484,6 +484,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
+| v0.12 | 2026-08-10 | **公开文档降噪。** 跨实体口述与个人语境示例改为中性值；R6 删除对无出处政策日期的引用，只保留现行条款核实要求。工具面、spike 判据与验收标准未变 |
 | v0.11 | 2026-08-10 | **文档审查第五轮回流。** §3.7 的比较对象由「工具清单」扩为 **capability manifest**（工具型 `kind+provider+name+input_schema`；非工具型 `kind+provider+capability`），`effective_tool_surface_hash` **改名 `effective_capability_hash`** 并算在整份 manifest 上；非工具型能力同样触发 `agent.tool_surface_unsealed`；R6 第 ④ 项补「报不出非工具型能力 = 失败结论」。§6 新增 4 条验收（含 span 的边界用例） |
 | v0.10 | 2026-08-10 | **文档审查第四轮回流三处。** ① **跳号由口头协议变成可验证的检查**：跳号 + 空 `unparsed_note` ⇒ `agent.unexplained_gap`（可补救），结构化 `unparsed_regions` 登记为 R7。② **§3.7 补第二条要件——清单必须对全部工具来源具有权威性**：只返回 MCP `tools/list` 的接口形式上完全合规，却看不见 `Bash`/`Read`/`Edit`，那正是本节要防的漏洞换个严谨外观重来一遍；并入 R6 失败判据。③ `evidence_span` 随 [00](./00-foundation.md) 定死坐标系并在工具层强制校验。§6 验收由 48 条增至 52 条 |
 | v0.9 | 2026-08-10 | **文档审查第三轮回流四处。** ① `draft_transaction` 新增必填 **`source_ordinal`** 与（仅 `utterance` 的）**`evidence_span`**——没有它 [07](./07-eval.md) 的条目对齐在 `file` 来源上写不出来；顺带把未知币种的拒绝提到工具层。② **§3.3 明确 `complete_source` 不写 `audit_log`**（判据：会不会影响账目），标题改准。③ **§3.7 定死探测必须走结构化 introspection、不许问模型**，补 `trace` 五字段与 R6 的失败判据。④ §3.4 收束表补 `completed_with_gaps`（五种）。§6 验收由 40 条增至 48 条 |
