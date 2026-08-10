@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-10
-version: v0.13
+version: v0.14
 ---
 
 # sub-PRD 索引
@@ -16,14 +16,14 @@ version: v0.13
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`ready`** | v0.9 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | `draft` ⚠️ | v0.10 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`ready`** | v0.7 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`ready`** | v0.7 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`ready`** | v0.11 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | `draft` ⚠️ | v0.12 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`ready`** | v0.8 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`ready`** | v0.8 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
-| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.5 |
-| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.5 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.7 |
+| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
+| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.8 |
 
 **M0 四份已于 2026-08-07 完成开工评审，进入 `ready`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。评审收敛了 5 处跨文档冲突与 8 处缺口，关闭待决 3 项、改期 2 项，各份变更记录有逐条说明。
 
@@ -105,6 +105,7 @@ version: v0.13
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：七份 sub-PRD 索引、状态总览、里程碑映射、依赖关系图、共享决定出处表 |
+| v0.14 | 2026-08-10 | **公开文档降噪同步**：00→v0.11 · 01→v0.12 · 05→v0.7 · 06→v0.6 · 07→v0.8 · [`docs/PRD.md`](../PRD.md)→v0.13；同时修正状态总览中 00/01/02/03/05 已落后于各文件 frontmatter 的版本号。**所有 status 未变** |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步 01/02/04 的版本号至 v0.2（去窄化：多币种与多渠道是能力而非定位，具名银行/支付平台降为 dogfooding 样本） |
 | v0.3 | 2026-08-07 | 随**本位币可切换**拍板（[`docs/PRD.md` §13](../PRD.md) P2 关闭）同步：00 → v0.2、04 → v0.3；共享决定出处表新增「本位币切换语义」一行，指向 [00 地基 §3.4](./00-foundation.md) |
 | v0.4 | 2026-08-07 | **M0 四份完成开工评审并进入 `ready`**：00 → v0.3、01 → v0.3、02 → v0.3、03 → v0.2。状态总览与「下一步」改写为进 plan mode 开 M0；共享决定出处表新增 5 行（M0 逐列字段、权威错误码集、总额校验比哪个金额、闸门 3 的边界、M0 端到端脚本） |

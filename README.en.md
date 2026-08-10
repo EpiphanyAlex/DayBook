@@ -133,5 +133,3 @@ Opening a pull request? The workflow and the template are described in [`CLAUDE.
 ## License
 
 Released under the [MIT License](./LICENSE).
-
-Rationale and decision record: [`docs/PRD.md` §13](./docs/PRD.md) (open question P4, closed 2026-08-09).
