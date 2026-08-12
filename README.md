@@ -114,6 +114,7 @@ Daybook 的前提相反：**默认你是事后补的。**
 | 各能力的规格 | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | 按主题拆分的实现细则 | [`.claude/rules/`](./.claude/rules/) |
 | 「这个功能现在是怎么实现的」 | [`.claude/features/`](./.claude/features/) |
+| 应用图标与加载动画（色板、几何、动效规格） | [`assets/brand/README.md`](./assets/brand/README.md) |
 
 要提 PR 的话，流程与模板见 [`CLAUDE.md`](./CLAUDE.md)。
 

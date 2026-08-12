@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Daybook 正在整理">
+  <title>Daybook 正在整理</title>
+  <style>
+    /* 一个 5.4s 周期里三张纸依次被抽出又归位；顶层两行文字以 2.2s 独立闪烁。 */
+    @keyframes db-pull {
+      0%        { transform: translate(0, 0); }
+      12%, 28%  { transform: translate(66px, -40px); }
+      42%, 100% { transform: translate(0, 0); }
+    }
+    @keyframes db-row {
+      0%, 100% { opacity: .16; }
+      45%, 60% { opacity: 1; }
+    }
+    .db-sheet { animation: db-pull 5.4s cubic-bezier(.3, 0, .3, 1) infinite; }
+    .db-sheet-mid { animation-delay: 1.8s; }
+    .db-sheet-bot { animation-delay: 3.6s; }
+    .db-line { animation: db-row 2.2s ease-in-out infinite; }
+    .db-line-2 { animation-delay: .2s; }
+
+    /* 静止时停在归位状态——与 icon.svg 逐像素一致。 */
+    @media (prefers-reduced-motion: reduce) {
+      .db-sheet, .db-line { animation: none; }
+    }
+  </style>
+  <defs>
+    <clipPath id="db-plate-loading"><rect width="512" height="512" rx="117.76" ry="117.76"/></clipPath>
+  </defs>
+  <g clip-path="url(#db-plate-loading)">
+    <!-- 底板：内嵌使用时可整行删掉，图形本身不依赖它 -->
+    <rect id="db-plate-bg" width="512" height="512" fill="#F1EFEA"/>
+    <g transform="rotate(-11 256 256) skewX(-9)">
+      <!-- 底层：深棕 -->
+      <g class="db-sheet db-sheet-bot">
+        <path d="M150 268h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" transform="translate(6 16)" fill="#4E2F1C" opacity=".42"/>
+        <path d="M150 268h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" fill="#4E2F1C"/>
+        <path d="M178 302h70M292 302h26" fill="none" stroke="#C4B79C" stroke-width="12" stroke-linecap="round"/>
+      </g>
+      <!-- 中层：麻 -->
+      <g class="db-sheet db-sheet-mid">
+        <path d="M150 182h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" transform="translate(6 16)" fill="#4E2F1C" opacity=".42"/>
+        <path d="M150 182h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" fill="#C4B79C"/>
+        <path d="M178 216h70M292 216h26" fill="none" stroke="#4E2F1C" stroke-width="12" stroke-linecap="round"/>
+        <path d="M178 252h140" fill="none" stroke="#4E2F1C" stroke-width="9" stroke-linecap="round"/>
+      </g>
+      <!-- 顶层：蓝 -->
+      <g class="db-sheet">
+        <path d="M150 96h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" transform="translate(6 16)" fill="#4E2F1C" opacity=".42"/>
+        <path d="M150 96h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" fill="#A9C6E8"/>
+        <rect x="154" y="100" width="188" height="24" fill="#4E2F1C"/>
+        <path class="db-line" d="M176 148h64M288 148h30" fill="none" stroke="#4E2F1C" stroke-width="12" stroke-linecap="round"/>
+        <path class="db-line db-line-2" d="M176 176h48M288 176h30" fill="none" stroke="#4E2F1C" stroke-width="12" stroke-linecap="round"/>
+        <path d="M176 202h142" fill="none" stroke="#4E2F1C" stroke-width="10" stroke-linecap="round"/>
+      </g>
+    </g>
+  </g>
+</svg>
