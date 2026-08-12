@@ -15,7 +15,7 @@
 **骨架阶段（2026-08-06 建立）。** 约束与文档已就位，`src/` 与 `src-tauri/` **尚未创建**。
 第一个里程碑是 **M0 端到端点亮**：拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
 
-**M0 当前被一个 spike 阻塞**：MCP server 的进程归属需要先定下来（[`docs/prd/01-agent-runtime.md` §5](./docs/prd/01-agent-runtime.md) R6）。
+**阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。M0 四份 sub-PRD 现已全部 `ready`。
 
 现在唯一可跑的命令是文档门禁（CI 对所有 PR 强制，见 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
 

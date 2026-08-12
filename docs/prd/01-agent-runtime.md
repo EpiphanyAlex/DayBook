@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: draft
+status: ready
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.12
+date: 2026-08-12
+version: v0.13
 ---
 
 # 01 · Agent 运行时
@@ -23,7 +23,7 @@ version: v0.12
 
 ## 2. 范围与非目标
 
-**范围**：MCP server（stdio · `rmcp` · **进程归属待定**，见 §5 R6）· 工具面定义与权限边界 · **密封启动配置与有效工具集探测**（§3.7）· agent launcher（spawn / 监控 / 回收 / 超时 / 取消）· 可插拔后端接口 · agent 侧提示词与任务下达 · **来源内容的注入姿态**（§3.8）· 子进程日志采集 · `parse_attempts` 的写入。
+**范围**：MCP server（stdio · `rmcp` · **独立 helper 二进制 + Unix domain socket**，2026-08-12 由 §5 R6 定案）· 工具面定义与权限边界 · **密封启动配置与有效工具集探测**（§3.7）· agent launcher（spawn / 监控 / 回收 / 超时 / 取消）· 可插拔后端接口 · agent 侧提示词与任务下达 · **来源内容的注入姿态**（§3.8）· 子进程日志采集 · `parse_attempts` 的写入。
 
 **非目标**：
 
@@ -35,16 +35,23 @@ version: v0.12
 
 ## 3. 决定与依据
 
-### 3.1 MCP server：stdio · `rmcp` · 进程归属待定
+### 3.1 MCP server：stdio · `rmcp` · 独立 helper 二进制（2026-08-12 由 R6 spike 定案）
 
-依据 [ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)。
+依据 [ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；进程归属的实测依据见 [spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)。
 
 - 传输用 **stdio**：没有端口、没有本机其他程序可见的攻击面，生命周期天然绑定子进程
 - 实现用 **`rmcp`**（官方 Rust MCP SDK）
 - **不开 HTTP 端口**（与 [ADR-0001](../adr/0001-local-first-desktop-platform.md) 的「不开 localhost API」一致）
-- **server 跑在哪个进程里：未定。** 三条候选与 spike 要求见 [§5 R6](#5-待决与风险)——这条是本文当前 `status: draft` 的原因
+- **server 跑在一个独立的 MCP helper 二进制里**（[§5 R6](#5-待决与风险) 的候选 ①）：由 agent CLI 按 `command + args` 自己拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**——不是 TCP 端口，因此不违反上一条
 
-> 本节 v0.1–v0.5 曾写「**在 Tauri 主进程内起**」，2026-08-09 撤下：stdio 型 MCP server 的启动方**是 agent CLI 自己**（读配置里的 `command` + `args` 去 `fork/exec`），**没有「连到某个已经在跑的进程」这种形态**——所以它不可能既活在 Tauri 主进程里、又被 `claude -p` 以 stdio 连上。**R6 结论落地前，任何关于进程归属的写法都不得作为实现依据。**
+**helper 不碰数据库。** 它只做两件事：把 MCP 工具面暴露给 CLI，把调用经 UDS 转给主进程。**全部 SQLite 写入留在 Tauri 主进程一处**——这是选候选 ① 而非候选 ②（应用自身二进制加 `--mcp-stdio` 子命令）的**唯一理由**：候选 ② 会让两个进程同时写库，既要 WAL，又要在草稿写完后额外把变更通知回主进程才能刷新 UI，而 [`.claude/rules/rust-tauri.md`](../../.claude/rules/rust-tauri.md) §4 那条「`DraftStore` 根本没有写事实表的方法、越权在编译期不可表达」也就得在两个进程里各成立一次。
+
+两条实现约束，都是实测踩出来的（[spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)）：
+
+- **socket 路径不能放在数据目录下。** macOS 的 `SUN_LEN` 约 104 字节，而 `~/Library/Application Support/…` 已接近上限，实测直接失败。要单独挑短路径。
+- **MCP helper 进程没有优雅关闭。** 它随 CLI 退出而死、不留孤儿，但退出是被杀的（探针的停止事件一次也没记录到）。**任何 flush / 收尾逻辑都不得挂在 helper 的退出路径上。**
+
+> 本节 v0.1–v0.5 曾写「**在 Tauri 主进程内起**」，2026-08-09 撤下，2026-08-12 由实测确认撤得对：stdio 型 MCP server 的启动方**是 agent CLI 自己**（读配置里的 `command` + `args` 去 `fork/exec`），**没有「连到某个已经在跑的进程」这种形态**。spike 里工具返回的 `ppid` 就是 `claude` 进程本身。
 
 ### 3.2 工具面（权限边界即工具签名）
 
@@ -174,7 +181,7 @@ version: v0.12
 
 ### 3.4 agent launcher
 
-- 通过 `std::process::Command` spawn agent CLI 子进程，**启动参数按 §3.7 的密封启动配置组装**。**CLI 与 MCP server 之间怎么接上取决于 §5 R6 的结论**（v0.1–v0.5 写的「把 MCP server 的 stdio 端接上」预设了 server 在主进程内，已撤下）
+- 通过 `std::process::Command` spawn agent CLI 子进程，**启动参数按 §3.7 的密封启动配置组装**。**CLI 与 MCP server 怎么接上（§3.1，2026-08-12 定案）**：launcher 不去接 stdio——它在密封参数里注入一份 MCP 配置，指向 **MCP helper 二进制**的路径与参数，**由 CLI 自己把 helper `fork/exec` 起来**；helper 再经 Unix domain socket 连回主进程。主进程要在 spawn CLI **之前**就绪并监听（v0.1–v0.5 写的「把 MCP server 的 stdio 端接上」预设了 server 在主进程内，已撤下）
 - **v1 后端**：Claude Code（`claude -p`）
 - **并发**：v1 **同时只跑一个 agent 子进程**。排队，不并发
 - **每次 spawn 写一行 `parse_attempts`**（2026-08-10 新增，[00 地基 §3.6](./00-foundation.md)）：spawn 前插入（`started_at` 非空、`outcome` 为空），进程收束时回填 `ended_at` / `outcome` / `error_code`。**先插后 spawn**——反过来的话进程起来了而记录还没有，崩溃恢复扫描就看不见它
@@ -282,7 +289,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 **要留的只有两样**：本应用经 MCP 配置注入的那一组工具，以及本应用给出的系统提示词与任务文本。
 
-> **实现提示（不是规格）**：本文写作时机器上的 `claude` 2.1.226 具备可用于此目的的开关（工具白名单、只用指定 MCP 配置、限定设置来源、最小模式、无会话持久化）。**具体 flag 组合由 §5 R6 的 spike 实测确定后回流本文**——CLI 的 flag 会变，把它们写进规格等于让规格跟着别人的 release notes 腐烂。**本节规定的是目标状态与验证方式，不是命令行。**
+> **实现提示（不是规格）**：**具体 flag 组合已由 R6 spike 于 2026-08-12 实测确定，落在 [spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)「密封配置」一节**（已验证于 `claude` 2.1.228）。**不写进本文**——CLI 的 flag 会变，把它们写进规格等于让规格跟着别人的 release notes 腐烂。**本节规定的是目标状态与验证方式，不是命令行。**
+>
+> 那份记录里有三个反直觉的坑，实现前务必读：**放行自己的工具是密封配置的必要组成**（漏了会得到「工具面正常但一次也调不动」的假象）；**CLI 的「最小模式」不是密封开关**，它恰好留下执行命令与文件读写；**CLI 的「安全模式」是反的**，它杀掉我们注入的 MCP 配置却留着内置工具。
 
 **B. 探测（运行时层）**——**这一条才是硬要求**：
 
@@ -312,6 +321,27 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 **两条都是 R6 的失败判据**：若后端 CLI 拿不出**机器可读的、对全部来源权威的**能力清单，那不是「换个方式凑合探测」，而是**这条后端在密封性上不可验证**——它必须影响 §5 R6 三条候选方案的取舍（例如改用能提供该能力的集成方式），而不是被降级成一句免责声明。**拿不到就判失败，不许用模拟的清单顶上。**
 
+#### hook 靠「主动引发」，不靠声明（2026-08-12 由 R6 spike 改写）
+
+上面两条要件，Claude Code 后端**过了第一条，第二条只过了一半**：初始化握手是结构化 JSON、不经模型自述，且**如实上报内置工具、全部 MCP server（含用户配置里的残留）、权限模式、插件、skills、自动记忆路径**——对抗测试里故意放开一个内置工具、故意打开权限绕过模式，探测都当场看见。
+
+**但 hook 不在握手信息里。** 实测挂上一个 `PreToolUse` hook，它**确实执行了**，而握手对它只字未提（[spike 记录](../spikes/2026-08-12-r6-agent-runtime.md) ④）。
+
+**因此探测的定义改为：一次完整的短会话，而不是一次握手读取。**
+
+1. 以密封配置起探测子进程，**打开 hook 事件流**
+2. 读握手信息，取工具型与其余各类能力
+3. **在探测会话里主动引发一次工具调用**（调我们自己的一个无副作用工具），把 hook 逼进事件流
+4. 读到会话结束，任何 hook 事件都记入 manifest 的非工具型条目
+5. 与期望集合做整份 manifest 的相等比较
+
+**两处盲区必须如实登记，不许当成已覆盖**：
+
+- **只发现得了能对我们工具生效的 hook。** 匹配某个内置工具的 hook 引不出来——不过密封配置里那些工具根本不存在，它也无从生效。生命周期类 hook（会话开始等）无条件触发，同样可见。**未逐个验证**会话结束、压缩等事件是否也如实进流。
+- **企业策略（managed policy）设置关不掉，也不在握手里声明**——CLI 的安全模式文档明说管理员策略始终生效。**这是我们控制不了的一条 hook 来源，属于已知残余风险**，不是本节能挡住的东西。
+
+**代价要写明**：第 3 步让探测从「零模型调用」变成一个真实 turn（实测约 $0.007，小模型）。**这不是可以省掉的一步**——省掉它，一个正在改写每次调用的 `PreToolUse` hook 会让探测显示一片绿。
+
 #### 比较的对象是「能力清单」，不是「工具清单」（2026-08-10 补）
 
 上面那三类里，**只有前两类长得像「工具」**。hook、插件、权限绕过模式**没有名字、没有参数 schema**——而本节先前只把 hash 定义在「工具名 + 所属 server + 参数 schema」上，于是**它们根本没有进入比较集合的路径**：实现者照着写完，会得到一个「工具集相等」的绿灯，而一个 `PreToolUse` hook 正在旁边改写每一次调用。
@@ -320,8 +350,12 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 条目类型 | 规范化形状 |
 |---|---|
-| **工具型能力** | `kind = "tool"` · `provider`（`builtin` / MCP server 名） · `name` · `input_schema`（规范化后） |
+| **工具型能力** | `kind = "tool"` · `provider`（`builtin` / MCP server 名） · `name` |
 | **非工具型副作用能力** | `kind = "hook" \| "plugin" \| "permission_mode" \| …` · `provider` · `capability`（该机制的标识与其生效范围/效果） |
+
+> **`input_schema` 已于 2026-08-12 从工具型条目里删除——后端拿不出来。** R6 spike 实测：CLI 的能力清单只报工具**名**，不报参数 schema（[spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)）。**规格不能要求一件后端做不到的事**，那只会产生一条永远无法通过的验收。
+>
+> **它原本要防的风险另有兜底**：怕的是「同名工具换了参数 schema，那是另一个能力」。而实测的工具命名空间是 `mcp__<server>__<tool>`，**`provider` 天然编码在名字里**；再加上密封配置只允许我们注入的那一个 MCP server（§3.1、[spike 记录](../spikes/2026-08-12-r6-agent-runtime.md) ②），同名不同 schema 的来源被堵在上游。**残余风险如实登记**：若我们自己改了某个工具的参数 schema 而工具名不变，`effective_capability_hash` 不会变——**这一侧由 `tool_surface_version` 这个我们自己的常量负责**，两者本就是一体两面。
 
 三条随之确定：
 
@@ -333,7 +367,11 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 **探测进程的 `trace` 至少记五项**（它不产生 `parse_attempts` 行，所以这些只能落在日志里）：`backend_id` + `backend_version` · 密封配置指纹 · **期望的** `tool_surface_version` · **实测的** `effective_capability_hash`（连同 manifest 里非工具型条目的条数）· 耗时与失败原因。探测成功后，那个 hash **复制进随后每一行真实的 `parse_attempts`**——否则事后看某条草稿时，无从知道它是在哪一套工具面下产出的。
 
-**探测跑在一次独立的子进程里，那次 spawn 不产生 `parse_attempts` 行**（2026-08-10 澄清）。此前 §3.4「一次 spawn = 一行 `parse_attempts`」与 §6「探测失败时不新增 `parse_attempts` 行」两句话对不上——**因为「一次 spawn 一行」说的是解析任务的 spawn，而探测不解析任何来源**。三条：
+**探测跑在一次独立的子进程里，那次 spawn 不产生 `parse_attempts` 行**（2026-08-10 澄清，**2026-08-12 由实测确认**）。此前 §3.4「一次 spawn = 一行 `parse_attempts`」与 §6「探测失败时不新增 `parse_attempts` 行」两句话对不上——**因为「一次 spawn 一行」说的是解析任务的 spawn，而探测不解析任何来源**。
+
+> **「需要单独起一次进程」曾是假定，现在是实测结论**（R6 spike 问题 (a)）：握手信息**只在 CLI 收到提示之后才发出**——保持输入流打开、不发任何消息，等 8 秒也等不到。**因此无法在「下发任务之前」于同一会话内完成验证**，独立探测进程是必需的，本节原先的规定不用改。详见 [spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)。
+
+三条：
 
 - 探测是**独立的、短命的**子进程：起来、要一次工具清单、退出。它没有 `source_id`，也不该有
 - **结果按 `(backend_id, backend_version, 密封配置指纹)` 缓存**，三者任一变化即重新探测。否则每解析一张图就多起一次进程，用户等的时间翻倍
@@ -346,9 +384,11 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | `tool_surface_version` | **我们期望的**工具面版本 | 我们的代码里的一个常量 |
 | `effective_capability_hash` | **实测到的**有效工具集指纹 | 探测结果算出来的 |
 
-**只留前者是不够的**——它是我们对自己的声明，不含任何关于「对面实际给了什么」的信息。哈希的输入至少含**工具名 + 所属 server + 参数 schema**：**只比名字会漏掉「同名工具换了参数 schema」**，那是另一个能力，不是同一个。
+**只留前者是不够的**——它是我们对自己的声明，不含任何关于「对面实际给了什么」的信息。哈希的输入至少含**工具名 + 所属 server**（**2026-08-12 修订**：原文还要求「+ 参数 schema」，后端不提供，理由与兜底见上方 capability manifest 表下的告示）。
 
-**spike 的结论要落到文档里，不能只活在某次会话中**（2026-08-10）：R6 做完后，具体 flag 组合与**已验证的 CLI 版本号**写进 `.claude/features/agent-runtime.md`（**待建**，随 M0 落地）或后端实现旁的兼容性说明。**不写进本文**——CLI 的 flag 会变，规格跟着它腐烂；但**也不能不写**，否则下一个人只能把这次考古重做一遍。
+**spike 的结论要落到文档里，不能只活在某次会话中**（2026-08-10 提出，**2026-08-12 已兑现**）：具体 flag 组合与**已验证的 CLI 版本号**落在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。**不写进本文**——CLI 的 flag 会变，规格跟着它腐烂；但**也不能不写**，否则下一个人只能把这次考古重做一遍。
+
+> 原定落点是 `.claude/features/agent-runtime.md`（随 M0 落地）。M0 尚未开工，而 [`.claude/features/README.md`](../../.claude/features/README.md) 要求那个目录**只写实况、路径带到文件级**——运行时还不存在，写进去就违反它自己的规矩。**`.claude/features/agent-runtime.md` 建立时把密封配置一节搬过去并链回 spike 记录。**
 
 **为什么必须是运行时探测而不是「设置对了就行」**：密封依赖的是**别人家 CLI 的行为**。它升级一次、加一个默认开启的内置工具、改一个 flag 语义，我们的密封就悄悄漏了，而**本地测试不会有任何反应**——因为它们测的是我们自己那张表。探测把「厂商改了什么」这件我们控制不了的事，变成一个启动时就红的检查。
 
@@ -378,7 +418,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 |---|---|
 | agent 输出 JSON，应用解析 | ① 权限边界要在解析后再补一层校验，而 MCP 的边界就是工具签名 ② 做不到多轮编排（agent 无法「先查历史上这个商户归哪一类，再决定怎么起草」） ③ 失去「Claude Code 和 Codex 都支持 MCP」这条可插拔红利（[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)「理由」） |
 | HTTP 传输的 MCP server | 要开端口 → 本机其他程序可见的攻击面，与「数据不出本机」的姿态相悖；且生命周期不再天然绑定子进程 |
-| ~~MCP server 做成独立二进制~~ **已重开（2026-08-09）** | 原否决理由是「`rmcp` 允许进程内起，独立二进制凭空多一层进程管理与版本同步」。但 §3.1 的告示说明**进程内起这个前提可能根本不成立**——若成立不了，本行就是候选方案而非被否决的方案。**结论随 §5 R6 一起给出。** |
+| ~~MCP server 做成独立二进制~~ **已重开并采纳（2026-08-12）** | 原否决理由是「`rmcp` 允许进程内起，独立二进制凭空多一层进程管理与版本同步」。**这个前提被 R6 spike 实测证伪**——stdio 型 server 由 CLI 自己 `fork/exec`，进程内起根本不成立。独立 helper 二进制现在是 §3.1 的选定方案；「多一层版本同步」的代价真实存在，用它换的是**全部 SQLite 写入收敛在主进程一处** |
+| **应用自身二进制加 `--mcp-stdio` 子命令**（R6 候选 ②，2026-08-12 否决） | 实测同样可行，活动部件更少、没有版本同步问题。**否决理由是数据层**：CLI 拉起的是另一个进程，于是 MCP server 与 Tauri 主进程会同时写 SQLite——既要 WAL，又要在草稿写完后把变更通知回主进程才能刷新 UI，而 [`.claude/rules/rust-tauri.md`](../../.claude/rules/rust-tauri.md) §4 那条「越权在编译期不可表达」得在两个进程里各成立一次。**省下的一次性复杂度，换来的是持续存在的一致性问题** |
+| **改用 Agent SDK / 库内嵌**（R6 候选 ③，2026-08-12 否决） | Rust 没有 Agent SDK，内嵌等于引入 Node/Python 运行时——[`CLAUDE.md`](../../CLAUDE.md) 约束 1 明文禁止内嵌 Node.js 本地服务，走这条得先改 [ADR-0001](../adr/0001-local-first-desktop-platform.md)。**代价还不止于此**：它要放弃「用用户自己已登录的 CLI」这条产品支点（[`docs/PRD.md` §3.2](../PRD.md)）。**未实测**——被约束挡在实测之前 |
 | 按业务领域拆「记账 agent」+「事项 agent」 | 用户一句话经常跨域（「今天吃饭 180，明天交房租，上周那 400 是给家里买茶叶」），拆开要先分派再合并，凭空多出错误面且闭不了环（[ADR-0003 §2](../adr/0003-agent-runtime-and-pluggable-backend.md)） |
 | 应用内置 API key / 让用户把 key 粘进应用 / 提供厂商登录 | 直接违反 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)：应用要存凭证、带 endpoint、自己发 HTTPS、代理鉴权，四件事各自是缺陷。**且产品不需要它**——用户已有付费订阅的 CLI。「用户自备 API key」已于 2026-08-09 从后端清单删除 |
 | v1 就实现多个后端 | 第二个后端的价值在厂商政策变化时才兑现；接口存在即可保住架构，实现推到 M4 |
@@ -391,8 +433,8 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | ~~R2~~ **已关闭（2026-08-07）** | 解析失败/超时的重试策略放在 launcher 还是 domain（[`docs/architecture.md` §8](../architecture.md) 未决 A2） | 本文 §3.4、[02 导入 §3.5](./02-ingest.md) | **结论：domain。** launcher 只负责「起进程、看着它、超时就杀」，不知道失败是否值得重试——那要看来源状态与用户意图。**v1 不做自动重试**：`failed` 的来源显式列在 UI 上由用户一键重试（[02 导入 §3.5](./02-ingest.md)），符合「控制流由代码决定、且不偷偷烧用户额度」。[`docs/architecture.md` §8](../architecture.md) A2 同步关闭 |
 | R3 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切（[`docs/architecture.md` §8](../architecture.md) 未决 A1） | 本文 §3.2、[02 导入](./02-ingest.md) | M2 批量解析时实测决定，**不阻塞 M0**（M0 单张截图） |
 | R7（**新增 2026-08-10**） | **`unparsed_note` 是自由文本，只能验证「说了」、验证不了「说得对」**（§3.2「跳号必须有说明」）。结构化形式是 `unparsed_regions: [{ source_ordinal, reason }]`，代码就能逐个核对跳掉的号是否都被覆盖 | 本文 §3.2、[00 地基 §3.6](./00-foundation.md) `parse_attempts` | **M0 后决**——要先实测 agent 到底怎么描述缺口才好定形状。M0 的自由文本版本已经把这条从口头协议变成一个会红的检查，够用 |
-| R4 | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效 | 全产品 | 对策已定（可插拔接口），**不需要额外决策**；登记以免被当成新问题重新讨论 |
-| **R6**（2026-08-09 新增，**阻塞 M0**） | **MCP server 的进程归属**：§3.1 要「主进程内起」，§3.4 要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥（理由见 §3.1 告示）。三条候选：① **独立 MCP helper 二进制**，由 CLI 按 `command + args` 拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**（`<数据目录>` 下的 socket 文件，不是 TCP 端口，因此不违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「不开 localhost API」）；② **应用自身二进制加一个 `--mcp-stdio` 子命令**，CLI 拉起的是同一个可执行文件的另一种模式，省掉版本同步；③ **改用 Agent SDK / 库内嵌**，不走 CLI + MCP 这条路（代价：放弃「用用户自己已登录的 CLI」这条产品支点，[ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md) 需重写） | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **M0 开工前必须先做 spike**，四项检查缺一不可：① 拿 `claude -p` + 一个最小 `rmcp` server 实测三条候选的可行性与生命周期行为；② 确认 CLI 侧 MCP 配置的实际契约（`command + args` 怎么传、stdio 怎么握手）；③ **核实厂商现行条款**——确认第三方应用经 `claude -p` 调用是否仍走用户订阅额度、有无额外限制，并把出处与结论回流本文及 [`docs/PRD.md` §12](../PRD.md)；④ **实测密封启动配置**（2026-08-10 加入，§3.7）——定出具体 flag 组合，并验证「有效工具集恰好等于我们注入的那一组」这个探测**真的能做到**：拿不到有效工具清单，或关不掉内置工具，就等于闸门 1 在进程层不成立，那会反过来影响候选方案的取舍。第 ④ 项要回答的两个具体问题：**(a) 拿有效工具清单需不需要单独起一次进程**（§3.7 假定「需要」并据此规定探测 spawn 不产生 `parse_attempts` 行——**若实测发现能在解析会话内拿到，这条要回流改掉**）。**这一项还有一个失败判据**：清单必须**机器可读**、且**对全部工具来源具有权威性**（内置工具 + 全部 MCP server + 插件/hook/权限模式），**两条任一不满足就是本次 spike 的失败结论**，必须反过来影响三条候选方案的取舍。**特别注意**：一个只返回 MCP `tools/list` 的接口三条形式要件都占，却对 `Bash` / `Read` / `Edit` 一无所知——**那不是有效工具集探测**；**(b) 能力清单的机器表示取到什么粒度**——工具型条目至少 `kind + provider + name + input_schema`，**非工具型（hook / 插件 / 权限模式）至少 `kind + provider + capability`**；实测看 CLI 到底报得出哪些。**报不出非工具型能力，与报不出内置工具同等，都是失败结论**。**四项结论一并回流本文并同步 [ADR-0003](../adr/0003-agent-runtime-and-pluggable-backend.md)；flag 组合与已验证的 CLI 版本号写进 `.claude/features/agent-runtime.md`（待建），不写进本文。** 在此之前本文 `status: draft` |
+| R4（**2026-08-12 补实测出处，风险等级上调**） | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效。**R6 spike 第 ③ 项核实的结果不是绿灯**：当下 `claude -p` 确实仍走订阅额度（实测跑通，认证来源为订阅登录而非 API key），但厂商的[法务与合规文档](https://code.claude.com/docs/en/legal-and-compliance)写着「OAuth 认证**仅面向**订阅计划购买者，用于 Claude Code 与其他原生应用的**寻常使用**」「构建产品或服务的开发者**应当使用 API key 认证**」；且该政策**已被改过一次又撤回**——原定 2026-06-15 起 Agent SDK 与 `claude -p` 不再计入订阅额度，当天挂出暂缓公告（[出处](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)）。**机制已经建好并上过一次膛** | 全产品 | 对策仍是可插拔接口，但**从「接口先摆着」提为「第二个后端实现要真能跑」**。判据：Daybook 不提供厂商登录、不打包凭证、不代理不转发（[`CLAUDE.md`](../../CLAUDE.md) 约束 11 已禁这三件事），链路里没有我们的服务端，因此不构成「代用户路由请求」；**但这是一种读法，不是厂商的书面豁免**。**不阻塞 M0**，M4 打包发布前必须重新核实一次当时的条款 |
+| ~~R6~~ **已关闭（2026-08-12）** | **MCP server 的进程归属**：§3.1 原要「主进程内起」，§3.4 原要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥。三条候选：① 独立 MCP helper 二进制 + Unix domain socket；② 应用自身二进制加 `--mcp-stdio` 子命令；③ 改用 Agent SDK / 库内嵌 | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **结论：候选 ①**（独立 helper 二进制 + Unix domain socket）。四项检查已于 2026-08-12 全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)（`claude` 2.1.228 · `rmcp` 3.1.2）。逐项：**①** 候选 ① 与 ② 都实测跑通，**候选 ③ 被 [`CLAUDE.md`](../../CLAUDE.md) 约束 1 挡在实测之前**（Rust 无 Agent SDK，内嵌等于引入 Node/Python 运行时）；选 ① 的理由是**把全部 SQLite 写入收敛到主进程一处**，否决 ② 的完整理由见 §4。**②** MCP 配置契约已确认（内联 JSON 亦可、`env` 会传到子进程、工具命名空间 `mcp__<server>__<tool>`、必须带只用指定配置的开关，否则用户侧 server 会混入）。**③** 厂商条款**不是绿灯**，结论与出处已回流本表 R4 与 [`docs/PRD.md` §12](../PRD.md)。**④** 密封配置实测可达成（内置工具清零、MCP 工具恰好等于我们注入的那组、插件与技能归零，且**订阅登录仍可用**）；探测**过了「机器可读」这条要件**，**「对全部来源权威」只过了一半**——hook 不在握手信息里，改为「主动引发一次工具调用把它逼进事件流」，两处盲区已在 §3.7 如实登记。**两处规格被实现证伪并已改**：`input_schema` 后端不提供（§3.7 已删除该字段并写明兜底）；(a)「探测需单独起进程」由假定升为**实测确认**（握手只在收到提示后才发出）。**未做的一项，如实登记**：`Stop` / `SessionEnd` / `PreCompact` 等 hook 事件是否也如实进流，本次未逐个验证 |
 | ~~R5~~ **已关闭（2026-08-07）** | agent 会话 ID 的粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) schema | **结论：一个来源一个会话**（2026-08-10 精确为「一个来源**一次尝试**一个会话」）。理由是 §3.4 的作废语义要能只作废本次的草稿——若一次导入共用一个会话，批量导入时某一张超时会波及同批其他来源的草稿。落点由「两列 `agent_session_id`」改为 **`parse_attempts` 一行 + 草稿上的 `attempt_id`**（[00 地基 §3.6](./00-foundation.md)），会话 ID 现在只存在尝试行上；**结论未变，键更直接了**（重试同一来源会产生第二行，旧写法下两次重试的 `agent_session_id` 都挂在同一个 `sources` 行上，后者覆盖前者） |
 
 ## 6. 验收标准
@@ -459,6 +501,11 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-12 | **R6 关闭，`status` 由 `draft` 回到 `ready`——M0 解锁。** 进程归属定为**独立 MCP helper 二进制 + Unix domain socket**（候选 ①）。§3.1 由「待定」改写为定案并补两条实测约束（socket 路径受 `SUN_LEN` 限制、**helper 没有优雅关闭，收尾逻辑不得挂在它的退出路径上**）；§2 范围、§3.4 第 1 条同步；§4 把候选 ② 与 ③ 各补一行否决理由 | R6 spike 实测（[记录](../spikes/2026-08-12-r6-agent-runtime.md)） |
+| 2026-08-12 | **§3.7 的 `input_schema` 要求被实现证伪——后端只报工具名，不报参数 schema。** 从 capability manifest 的工具型条目里**删除该字段**，`effective_capability_hash` 的输入相应改为「工具名 + 所属 server」。**它原本要防的「同名工具换了参数 schema」另有兜底**：工具命名空间 `mcp__<server>__<tool>` 把 provider 编进名字，密封配置又只允许我们注入的那一个 server；我们自己改 schema 那一侧由 `tool_surface_version` 负责。**规格不能要求一件后端做不到的事**，那只会产生一条永远无法通过的验收 | R6 spike 实测（[记录](../spikes/2026-08-12-r6-agent-runtime.md)） |
+| 2026-08-12 | **§3.7 的 hook 探测从「读一次声明」改写为「跑一次短会话并主动引发一次工具调用」。** 实测：一个 `PreToolUse` hook **确实执行了**，而 CLI 的初始化握手对它只字未提——按原写法实现会得到一片绿灯，而 hook 正在旁边改写每一次调用。新增五步探测流程，并**如实登记两处盲区**：只发现得了能对我们工具生效的 hook；**企业策略设置关不掉也不声明**，属于控制不了的残余风险。代价写明：探测由零模型调用变成一个真实 turn，**这一步不能省** | R6 spike 实测（[记录](../spikes/2026-08-12-r6-agent-runtime.md)） |
+| 2026-08-12 | **§3.7 问题 (a)「探测需不需要单独起一次进程」由假定升为实测确认：需要。** 握手信息只在 CLI 收到提示之后才发出，保持输入流打开也等不到，因此**无法在下发任务之前于同一会话内验证**。本节原先的规定不用改——**这次是实测支持了规格，不是推翻它** | R6 spike 实测（[记录](../spikes/2026-08-12-r6-agent-runtime.md)） |
+| 2026-08-12 | **R4 补实测出处并上调风险等级。** 厂商条款核实结果**不是绿灯**：当下 `claude -p` 仍走订阅额度（实测认证来源为订阅登录），但厂商法务文档写着 OAuth「仅面向……原生应用的寻常使用」、开发者「应当使用 API key」，且该政策已被改过一次又撤回。对策由「接口先摆着」提为**第二个后端实现要真能跑**；**M4 打包发布前必须重新核实当时的条款**。同步 [`docs/PRD.md` §12](../PRD.md) | R6 spike 第 ③ 项；[法务与合规](https://code.claude.com/docs/en/legal-and-compliance)、[Agent SDK 与订阅计划](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) |
 | 2026-08-10（五轮） | **§3.7 要求覆盖 hook / 插件 / 权限模式，但比较与哈希只定义在「工具名 + server + 参数 schema」上**——那三类没有名字也没有参数 schema，**根本没有进入比较集合的路径**。实现者照着写完会得到「工具集相等」的绿灯，而一个 `PreToolUse` hook 正在旁边改写每一次调用。定义**规范化的 capability manifest**（工具型 / 非工具型两种形状），hash 算在整份 manifest 上，字段由 `effective_tool_surface_hash` 改名为 **`effective_capability_hash`**——**旧名字本身就是那个太窄的框**；非工具型能力同样触发 `agent.tool_surface_unsealed`；验收必须覆盖至少一次非工具型 | 文档审查（五轮） |
 | 2026-08-10（四轮） | **「跳号要写进 `unparsed_note`」只是一句口头协议**——自由文本，代码验证不了 `1,2,4` 里的 3 有没有被说明，传空字符串照样通过。改为**把两个字段关联起来判**：跳号 + 空说明 ⇒ `agent.unexplained_gap`（可补救的拒绝）；跳号 + 非空 ⇒ `completed_with_gaps`。**如实登记边界**：这只验证了「说了」，没验证「说得对」。结构化的 `unparsed_regions` 登记为 R7 | 文档审查（四轮） |
 | 2026-08-10（四轮） | **§3.7「结构化 introspection」这条形式要件不够**：一个只返回 MCP `tools/list` 的接口机器可读、结构化、协议层三条都占，**却对 `Bash` / `Read` / `Edit` 一无所知**——拿它当探测，会得到一份「恰好等于注册表」的漂亮清单，而那个能绕过四道闸门的内置工具从头到尾不在视野里。补第二条要件：**清单必须对全部工具来源具有权威性**（内置工具 + 全部 MCP server + 插件/hook/权限模式），并入 R6 失败判据 | 文档审查（四轮） |
@@ -483,6 +530,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.13 | 2026-08-12 | **R6 spike 做完并关闭，`status` 由 `draft` 回到 `ready`——M0 解锁。** ① **进程归属定案：独立 MCP helper 二进制 + Unix domain socket**（候选 ①）；候选 ② 实测同样可行但会让两个进程同时写 SQLite，候选 ③ 被 [`CLAUDE.md`](../../CLAUDE.md) 约束 1 挡在实测之前——§3.1、§2、§3.4、§4 一并改定。② **§3.7 两处被实现证伪**：`input_schema` 后端不提供（删字段 + 写明兜底）、hook 探测改为「跑一次短会话并主动引发一次工具调用」（原写法会得到一片绿灯而 hook 正在改写每次调用），两处盲区如实登记。③ **问题 (a) 由假定升为实测确认**——探测确实需要单独起进程。④ **R4 补出处并上调等级**：厂商条款不是绿灯。⑤ 具体 flag 组合与已验证 CLI 版本号落在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)，**不进本文** |
 | v0.1 | 2026-08-06 | 初版：MCP server 形态（stdio/`rmcp`/进程内）、六个工具的权限边界与四条硬性禁令、审计写入、launcher（超时/并发/日志）、可插拔后端接口形状、任务下达方式；否决方案六条；待决 R1–R5；验收标准 10 条可执行 + 2 条人工 |
 | v0.12 | 2026-08-10 | **公开文档降噪。** 跨实体口述与个人语境示例改为中性值；R6 删除对无出处政策日期的引用，只保留现行条款核实要求。工具面、spike 判据与验收标准未变 |
 | v0.11 | 2026-08-10 | **文档审查第五轮回流。** §3.7 的比较对象由「工具清单」扩为 **capability manifest**（工具型 `kind+provider+name+input_schema`；非工具型 `kind+provider+capability`），`effective_tool_surface_hash` **改名 `effective_capability_hash`** 并算在整份 manifest 上；非工具型能力同样触发 `agent.tool_surface_unsealed`；R6 第 ④ 项补「报不出非工具型能力 = 失败结论」。§6 新增 4 条验收（含 span 的边界用例） |

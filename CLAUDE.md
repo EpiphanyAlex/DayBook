@@ -4,7 +4,7 @@
 
 **仓库处于骨架阶段（2026-08-06 建立）**：约束已就位，`src/` 与 `src-tauri/` **尚未创建**。设计文档是产品与架构的事实源——**版本号不在本文登记**（会腐烂），各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 的状态总览表为准。第一个里程碑是 **M0 端到端点亮**（见 [`docs/PRD.md`](./docs/PRD.md) 里程碑表）。
 
-> ⚠️ **M0 当前被一个 spike 阻塞**：[`docs/prd/01-agent-runtime.md`](./docs/prd/01-agent-runtime.md) 已于 2026-08-09 退回 `status: draft`——「MCP server 在 Tauri 主进程内 + agent CLI 以 stdio 连上来」物理上不成立（stdio 型 server 由 CLI 自己 `fork/exec`）。候选方案与 spike 要求见该文 §5 R6，**2026-08-10 增加第 ④ 项检查：密封启动配置与有效工具集探测**（约束 9 的另一半，关不掉 CLI 的内置工具则闸门 1 在进程层不成立，这会反过来影响候选方案的取舍）。**开工前先解这条。**
+> ✅ **阻塞 M0 的 R6 spike 已于 2026-08-12 做完并关闭，M0 四份 sub-PRD 全部 `ready`。** 结论：**MCP server 跑在独立 helper 二进制里**，由 agent CLI 自己 `fork/exec`，helper 经 Unix domain socket 连回 Tauri 主进程、**自己不碰数据库**（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)）。密封启动配置的具体 flag 组合与已验证的 CLI 版本号在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](./docs/spikes/2026-08-12-r6-agent-runtime.md)——**动 agent 运行时之前先读那一份**，里面三个反直觉的坑（放行自己的工具是必需的、CLI 的「最小模式」恰好留下最危险的三个内置工具、CLI 的「安全模式」是反的）会直接决定实现对不对。
 
 ### 常用命令
 
@@ -80,7 +80,8 @@
 2. [`docs/adr/`](./docs/adr/)：已接受的难逆决策 —— `0001` 本地优先桌面平台、`0002` AI 永不直接写入与证据链、`0003` Agent 运行时与可插拔后端、`0004` 数据模型、`0006` smart agent dumb tools、`0007` 本地可观测性与日志分级；提议中 —— `0005` 语音与系统集成。
 3. [`docs/architecture.md`](./docs/architecture.md)：系统架构基线。
 4. [`docs/CONTEXT.md`](./docs/CONTEXT.md)：当前术语。
-5. [`README.md`](./README.md)：导航与摘要；[`README.en.md`](./README.en.md) 是它的英文镜像。
+5. [`docs/spikes/`](./docs/spikes/)：**带日期的实测记录**（`YYYY-MM-DD-slug.md`）。装的是 sub-PRD 不该装的**易腐内容**——别人家 CLI 的 flag 组合、已验证的版本号、踩过的坑。**它会过期，过期了就重跑而不是修补**；因此每份必须在顶部写明被测版本。结论回流对应 sub-PRD，flag 留在这里。
+6. [`README.md`](./README.md)：导航与摘要；[`README.en.md`](./README.en.md) 是它的英文镜像。
 
 文档采用中文 Markdown，**两处例外，都因为仓库公开、它们是外部读者的第一接触面**：
 

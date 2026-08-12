@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.14
+date: 2026-08-12
+version: v0.15
 ---
 
 # sub-PRD 索引
@@ -17,7 +17,7 @@ version: v0.14
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`ready`** | v0.11 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | `draft` ⚠️ | v0.12 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | **`ready`** | v0.13 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`ready`** | v0.8 |
 | 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`ready`** | v0.8 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
@@ -27,13 +27,17 @@ version: v0.14
 
 **M0 四份已于 2026-08-07 完成开工评审，进入 `ready`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。评审收敛了 5 处跨文档冲突与 8 处缺口，关闭待决 3 项、改期 2 项，各份变更记录有逐条说明。
 
-> ⚠️ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-09 退回 `draft`**：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。**这条阻塞 M0**，[01 §5 R6](./01-agent-runtime.md) 给了三条候选并要求开工前先做 spike。
+> ✅ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-12 回到 `ready`——M0 不再被阻塞。** 它曾于 2026-08-09 退回 `draft`：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。R6 的四项检查已全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
-> **2026-08-10 更新**：R6 的 spike **增加第 ④ 项——实测密封启动配置与有效工具集探测**（[01 §3.7](./01-agent-runtime.md)）。关不掉 CLI 的内置工具，就等于 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1 在进程层不成立，**这会反过来影响 R6 三条候选的取舍**，所以两件事必须在同一次 spike 里一起测。
+> **结论：进程归属取候选 ①——独立 MCP helper 二进制 + Unix domain socket。** 候选 ②（应用自身二进制加子命令）实测同样可行，但会让两个进程同时写 SQLite；候选 ③（Agent SDK 内嵌）被 [`CLAUDE.md`](../../CLAUDE.md) 约束 1 挡在实测之前。
+>
+> **两处规格被实现证伪并已回流**（[01 §3.7](./01-agent-runtime.md)）：① capability manifest 的 `input_schema` 字段**后端拿不出来**，已删除并写明兜底；② hook **不在 CLI 的初始化握手里**——实测一个 `PreToolUse` hook 确实执行了而握手只字未提，探测改为「跑一次短会话并主动引发一次工具调用把它逼出来」，两处盲区如实登记。
+>
+> **一条要长期盯着的风险**：R6 第 ③ 项核实厂商条款的结果**不是绿灯**，详见 [01 §5](./01-agent-runtime.md) R4 与 [`docs/PRD.md` §12](../PRD.md)。**不阻塞 M0，但 M4 打包发布前必须重新核实。**
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（依据 [`CLAUDE.md`](../../CLAUDE.md)「PRD 体系与工作流」步骤 2）：**先做 [01 §5 R6](./01-agent-runtime.md) 的 spike（四项检查）**，结论回流 01 并把它推回 `ready`；之后 agent 读 M0 四份 → 进 plan mode → 出 M0 实施计划 → 人审 → 批准后 `status: in-progress`。
+**下一步**（依据 [`CLAUDE.md`](../../CLAUDE.md)「PRD 体系与工作流」步骤 2）：**R6 已于 2026-08-12 关闭，M0 四份全部 `ready`**——agent 读 M0 四份 → 进 plan mode → 出 M0 实施计划 → 人审 → 批准后 `status: in-progress`。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -105,6 +109,7 @@ version: v0.14
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v0.1 | 2026-08-06 | 初版：七份 sub-PRD 索引、状态总览、里程碑映射、依赖关系图、共享决定出处表 |
+| v0.15 | 2026-08-12 | **R6 spike 做完，[01 Agent 运行时](./01-agent-runtime.md) 由 `draft` 回到 `ready`（v0.13）——M0 不再被阻塞。** 进程归属定为**独立 MCP helper 二进制 + Unix domain socket**（候选 ①，理由是把全部 SQLite 写入收敛到主进程一处）。**两处规格被实现证伪并已回流 01 §3.7**：capability manifest 的 `input_schema` 后端拿不出来（删字段 + 写明兜底）；hook 不在 CLI 初始化握手里，探测改为「跑一次短会话并主动引发一次工具调用」。**R4 风险上调**：厂商条款核实结果不是绿灯，可插拔后端由「接口先摆着」提为「第二个实现要真能跑」，同步 [`docs/PRD.md` §12](../PRD.md)。**新增 `docs/spikes/`**：带日期的实测记录，装 sub-PRD 不该装的易腐内容（flag 组合、已验证 CLI 版本号）。**其余七份 sub-PRD 的 status 与版本未变** |
 | v0.14 | 2026-08-10 | **公开文档降噪同步**：00→v0.11 · 01→v0.12 · 05→v0.7 · 06→v0.6 · 07→v0.8 · [`docs/PRD.md`](../PRD.md)→v0.13；同时修正状态总览中 00/01/02/03/05 已落后于各文件 frontmatter 的版本号。**所有 status 未变** |
 | v0.2 | 2026-08-07 | 随 [`docs/PRD.md` v0.2](../PRD.md) 定位修正同步 01/02/04 的版本号至 v0.2（去窄化：多币种与多渠道是能力而非定位，具名银行/支付平台降为 dogfooding 样本） |
 | v0.3 | 2026-08-07 | 随**本位币可切换**拍板（[`docs/PRD.md` §13](../PRD.md) P2 关闭）同步：00 → v0.2、04 → v0.3；共享决定出处表新增「本位币切换语义」一行，指向 [00 地基 §3.4](./00-foundation.md) |

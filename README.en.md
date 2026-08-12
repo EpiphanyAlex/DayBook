@@ -17,7 +17,7 @@ It is not an expense tracker and not a to-do app. It is a **retroactive recorder
 **Skeleton stage (established 2026-08-06).** Constraints and documentation are in place; `src/` and `src-tauri/` **do not exist yet**.
 The first milestone is **M0 — end-to-end smoke test**: drop in a screenshot → the agent reads it → **drafts are written through MCP** → **a human confirms** → the fact tables are written → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
 
-**M0 is currently blocked on a spike**: where the MCP server process lives has to be settled first ([`docs/prd/01-agent-runtime.md` §5](./docs/prd/01-agent-runtime.md), R6).
+**The spike that blocked M0 was completed on 2026-08-12**: the MCP server lives in a standalone helper binary that talks back to the main process over a Unix domain socket ([`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md); measurements in [`docs/spikes/`](./docs/spikes/)). All four M0 sub-PRDs are now `ready`.
 
 The only commands that run today are the documentation gates, enforced by CI on every PR (see [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
 

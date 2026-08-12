@@ -50,7 +50,7 @@ v1 目标平台只有 macOS。
 
 - Tauri 二进制小一个数量级；
 - Rust 侧做 SQLite / 进程管理 / 文件监听更扎实；
-- 关键：`rmcp`（官方 Rust MCP SDK）让 **MCP server 可以用 Rust 写**（[ADR-0003](./0003-agent-runtime-and-pluggable-backend.md)），不必为它额外拉一个 Node 进程。（本条原文写「可以在同一进程内起」，2026-08-09 改——**进程归属另有争议**，见 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md)；但无论 R6 选哪条候选，**都不需要 Node**，本条论据不受影响。）
+- 关键：`rmcp`（官方 Rust MCP SDK）让 **MCP server 可以用 Rust 写**（[ADR-0003](./0003-agent-runtime-and-pluggable-backend.md)），不必为它额外拉一个 Node 进程。（本条原文写「可以在同一进程内起」，2026-08-09 改——进程归属当时另有争议，**2026-08-12 由 R6 spike 定案为独立 helper 二进制**，见 [`docs/prd/01-agent-runtime.md` §3.1](../prd/01-agent-runtime.md)；**它仍然是 Rust 写的，不需要 Node**，本条论据不受影响。）
 
 ### 为什么不是「Tauri 壳 + 内嵌 Node 服务 / localhost API」
 

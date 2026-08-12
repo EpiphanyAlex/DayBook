@@ -6,7 +6,8 @@
 - **相关**：[ADR-0001 本地优先桌面平台](./0001-local-first-desktop-platform.md)、[ADR-0002 AI 永不直接写入](./0002-ai-never-writes-directly.md)、[`docs/prd/01-agent-runtime.md`](../prd/01-agent-runtime.md)
 - **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变**——§2 论证「不按业务领域拆 agent」的跨域例句保留，它是该决定的载重论据。
 - **2026-08-09 修订（二）**：§4 后端清单**删除「用户自备 API key」**——它要求应用存凭证、带 endpoint、自发 HTTPS、代理鉴权，与本节后半句及 [`CLAUDE.md`](../../CLAUDE.md) 约束 2 正面冲突，且产品用不上（用户已有付费订阅的 CLI）。后端形态收窄为「用户预先配置好的外部进程」。**应用直连模型 API 需新写 ADR。** 同日「理由」一节删除无出处的政策时间线——已接受的 ADR 不以未核实观察为依据；论据改为「厂商政策会变」，现行条款核实要求见 [`docs/PRD.md` §12](../PRD.md)。
-- **2026-08-09 修订**：§1 的「**在 Tauri 主进程内起**」**挂起**——它与「agent CLI 以 stdio 连上来」互斥（stdio 型 server 由 CLI 自己 `fork/exec`）。进程归属改由 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md) 的 spike 决定。**其余决策（用 MCP、走 stdio、不开端口、工具权限即签名、后端可插拔）全部不变。**
+- **2026-08-12 修订（R6 spike 结论回写）**：§1 挂起的进程归属**已定案——独立 MCP helper 二进制 + Unix domain socket**。同时 §4 的可插拔后端**从「接口先摆着」提为「第二个实现要真能跑」**：R6 第 ③ 项核实厂商现行条款的结果不是绿灯（详见「后果」一节新增段落与 [`docs/PRD.md` §12](../PRD.md)）。实测记录：[`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
+- **2026-08-09 修订**：§1 的「**在 Tauri 主进程内起**」**挂起**——它与「agent CLI 以 stdio 连上来」互斥（stdio 型 server 由 CLI 自己 `fork/exec`）。进程归属改由 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md) 的 spike 决定。**其余决策（用 MCP、走 stdio、不开端口、工具权限即签名、后端可插拔）全部不变。**（**2026-08-12 已由上一条关闭。**）
 
 ## 背景
 
@@ -28,7 +29,9 @@
 
 MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端口（与 [ADR-0001](./0001-local-first-desktop-platform.md) 的「不开 localhost HTTP API」一致）。
 
-> ⚠️ **「在 Tauri 主进程内起」这半句已于 2026-08-09 挂起**：stdio 型 MCP server 由 agent CLI 按配置里的 `command + args` 自己 `fork/exec`，**没有「连到一个已经在跑的进程」这种形态**——所以它不可能既活在 Tauri 主进程里、又被 `claude -p` 以 stdio 连上。**进程归属改由 [`docs/prd/01-agent-runtime.md` §5 R6](../prd/01-agent-runtime.md) 的 spike 决定**（候选：独立 helper 二进制 + Unix domain socket / 应用自身 `--mcp-stdio` 子命令 / 改用 Agent SDK），结论出来后回写本 ADR。
+> ✅ **「在 Tauri 主进程内起」这半句已于 2026-08-09 挂起、2026-08-12 由 spike 定案替换。** stdio 型 MCP server 由 agent CLI 按配置里的 `command + args` 自己 `fork/exec`，**没有「连到一个已经在跑的进程」这种形态**——实测中工具返回的父进程号就是 `claude` 本身。
+>
+> **定案：MCP server 跑在一个独立的 helper 二进制里**，由 CLI 拉起，helper 与 Tauri 主进程之间走 **Unix domain socket**（不是 TCP 端口，因此仍不违反「不开 localhost HTTP API」）。**helper 不碰数据库**——全部 SQLite 写入留在主进程一处，这是它相对「应用自身二进制加子命令」那条候选的**唯一取舍理由**。两条实现约束（socket 路径受长度限制、helper 没有优雅关闭）见 [`docs/prd/01-agent-runtime.md` §3.1](../prd/01-agent-runtime.md) 与 [spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
 > **本决策的其余部分不受影响**：用 MCP 而非解析 JSON、走 stdio 而非 HTTP、不开端口、工具权限即工具签名——四条都与进程归属无关。
 
@@ -38,8 +41,8 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端
 │    └─ agent launcher            │   ← spawn `claude -p` / `codex exec`
 └─ SQLite + 截图目录 ─────────────┘
         ↕
-   MCP server (stdio, rmcp)           ← agent 通过它读写数据
-   进程归属待定（R6）
+   MCP helper 二进制 (stdio, rmcp)    ← CLI 拉起它；它经 Unix socket 连回主进程
+   不碰数据库（R6 定案 2026-08-12）
 ```
 
 ### 2. 单 agent + 多工具，不按业务领域拆
@@ -116,6 +119,15 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端
 - 用户必须自己装好并登录 Claude Code 或 Codex——**这是一道真实的准入门槛**，产品不做任何简化（简化就意味着代理鉴权，违反本 ADR）
 - 受制于用户订阅的用量限制。核心操作（多图 + 长上下文 + 多轮推理）恰好最烧额度（[`docs/PRD.md` §12](../PRD.md)）
 - 不同后端的能力差异（尤其视觉解析）会导致体验不一致，v1 不做能力探测与降级
+- **多一个进程与一条本机 IPC**：MCP helper 是独立二进制，要处理版本同步（helper 与主进程的协议）与 socket 路径长度限制。这是 §1 定案换来「全部 SQLite 写入收敛在主进程一处」的代价（[R6 spike](../spikes/2026-08-12-r6-agent-runtime.md)）
+
+**「换后端」这条退路的成色，2026-08-12 重新评估过：**
+
+原文写「厂商政策变化时换后端，不改架构」。R6 spike 第 ③ 项核实了厂商现行条款，结果**不是绿灯**：当下 `claude -p` 确实仍走用户订阅额度（实测认证来源为订阅登录而非 API key），但厂商的[法务与合规文档](https://code.claude.com/docs/en/legal-and-compliance)写着 OAuth 认证「**仅面向**订阅计划购买者，用于 Claude Code 与其他原生应用的**寻常使用**」、构建产品的开发者「**应当使用 API key 认证**」；且该政策**已被改过一次又撤回**——原定 2026-06-15 起 Agent SDK 与 `claude -p` 不再计入订阅额度，当天挂出暂缓公告（[出处](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)）。
+
+**本 ADR 的判据是**：Daybook 不提供厂商登录、不打包凭证、不代理不转发（§4 与 [`CLAUDE.md`](../../CLAUDE.md) 约束 11 已禁这三件事），链路里没有我们的服务端，因此不构成文档所禁的「代用户路由请求」。**但这是一种读法，不是厂商的书面豁免——如实写明，不假装它是。**
+
+因此**可插拔后端从「接口从第一天存在」提为「第二个实现要真能跑」**：一个只有单一实现的 trait 不是退路，是一个未经验证的假设。**这不改变本 ADR 的任何决策，只是把它的兑现门槛提高了。** M4 打包发布前必须重新核实当时的条款。
 
 **对实现的硬性要求**：
 
