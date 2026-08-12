@@ -116,6 +116,7 @@ The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-
 | Specs for individual capabilities | [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) |
 | Implementation rules split by topic | [`.claude/rules/`](./.claude/rules/) |
 | "How is this feature actually implemented right now?" | [`.claude/features/`](./.claude/features/) |
+| App icon and loading animation (palette, geometry, motion spec) | [`assets/brand/README.md`](./assets/brand/README.md) |
 
 Opening a pull request? The workflow and the template are described in [`CLAUDE.md`](./CLAUDE.md).
 

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32" role="img" aria-label="Daybook">
+  <title>Daybook</title>
+  <defs>
+    <clipPath id="db-plate-32"><rect width="512" height="512" rx="117.76" ry="117.76"/></clipPath>
+  </defs>
+  <g clip-path="url(#db-plate-32)">
+    <rect width="512" height="512" fill="#F1EFEA"/>
+    <g transform="rotate(-11 256 256) skewX(-9)">
+      <!-- 底层：深棕 -->
+      <path d="M138 296h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" transform="translate(10 22)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M138 296h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" fill="#4E2F1C"/>
+      <!-- 中层：麻 -->
+      <path d="M138 196h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" transform="translate(10 22)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M138 196h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" fill="#C4B79C"/>
+      <!-- 顶层：蓝 -->
+      <path d="M138 96h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" transform="translate(10 22)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M138 96h228v130l-38 18-38-16-38 20-38-18-38 16-38-20z" fill="#A9C6E8"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="64" height="64" role="img" aria-label="Daybook">
+  <title>Daybook</title>
+  <defs>
+    <clipPath id="db-plate-64"><rect width="512" height="512" rx="117.76" ry="117.76"/></clipPath>
+  </defs>
+  <g clip-path="url(#db-plate-64)">
+    <rect width="512" height="512" fill="#F1EFEA"/>
+    <g transform="rotate(-11 256 256) skewX(-9)">
+      <!-- 底层：深棕 -->
+      <path d="M144 288h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" transform="translate(8 18)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M144 288h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" fill="#4E2F1C"/>
+      <!-- 中层：麻 -->
+      <path d="M144 192h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" transform="translate(8 18)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M144 192h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" fill="#C4B79C"/>
+      <!-- 顶层：蓝 -->
+      <path d="M144 96h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" transform="translate(8 18)" fill="#4E2F1C" opacity=".42"/>
+      <path d="M144 96h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" fill="#A9C6E8"/>
+      <rect x="150" y="102" width="200" height="26" fill="#4E2F1C"/>
+      <path d="M174 164h100" fill="none" stroke="#4E2F1C" stroke-width="18" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>
