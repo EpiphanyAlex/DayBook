@@ -2,8 +2,8 @@
 title: Daybook 术语表
 status: ready
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.8
+date: 2026-08-12
+version: v0.9
 ---
 
 # 术语表
@@ -70,7 +70,7 @@ version: v0.8
 | 词 | 定义 | 出处 |
 |---|---|---|
 | **agent CLI** | 用户**自己已安装并登录**的命令行 agent（`claude -p` / `codex exec`）。应用不打包厂商凭证、不提供第三方登录、不代理鉴权 | [ADR-0003 §4](./adr/0003-agent-runtime-and-pluggable-backend.md) |
-| **MCP server** | 本应用暴露给 agent 的工具面，走 stdio、用 `rmcp` 实现。**本 app 本质上是一个本地 MCP server**——不让 agent 输出 JSON 再解析。⚠️ **它跑在哪个进程里尚未定**（[`01-agent-runtime` §5](./prd/01-agent-runtime.md) R6） | [ADR-0003 §1](./adr/0003-agent-runtime-and-pluggable-backend.md) |
+| **MCP server** | 本应用暴露给 agent 的工具面，走 stdio、用 `rmcp` 实现。**本 app 本质上是一个本地 MCP server**——不让 agent 输出 JSON 再解析。它跑在一个**独立的 MCP helper 二进制**里（2026-08-12 由 R6 定案），由 agent CLI 拉起，经 Unix domain socket 连回主进程；**helper 不碰数据库** | [ADR-0003 §1](./adr/0003-agent-runtime-and-pluggable-backend.md)、[`01-agent-runtime` §3.1](./prd/01-agent-runtime.md) |
 | **agent launcher** | Rust 侧负责 spawn / 监控 / 回收 agent CLI 子进程的组件 | [`01-agent-runtime` §3.4](./prd/01-agent-runtime.md) |
 | **工具权限** | MCP 工具的写入范围**在实现层面锁死**，**权限边界就是工具签名**。不得提供通用的「执行任意 SQL」类工具 | [ADR-0003 §3](./adr/0003-agent-runtime-and-pluggable-backend.md) · [`01-agent-runtime` §3.2](./prd/01-agent-runtime.md) |
 | **有效工具集** | agent **实际拿得到**的那一套，**不等于我们注册的那一套**——通用 CLI 自带执行命令与文件读写工具，足以绕过全部四道闸门。**闸门 1 的前提是子进程密封启动 + 有效工具集实测**，不相等即拒绝下发任务 | [ADR-0003 §3](./adr/0003-agent-runtime-and-pluggable-backend.md) · [`01-agent-runtime` §3.7](./prd/01-agent-runtime.md) |
@@ -109,6 +109,7 @@ version: v0.8
 | v0.6 | 2026-08-10 | **随第四轮同步**：新增 **位置声明 / `source_ordinal`** 词条（`file` 无 OCR 无坐标，位置只能由 agent 报，eval 对齐用它）；**最小货币单位**补「未知币种是非法数据、不回退」；**声明合计**与 **`confirmation_policy`** 补「口述里说了合计时对账照常做、策略不变」 |
 | v0.5 | 2026-08-10 | **随第三轮文档审查同步（[`docs/PRD.md` v0.10](./PRD.md)）**：**声明合计**改为「存在 `parse_attempts.reported_total_*`，不在 `sources` 上」；**总额交叉校验**入参改为 `attempt_id`；**`not_applicable`** 一条拆成 **`reconciliation_status`** 与 **`confirmation_policy`** 两条（放行批量的是后者）；**eval 集**的真值收窄为 `expected.json` 一个、匹配改为按位置保序对齐；**最小货币单位**补 IPC 上传字符串。**新增**：`accounts` 骨架在 M0 建（见「账户 / account」出处） |
 | v0.4 | 2026-08-10 | **随第二轮文档审查同步词义（[`docs/PRD.md` v0.9](./PRD.md)）。** 改写四条：**证据**（收窄为不可变原件）· **最小货币单位**（不恒等于「分」，由 ISO 4217 exponent 决定）· **渠道**（收窄为支付方式类别）· **总额交叉校验**（求和范围是全部未作废草稿、按类型选等式、四态）· **记忆**（「永不成为事实源」改为准确表述）· **纠正**（就是 `audit_log` 里 `actor = "human"` 的行）· **eval 集**（真值改为 `drafted_json` + 来源级期望集合）· **夹具**（补重放环境）。新增八条：**抽取声明 / `evidence_text`** · **起草快照 / `drafted_json`** · **解析尝试 / parse_attempt** · **账户 / account** · **声明合计的类型** · **`not_applicable`** · **有效工具集** · **密封启动配置** · **完成协议 / `complete_source`** |
+| v0.9 | 2026-08-12 | **MCP server 词条的「进程归属尚未定」改为定案**（[01 §3.1](./prd/01-agent-runtime.md)，2026-08-12 R6 spike）：独立 helper 二进制，由 agent CLI 拉起，经 Unix domain socket 连回主进程，**自己不碰数据库**。**词义未变**，只是补上了它住在哪 |
 | v0.3 | 2026-08-09 | **收回术语表本分。** 本文此前把架构、记忆机制、评测方法与流程决定的**论证**整段抄了进来（约 195 行），形成第二个事实源——改了 ADR 就得记得改这里，而没人会记得。现改为**定义 + 权威出处**的表格，理由一律留在出处。同步修正三处已漂移的措辞：总额校验的基准由「合计/余额」改为**声明合计**（[ADR-0002](./adr/0002-ai-never-writes-directly.md) 同日修订）；证据链去掉「每条**交易**草稿」的窄化，改为全部 `draft_*` 表（[05 §3.4](./prd/05-items.md) 同日删除事项例外）；MCP server 条目标注进程归属未定（[`01-agent-runtime` §5](./prd/01-agent-runtime.md) R6）。新增 `声明合计` 与 `日志分级` 两个词条。**可插拔后端**词条删掉「用户自备 API key」并注明它是本机概念、不是远程服务端（[ADR-0003 §4](./adr/0003-agent-runtime-and-pluggable-backend.md) 同日修订）。**词义未变** |
 | v0.2 | 2026-08-08 | 公开仓库去个人化：`owner` 改为 `@maintainer`。**术语与定义未变** |
 | v0.1 | 2026-08-06 | 初版术语表 |

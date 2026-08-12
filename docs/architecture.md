@@ -2,8 +2,8 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.6
+date: 2026-08-12
+version: v0.7
 ---
 
 # 系统架构基线
@@ -23,7 +23,7 @@ version: v0.6
 ├─ Tauri v2 主进程 (Rust) ───────────────────────────┤
 │    ├─ command 层      前端能调的全部能力            │
 │    ├─ domain 层       校验、状态机、确认动作         │
-│    ├─ MCP server      stdio · rmcp · 进程归属待定    │  ← agent 通过它读写
+│    ├─ MCP helper      stdio · rmcp · 独立二进制      │  ← CLI 拉起它，它经 Unix socket 连回主进程
 │    ├─ agent launcher  spawn `claude -p` / `codex exec`
 │    └─ store 层        rusqlite · 迁移 · 证据文件     │
 └─ SQLite（单一事实源）+ 证据目录（截图原件）─────────┘
@@ -127,7 +127,7 @@ version: v0.6
 
 ## 7. Agent 运行时边界
 
-- MCP server 走 **stdio**、用 **`rmcp`**、**不开端口**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。⚠️ **它跑在哪个进程里尚未定**——原文的「在 Tauri 主进程内起」于 2026-08-09 挂起（与「agent CLI 以 stdio 连上来」互斥），候选方案与 spike 见 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md)。
+- MCP server 走 **stdio**、用 **`rmcp`**、**不开端口**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。✅ **进程归属已于 2026-08-12 由 R6 spike 定案：独立 MCP helper 二进制**——由 agent CLI 自己 `fork/exec`，helper 与 Tauri 主进程之间走 **Unix domain socket**（不是 TCP 端口，仍不开 localhost API）。**helper 不碰数据库**，全部 SQLite 写入留在主进程一处。见 [`01-agent-runtime` §3.1](./prd/01-agent-runtime.md) 与 [spike 记录](./spikes/2026-08-12-r6-agent-runtime.md)。
 - **子进程以密封配置启动，有效工具集在下发任务前实测**（[`01-agent-runtime` §3.7](./prd/01-agent-runtime.md)）——**「我们暴露了什么」不等于「它实际拿得到什么」**，这是 §3 结构性保证第 5 条的落点。
 - **来源内容是不可信输入**：截图与口述可能携带指令，提示词显式声明它们是数据不是指令；爆炸半径由四道闸门限死在「产出一批错的草稿」（[`01-agent-runtime` §3.8](./prd/01-agent-runtime.md)）。
 - **单 agent + 多工具**，不按业务领域拆。子 agent 只用于**上下文隔离**（如解析超长截图），不用于业务分工。
@@ -153,6 +153,7 @@ version: v0.6
 |---|---|---|
 | v0.6 | 2026-08-10 | 随[`docs/PRD.md` v0.10](./PRD.md) 第三轮同步：§3 结构性保证增第 7 条「**原件属于来源，读出来的东西属于尝试**」；§4 第 7 步的总额校验改为按 `attempt_id`、返回两个字段；§6 的 IPC 金额表示改为十进制字符串 |
 | v0.5 | 2026-08-10 | 随[`docs/PRD.md` v0.9](./PRD.md) 第二轮文档审查同步：§3 **结构性保证由四条增至六条**——新增「子进程密封启动 + 有效工具集实测」（前四条只约束我们注册的工具面，而通用编码 agent 自带的能力可直接绕过）与「agent 原始起草值不可变」；§4 数据流由 10 步扩为 11 步，补 `parse_attempts` 落行、工具集探测、`complete_source` 完成协议、`drafted_json`，并写明总额校验的求和范围与「要确认哪些」无关；§7 补密封配置与来源内容不可信两条。**组件职责与两条写入路径的形状未变** |
+| v0.7 | 2026-08-12 | **MCP server 的进程归属由「待定」改为定案**（[01 §5](./prd/01-agent-runtime.md) R6 spike，2026-08-12）：**独立 MCP helper 二进制**，由 agent CLI 自己 `fork/exec`，helper 经 **Unix domain socket** 连回 Tauri 主进程，**自己不碰数据库**——全部 SQLite 写入收敛在主进程一处。§1 结构图与 §7 同步。stdio、`rmcp`、不开端口三条仍不变。同步 [ADR-0003 §1](./adr/0003-agent-runtime-and-pluggable-backend.md)、[`docs/CONTEXT.md`](./CONTEXT.md) |
 | v0.4 | 2026-08-09 | §7 与 §1 结构图 **MCP server 的进程归属挂起**——「在 Tauri 主进程内起」与「agent CLI 以 stdio 连上来」互斥，改由 [`01-agent-runtime` §5 R6](./prd/01-agent-runtime.md) 的 spike 决定；stdio、`rmcp`、不开端口三条不变。结构图里 MCP server 相应从「Tauri 主进程」框内移出，标注「进程归属待定」。同步 [ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) |
 | v0.3 | 2026-08-08 | 公开仓库去个人化：§2「harness」澄清**去掉外部参考仓库的出处从句，把界定直接写出**（结论不变）；本表去掉工具与会话指代；`owner` 改为 `@maintainer` |
 | v0.2 | 2026-08-08 | 设计评审回流：**未决 A3 关闭**（记忆规则改由 agent 经 `query_memory` 主动查，domain 只标记冲突不覆盖分类，见 [06 §3.4](./prd/06-memory.md)）；§2 补一段澄清「harness」在本项目指什么及它的规格散落在哪三处 |
