@@ -573,17 +573,69 @@ fn classify_process_error(stderr: &str) -> AppError {
 }
 
 fn discover_claude() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let mut candidates = std::env::split_paths(&path)
+    discover_claude_in(
+        std::env::var_os("PATH"),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+/// **从 Finder 启动的 `.app` 只继承 `/usr/bin:/bin:/usr/sbin:/sbin`**，所以 `PATH` 那一路
+/// 在打包后基本必然落空，只剩下面这些硬编码位置在兜底。用户终端里 `claude` 跑得好好的、
+/// 应用却说「未安装」，就是这么来的。
+///
+/// **不去 spawn 一个登录 shell 问它的 `PATH`**：唯一允许 spawn 的子进程是 agent CLI 本身
+/// （[`rust-tauri.md` §2](../../../.claude/rules/rust-tauri.md)），所以只能穷举常见安装位置。
+fn discover_claude_in(path: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    let mut candidates = std::env::split_paths(&path.unwrap_or_default())
         .map(|directory| directory.join("claude"))
         .collect::<Vec<_>>();
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        candidates.push(home.join(".local/bin/claude"));
-        candidates.push(home.join(".claude/local/claude"));
+    if let Some(home) = home {
+        for relative in [
+            ".local/bin/claude",
+            ".claude/local/claude",
+            ".npm-global/bin/claude",
+            ".npm/bin/claude",
+            ".volta/bin/claude",
+            ".bun/bin/claude",
+            ".yarn/bin/claude",
+            ".local/share/pnpm/claude",
+        ] {
+            candidates.push(home.join(relative));
+        }
+        candidates.extend(node_version_manager_candidates(&home));
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
     candidates.push(PathBuf::from("/usr/local/bin/claude"));
     candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+/// nvm / fnm / n 把二进制放在带版本号的目录里，路径中间有一层通配。标准库没有 glob，
+/// 手动读目录；版本目录按字典序倒排，让较新的版本先命中。
+fn node_version_manager_candidates(home: &Path) -> Vec<PathBuf> {
+    let roots = [
+        home.join(".nvm/versions/node"),
+        home.join("Library/Application Support/fnm/node-versions"),
+        home.join(".local/share/fnm/node-versions"),
+        home.join(".local/state/fnm_multishells"),
+        home.join("n/versions/node"),
+    ];
+    let mut found = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        let mut versions = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        versions.sort();
+        versions.reverse();
+        for version in versions {
+            found.push(version.join("bin/claude"));
+            found.push(version.join("installation/bin/claude"));
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -649,6 +701,53 @@ mod agent {
         assert_eq!(
             status.error_code.as_deref(),
             Some("agent.backend_unavailable")
+        );
+    }
+
+    #[test]
+    fn discovery_survives_the_finder_launched_path() {
+        // 打包后的 .app 从 Finder 起来时 PATH 里没有任何 node 版本管理器的目录。
+        let home = tempfile::tempdir().unwrap();
+        let nvm_bin = home.path().join(".nvm/versions/node/v20.11.0/bin");
+        std::fs::create_dir_all(&nvm_bin).unwrap();
+        std::fs::write(nvm_bin.join("claude"), b"#!/bin/sh\n").unwrap();
+
+        let finder_path = Some(std::ffi::OsString::from("/usr/bin:/bin:/usr/sbin:/sbin"));
+        assert_eq!(
+            discover_claude_in(finder_path, Some(home.path().to_path_buf())),
+            Some(nvm_bin.join("claude"))
+        );
+    }
+
+    #[test]
+    fn discovery_prefers_the_newest_node_version() {
+        let home = tempfile::tempdir().unwrap();
+        for version in ["v18.19.0", "v20.11.0"] {
+            let bin = home
+                .path()
+                .join(".nvm/versions/node")
+                .join(version)
+                .join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("claude"), b"#!/bin/sh\n").unwrap();
+        }
+        let found = discover_claude_in(
+            Some(std::ffi::OsString::new()),
+            Some(home.path().to_path_buf()),
+        )
+        .unwrap();
+        assert!(found.to_string_lossy().contains("v20.11.0"), "{found:?}");
+    }
+
+    #[test]
+    fn discovery_reports_absence_instead_of_guessing() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(
+            discover_claude_in(
+                Some(std::ffi::OsString::new()),
+                Some(home.path().to_path_buf())
+            ),
+            None
         );
     }
 

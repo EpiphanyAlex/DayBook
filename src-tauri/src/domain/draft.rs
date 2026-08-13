@@ -62,6 +62,7 @@ pub struct DraftStore {
     assignment: Option<Assignment>,
     closed: AtomicBool,
     completion_rejections: AtomicU8,
+    total_marker_rejections: AtomicU8,
     trace_events: Mutex<Vec<Value>>,
     debug_events: Mutex<Vec<Value>>,
 }
@@ -73,6 +74,7 @@ impl DraftStore {
             assignment: None,
             closed: AtomicBool::new(false),
             completion_rejections: AtomicU8::new(0),
+            total_marker_rejections: AtomicU8::new(0),
             trace_events: Mutex::new(Vec::new()),
             debug_events: Mutex::new(Vec::new()),
         }
@@ -84,6 +86,7 @@ impl DraftStore {
             assignment: Some(assignment),
             closed: AtomicBool::new(false),
             completion_rejections: AtomicU8::new(0),
+            total_marker_rejections: AtomicU8::new(0),
             trace_events: Mutex::new(Vec::new()),
             debug_events: Mutex::new(Vec::new()),
         }
@@ -416,9 +419,24 @@ impl DraftStore {
         if args.item_count < 0 {
             return Err(tool_rejected("item_count 不能为负数"));
         }
-        if self.explicit_utterance_total_is_unreported(&assignment)? {
+        // 合计词闸门（01 §3.2 可信性要求第 6 条）。词表只认字面量，认不出「一共去了三个地方」
+        // 这类非金额用法——所以 `unparsed_note` 是它的出口：说明了就放行，产出
+        // `completed_with_gaps`，审核界面显眼呈现那段说明。它挡的是**静默**漏报，写了说明就不静默。
+        if args.unparsed_note.trim().is_empty()
+            && self.explicit_utterance_total_is_unreported(&assignment)?
+        {
+            // 这条此前不计数、可无限拒绝：agent 找不到合计时只能挂到 180 秒硬超时。
+            let rejection = self.total_marker_rejections.fetch_add(1, Ordering::SeqCst) + 1;
+            if rejection >= 2 {
+                self.fail_protocol(&assignment)?;
+                return Err(AppError::new(
+                    "agent.protocol_violation",
+                    "口述含明显合计词，两次完成尝试都既未回报合计也未说明原因",
+                ));
+            }
             return Err(tool_rejected(
-                "口述原文含明显合计词；必须先调用 report_source_total，再重试 complete_source",
+                "口述原文含明显合计词。若它确实是金额合计，先调用 report_source_total 再重试完成；\
+                 若不是（例如「一共去了三个地方」），在 unparsed_note 里说明后重试完成。",
             ));
         }
         let (ids, ordinals) = self.database.read(|connection| {
@@ -568,9 +586,13 @@ pub fn void_attempt(
              WHERE id = ?4 AND ended_at IS NULL",
             params![timestamp, outcome, error_code, assignment.attempt_id],
         )?;
-        transaction.execute(
-            "UPDATE sources SET state = 'failed', parse_error_code = ?1 WHERE id = ?2",
-            params![error_code, assignment.source_id],
+        // `failed → failed` 是合法的幂等重入：工具面先 fail_protocol 一次，
+        // runtime 收到协议失败后还会兜底再作废一次（见 02 §3.4）。
+        crate::ingest::apply_transition(
+            transaction,
+            &assignment.source_id,
+            crate::ingest::SourceState::Failed,
+            Some(error_code),
         )?;
         let mut statement = transaction.prepare(
             "SELECT id FROM draft_transactions WHERE attempt_id = ?1 AND voided_at IS NULL",
@@ -1167,6 +1189,71 @@ mod agent {
             .unwrap();
         fixture.complete(1, "").unwrap();
         assert!(fixture.store.is_complete());
+    }
+
+    #[test]
+    fn explicit_total_marker_is_escapable_with_note() {
+        // 「一共」说的是地点数量，不是金额合计——词表分辨不了，agent 必须有路可走。
+        let fixture = Fixture::new("utterance", "昨天一共去了三个地方，咖啡 5 元");
+        let evidence = "咖啡 5 元";
+        assert_eq!(
+            fixture.text.chars().skip(11).take(6).collect::<String>(),
+            evidence
+        );
+        fixture
+            .store
+            .handle(
+                "draft_transaction",
+                fixture.draft(1, evidence, Some((11, 17))),
+            )
+            .unwrap();
+
+        assert_eq!(
+            fixture.complete(1, "").unwrap_err().code,
+            "agent.tool_rejected"
+        );
+        assert!(!fixture.store.is_complete());
+
+        let completed = fixture
+            .complete(
+                1,
+                "原文的「一共」指地点数量，不是金额合计，来源没有可回报的合计",
+            )
+            .unwrap();
+        assert!(fixture.store.is_complete());
+        assert_eq!(
+            completed.structured_content.unwrap()["outcome"],
+            "completed_with_gaps"
+        );
+    }
+
+    #[test]
+    fn explicit_total_marker_gate_is_bounded() {
+        // 此前这条不计数：agent 交不出合计也说不出理由时，只能一直被拒到 180 秒硬超时。
+        let fixture = Fixture::new("utterance", "总共花了很多");
+        assert_eq!(
+            fixture.complete(0, "").unwrap_err().code,
+            "agent.tool_rejected"
+        );
+        assert_eq!(
+            fixture.complete(0, "").unwrap_err().code,
+            "agent.protocol_violation"
+        );
+        let (outcome, state): (String, String) = fixture
+            .database
+            .read(|connection| {
+                connection.query_row(
+                    "SELECT p.outcome, s.state FROM parse_attempts p
+                     JOIN sources s ON s.id = p.source_id WHERE p.id = ?1",
+                    [&fixture.attempt_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            (outcome.as_str(), state.as_str()),
+            ("protocol_violation", "failed")
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ import iconUrl from '../assets/brand/icon.svg'
 import { backendPresentation } from './agent/presentation'
 import { runQueueContinuing } from './ingest/queue'
 import { AppError, call, type MinorUnits, type RatePpm } from './lib/bridge'
+import { formatMoney, formatRate, parseMoneyInput, parseRateInput } from './lib/money'
 import { AttestationHint } from './review/AttestationHint'
 import { CompletedWithGapsBanner } from './review/CompletedWithGapsBanner'
 import { canBatchConfirm, type ReviewPolicy, type UtteranceGateState } from './review/policy'
@@ -82,13 +83,6 @@ interface ImportResult {
   matchingUtteranceSourceIds: string[]
 }
 
-const EXPONENTS: Record<string, number> = {
-  BHD: 3, IQD: 3, JOD: 3, KWD: 3, LYD: 3, OMR: 3, TND: 3,
-  CLF: 4, UYW: 4,
-  BIF: 0, CLP: 0, DJF: 0, GNF: 0, ISK: 0, JPY: 0, KMF: 0, KRW: 0,
-  PYG: 0, RWF: 0, UGX: 0, VND: 0, VUV: 0, XAF: 0, XOF: 0, XPF: 0,
-}
-
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
 function sourceTitle(source: ReviewSource): string {
@@ -105,44 +99,6 @@ function sourceStateLabel(source: ReviewSource): string {
     reviewed: '已归档',
   }
   return labels[source.state]
-}
-
-function formatMinor(amount: number | null, currency: string | null): string {
-  if (amount === null || currency === null) return '—'
-  const exponent = EXPONENTS[currency] ?? 2
-  const sign = amount < 0 ? '−' : ''
-  const absolute = Math.abs(amount).toString().padStart(exponent + 1, '0')
-  const value = exponent === 0
-    ? absolute
-    : `${absolute.slice(0, -exponent)}.${absolute.slice(-exponent)}`
-  return `${sign}${value} ${currency}`
-}
-
-function formatRate(ratePpm: number | null): string {
-  if (ratePpm === null) return ''
-  const absolute = Math.abs(ratePpm).toString().padStart(7, '0')
-  const value = `${absolute.slice(0, -6)}.${absolute.slice(-6)}`.replace(/\.?0+$/, '')
-  return `${ratePpm < 0 ? '−' : ''}${value || '0'}`
-}
-
-function parseRateInput(value: string): number | null {
-  const normalized = value.trim()
-  if (!/^\d+(?:\.\d{1,6})?$/.test(normalized)) return null
-  const [whole, fraction = ''] = normalized.split('.')
-  const result = Number(`${whole}${fraction.padEnd(6, '0')}`)
-  return Number.isSafeInteger(result) && result > 0 ? result : null
-}
-
-function parseDisplayAmount(value: string, currency: string): number | null {
-  const normalized = value.trim().replace(/,/g, '')
-  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null
-  const exponent = EXPONENTS[currency] ?? 2
-  const [whole, fraction = ''] = normalized.split('.')
-  if (fraction.length > exponent) return null
-  const negative = whole.startsWith('-')
-  const digits = `${whole.replace('-', '')}${fraction.padEnd(exponent, '0')}`
-  const result = Number(digits) * (negative ? -1 : 1)
-  return Number.isSafeInteger(result) ? result : null
 }
 
 function errorMessage(error: unknown): string {
@@ -629,8 +585,8 @@ export function App() {
             {check && (
               <AttestationHint
                 policy={check}
-                reportedTotalText={formatMinor(check.reportedTotalMinor, check.reportedTotalCurrency)}
-                calculatedTotalText={formatMinor(check.calculatedTotalMinor, check.reportedTotalCurrency)}
+                reportedTotalText={formatMoney(check.reportedTotalMinor, check.reportedTotalCurrency)}
+                calculatedTotalText={formatMoney(check.calculatedTotalMinor, check.reportedTotalCurrency)}
               />
             )}
             {check?.confirmationPolicy === 'single_only' && (
@@ -657,8 +613,8 @@ function ReconciliationCard({ check }: { check: TotalCheck }) {
       <p>{copy[1]}</p>
       {check.reportedTotalMinor !== null && (
         <dl>
-          <div><dt>来源声明</dt><dd>{formatMinor(check.reportedTotalMinor, check.reportedTotalCurrency)}</dd></div>
-          <div><dt>草稿合计</dt><dd>{formatMinor(check.calculatedTotalMinor, check.reportedTotalCurrency)}</dd></div>
+          <div><dt>来源声明</dt><dd>{formatMoney(check.reportedTotalMinor, check.reportedTotalCurrency)}</dd></div>
+          <div><dt>草稿合计</dt><dd>{formatMoney(check.calculatedTotalMinor, check.reportedTotalCurrency)}</dd></div>
         </dl>
       )}
       {check.reportedTotalEvidenceText && <blockquote>“{check.reportedTotalEvidenceText}”</blockquote>}
@@ -678,10 +634,10 @@ interface DraftCardProps {
 }
 
 function DraftCard({ draft, selected, unavailable, onToggle, onPatch, onConfirm, onDiscard, defaultBaseCurrency }: DraftCardProps) {
-  const [amount, setAmount] = useState(formatMinor(draft.amountMinor, draft.currency).split(' ')[0])
+  const [amount, setAmount] = useState(formatMoney(draft.amountMinor, draft.currency).split(' ')[0])
   const [baseCurrency, setBaseCurrency] = useState(defaultBaseCurrency)
   const [rate, setRate] = useState(() => (draft.currency === defaultBaseCurrency ? '1' : ''))
-  useEffect(() => setAmount(formatMinor(draft.amountMinor, draft.currency).split(' ')[0]), [draft.amountMinor, draft.currency])
+  useEffect(() => setAmount(formatMoney(draft.amountMinor, draft.currency).split(' ')[0]), [draft.amountMinor, draft.currency])
   return (
     <article className={`draft-card ${selected ? 'is-selected' : ''} ${unavailable ? 'has-warning' : ''}`}>
       <button className="draft-check" aria-label={selected ? '取消选择' : '选择'} onClick={onToggle}>
@@ -701,7 +657,7 @@ function DraftCard({ draft, selected, unavailable, onToggle, onPatch, onConfirm,
             value={amount}
             onChange={(event) => setAmount(event.target.value)}
             onBlur={() => {
-              const minor = parseDisplayAmount(amount, draft.currency)
+              const minor = parseMoneyInput(amount, draft.currency)
               if (minor !== null && minor !== draft.amountMinor) onPatch({ amountMinor: minor })
             }}
           />

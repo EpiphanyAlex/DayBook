@@ -3,7 +3,7 @@ title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: review
 owner: "@maintainer"
 date: 2026-08-13
-version: v0.19
+version: v0.20
 ---
 
 # 01 · Agent 运行时
@@ -162,7 +162,11 @@ version: v0.19
 3. **来源上没有印合计、或印了但判不出是哪一类时，agent 必须不调用本工具**——留空即 `unavailable`（[03 审核 §3.3](./03-review.md)），**不许自己算一个填进去，也不许在三个 kind 里挑一个试试看**。基准的语义不确定，它就不是基准。
 4. `reported_total_*` 四列在数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)），漏填一项写不进去。
 5. **一次尝试只接受一次成功调用**（2026-08-10 由「一个来源」收窄）。账单同时印着消费合计与收入合计时取消费合计，同一尝试内第二次调用返回 `agent.tool_rejected`。**重试产生新的尝试，可以重新回报**——合计和草稿一样属于产出它的那次尝试（[00 地基 §3.6](./00-foundation.md)「声明合计归尝试，不归来源」）。「一来源多条 claim」是 [00 地基 §5](./00-foundation.md) R7，M2 决。
-6. **口述里的明显合计词不能只靠提示词防漏。** M0 对落盘转写中的保守词集（`总共` / `一共` / `合计` / `总计` / 独立英文 `TOTAL`）做代码侧完成前检查：命中但本次尝试尚未成功调用 `report_source_total` 时，`complete_source` 返回可补救的 `agent.tool_rejected`，会话保持开放，agent 必须先回报合计再重试完成。该词集只用于阻止已知的静默漏报，**未命中不证明来源没有合计**；图片仍由视觉模型识别，M0 不伪装成拥有独立 OCR。
+6. **口述里的明显合计词不能只靠提示词防漏。** M0 对落盘转写中的保守词集（`总共` / `一共` / `合计` / `总计` / 独立英文 `TOTAL`）做代码侧完成前检查：命中但本次尝试尚未成功调用 `report_source_total` 时，`complete_source` 返回可补救的 `agent.tool_rejected`，会话保持开放。该词集只用于阻止已知的静默漏报，**未命中不证明来源没有合计**；图片仍由视觉模型识别，M0 不伪装成拥有独立 OCR。
+
+   **补救有两条路，不是一条**（2026-08-13 实施回流）：① 回报合计；② **在 `unparsed_note` 里说明为什么没有合计**，随后完成，产出 `completed_with_gaps`。**词表只认字面量，认不出「一共去了三个地方」这类非金额用法**——本条 v0.7–v0.19 只留了第 ① 条路，于是这种口述**无法完成解析**：agent 要么编一个合计（比漏报更糟，它会成为闸门 3 的假基准），要么被反复拒绝到 180 秒硬超时、整次尝试作废。第 ② 条路不削弱闸门：**它挡的是「静默」漏报，写了说明就不静默**，而 `unparsed_note` 非空会让审核界面显眼提示（§3.2「`complete_source`」、[03 审核 §3.4](./03-review.md)）。
+
+   **这道闸门还必须有界**（同上）：本条此前的拒绝**不计次**，是 M0 唯一一处可以无限重试的工具拒绝。现改为**同一次尝试内第二次仍未满足即 `agent.protocol_violation`**，与 `complete_source` 条目数不符那条同构（各自独立计数，互不影响）。**「拒绝可补救」必须同时意味着「补救不成会结束」**，否则它不是闸门，是一个挂起。
 
 **诚实说明这道闸门的边界**：它能捕获「逐笔读错但合计读对」，捕获不了「逐笔和合计一起读错」。后者只能靠**人扫一眼合计的原文**——这就是第 2 条强制 `evidence_text` 的理由：审核界面把声明合计与它的原文并排显示，让基准本身也可核对（[03 审核 §3.3](./03-review.md)）。**闸门 3 不是万能的，规格必须如实写明它挡不住什么。**
 
@@ -486,6 +490,8 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::report_total_requires_evidence_currency_and_kind` 通过——`report_source_total` 缺 `currency` / `kind` / `evidence_text` 任一时返回 `agent.tool_rejected` 且未写库（§3.2 可信性要求第 2 条）
 - [ ] `cargo test agent::report_total_accepts_only_once_per_attempt` 通过——**同一尝试内**第二次调用返回 `agent.tool_rejected`、首次写入的值不被覆盖；而**重试产生的新尝试可以重新回报**，两行 `parse_attempts` 各存各的（可信性要求第 5 条）
 - [ ] `cargo test agent::explicit_utterance_total_must_be_reported` 通过——口述原文命中明显合计词而本次尝试未报合计时，`complete_source` 被代码拒绝且会话仍可补救；成功调用 `report_source_total` 后才能完成（可信性要求第 6 条）
+- [ ] `cargo test agent::explicit_total_marker_is_escapable_with_note` 通过——命中词但那不是金额合计（「昨天一共去了三个地方」）时，在 `unparsed_note` 里说明即可完成，`outcome == completed_with_gaps`（第 6 条补救路径 ②）
+- [ ] `cargo test agent::explicit_total_marker_gate_is_bounded` 通过——同一次尝试内第二次仍未满足即 `agent.protocol_violation`、来源转 `failed`；**把拒绝改回不计次时该用例必须变红**（第 6 条「闸门必须有界」）
 - [ ] `cargo test agent::every_ledger_write_tool_writes_audit` 通过——每个影响账目或草稿内容的写入工具调用后 `audit_log` 恰好多一条且 `actor = "agent"`；只收束完成协议元数据的 `complete_source` 明确不写审计
 - [ ] `cargo test agent::timeout_voids_only_own_attempt` 通过——两个来源各自解析，其一超时后，**只有该 `attempt_id` 的草稿被置 `voided_at`**，另一来源的草稿不受影响（§5 R5 的会话粒度结论）
 - [ ] `cargo test agent::void_marks_not_deletes` 通过——作废后草稿行仍在且 `drafted_json` 完好（§3.4「作废是置标志，不是删行」）
@@ -506,6 +512,8 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-13（实现验收） | **§3.2 可信性要求第 6 条的合计词闸门此前无出口也无边界。** ① 词表只认字面量，认不出「一共去了三个地方」这类非金额用法，而唯一的补救路径是「回报合计」——这种口述**无法完成解析**，agent 只能编一个合计（成为闸门 3 的假基准）或被拒到硬超时后整次作废。补第二条路：在 `unparsed_note` 里说明即可完成，产出 `completed_with_gaps`；闸门挡的是**静默**漏报，写了说明就不静默。② 该拒绝**不计次**，是 M0 唯一一处可无限重试的工具拒绝；改为第二次仍未满足即 `agent.protocol_violation`。**「可补救」必须同时意味着「补救不成会结束」**，否则是挂起不是闸门。§6 新增 2 条验收 | M0 实施验收（2026-08-13）代码审查：`complete_source` 的该分支在 `completion_rejections` 计数之前返回 |
+| 2026-08-13（实现验收） | **`ClaudeCodeBackend` 的 CLI 发现路径覆盖不到 nvm / fnm / volta / pnpm 装的 `claude`。** 从 Finder 启动的 `.app` 只继承 `/usr/bin:/bin:/usr/sbin:/sbin`，`PATH` 那一路在打包后基本必然落空，只剩四个硬编码位置兜底——用户终端里 `claude` 能跑、应用却报 `agent.backend_unavailable`。补常见安装位置与带版本号目录的枚举（较新版本优先）。**不去 spawn 登录 shell 问 `PATH`**：唯一允许 spawn 的子进程是 agent CLI 本身（[`rust-tauri.md` §2](../../.claude/rules/rust-tauri.md)）。本条只在打包后暴露，`cargo test` 环境里 `PATH` 是全的 | M0 实施验收（2026-08-13）代码审查 `discover_claude` |
 | 2026-08-13 | `read_source` 的口述正文必须放进 `structuredContent.text`，不能只作为第二个 text content block；图片仍走 image content block | Claude Code 2.1.229 真实口述路径：存在 `structuredContent` 时 CLI 只把第一个 text block交给模型，第二个正文块被丢弃，agent 因无原文正确地以 0 条完成 |
 | 2026-08-13 | effective manifest 按「可执行能力」规范化：Claude Code 仍声明但因无 `Agent` / `Task` 工具且并发上限锁为 0 而不可调用的内建 agent 定义不计入；调用原语一旦存在则照常计入。`--safe-mode` 会连显式 MCP 配置一起屏蔽，不能用于生产密封启动 | Claude Code 2.1.228 真实探测：首轮暴露 5 个 agent + auto-memory；关闭项后只余不可调用的 `general-purpose` 声明；加 `--safe-mode` 时五个 Daybook MCP 工具同时消失 |
 | 2026-08-13 | 日志默认保留期定为 14 天，启动清理；两级同一周期 | M0 实施决定：覆盖常见复现窗口，同时限制开发期完整内容长期残留 |
@@ -540,6 +548,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.20 | 2026-08-13 | **实现验收回流两处，`status` 仍为 `review`。** ① §3.2 可信性要求第 6 条的合计词闸门补出口（`unparsed_note` 说明即可完成）与边界（第二次仍未满足即 `agent.protocol_violation`）——此前这条既无出口也不计次，非金额的「一共」会让整次解析挂到硬超时。② CLI 发现路径补 nvm / fnm / volta / pnpm 等位置，修 Finder 启动的 `.app` 上「装了却说没装」。§6 验收新增 2 条 |
 | v0.19 | 2026-08-13 | **M0 实现验收进入 `review`。** 五工具密封能力探测、独立 MCP helper/UDS、进程收束、分级日志与真实 Claude Code 链路通过；live 验收发现并补上口述显式合计的代码侧完成闸门 |
 | v0.18 | 2026-08-13 | **真实 CLI 回流：**口述正文加入 `read_source.structuredContent.text`，绕开 CLI 丢弃第二个 text block 的行为 |
 | v0.17 | 2026-08-13 | **实现实测回流：**effective manifest 排除确定性不可达的内建 agent 声明；登记 `--safe-mode` 会屏蔽显式 MCP 的行为 |

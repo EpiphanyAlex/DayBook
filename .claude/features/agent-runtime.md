@@ -46,6 +46,8 @@ AgentRuntime::parse_source
 - `cancel` 先向独立进程组发 SIGTERM，2 秒后仍未退出才 SIGKILL；等 attempt、草稿与 stdout/stderr 持久化收束后才返回。应用退出走同一条 shutdown，防止 helper 成为孤儿。
 - `trace` 常开且不含金额、原文或 prompt；`debug` 可见开关，含完整调用与原始流。两类日志启动时清除 14 天前文件。
 - 口述原文命中「总共 / 一共 / 合计 / 总计 / 独立 TOTAL」但未报告合计时，代码拒绝 `complete_source` 并保持会话可补救；这只是防已知漏报的保守词集，不是通用语义解析。
+- **该闸门有两条出口、且有界**：回报合计，或在 `unparsed_note` 里说明为什么没有合计（产出 `completed_with_gaps`）。词表认不出「一共去了三个地方」这类非金额用法，只留一条出口会让这种口述根本无法完成解析。同一次尝试内第二次仍未满足即 `agent.protocol_violation`；计数器与条目数不符那条各自独立（`total_marker_rejections` / `completion_rejections`）。
+- **CLI 发现只查静态路径，不 spawn 登录 shell**：`PATH` + `~/.local/bin` + `~/.claude/local` + npm-global / volta / bun / yarn / pnpm + nvm / fnm / n 的带版本号目录（较新版本优先）。从 Finder 启动的 `.app` 只继承 `/usr/bin:/bin:/usr/sbin:/sbin`，`PATH` 那一路基本必然落空；这条只在打包后暴露，`cargo test` 里 `PATH` 是全的。发现只在构造 `AgentRuntime` 时做一次，装完 CLI 需重启应用。
 
 ## 已知边界与坑
 

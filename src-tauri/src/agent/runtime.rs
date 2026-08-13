@@ -125,24 +125,14 @@ impl AgentRuntime {
             attempt_id: attempt_id.clone(),
         };
         database.write(|transaction| {
-            let state: String = transaction
-                .query_row(
-                    "SELECT state FROM sources WHERE id = ?1",
-                    [&source_id],
-                    |row| row.get(0),
-                )
-                .map_err(|error| match error {
-                    rusqlite::Error::QueryReturnedNoRows => {
-                        AppError::new("data.not_found", "来源不存在")
-                    }
-                    other => other.into(),
-                })?;
-            if !matches!(state.as_str(), "imported" | "failed" | "parsed") {
-                return Err(AppError::new(
-                    "ingest.invalid_state_transition",
-                    format!("来源当前处于 {state}，不能开始解析"),
-                ));
-            }
+            // 状态机只有一份，在 ingest.rs（02 §3.4）。此处曾内联一个 `matches!`，
+            // 它和 SourceState::can_transition_to 对 `parsed → parsing` 的答案相反。
+            crate::ingest::apply_transition(
+                transaction,
+                &source_id,
+                crate::ingest::SourceState::Parsing,
+                None,
+            )?;
             transaction.execute(
                 "INSERT INTO parse_attempts (
                     id, source_id, agent_session_id, backend_id, backend_version,
@@ -163,8 +153,7 @@ impl AgentRuntime {
                 ],
             )?;
             transaction.execute(
-                "UPDATE sources SET state = 'parsing', parse_error_code = NULL,
-                    latest_attempt_id = ?1 WHERE id = ?2",
+                "UPDATE sources SET latest_attempt_id = ?1 WHERE id = ?2",
                 rusqlite::params![attempt_id, source_id],
             )?;
             Ok(())
@@ -326,9 +315,11 @@ impl AgentRuntime {
                  WHERE id = ?4 AND ended_at IS NULL",
                 rusqlite::params![ended_at, outcome, result.model_id, attempt_id],
             )?;
-            transaction.execute(
-                "UPDATE sources SET state = 'parsed', parse_error_code = NULL WHERE id = ?1",
-                [&source_id],
+            crate::ingest::apply_transition(
+                transaction,
+                &source_id,
+                crate::ingest::SourceState::Parsed,
+                None,
             )?;
             Ok(())
         })?;

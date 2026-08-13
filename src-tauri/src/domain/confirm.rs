@@ -601,16 +601,24 @@ fn update_source_reviewed(
     source_id: &str,
     attempt_id: &str,
 ) -> AppResult<()> {
-    transaction.execute(
-        "UPDATE sources SET state = 'reviewed'
-         WHERE id = ?1 AND latest_attempt_id = ?2 AND state = 'parsed'
-           AND NOT EXISTS (
-             SELECT 1 FROM draft_transactions
-             WHERE attempt_id = ?2 AND voided_at IS NULL
-               AND discarded_at IS NULL AND consumed_at IS NULL
-           )",
+    // 条件先判，再走状态机——`sources.state` 只在 ingest.rs 里写（02 §3.4）。
+    let ready: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sources WHERE id = ?1 AND latest_attempt_id = ?2
+            AND state = 'parsed')
+          AND NOT EXISTS(SELECT 1 FROM draft_transactions
+            WHERE attempt_id = ?2 AND voided_at IS NULL
+              AND discarded_at IS NULL AND consumed_at IS NULL)",
         params![source_id, attempt_id],
+        |row| row.get(0),
     )?;
+    if ready {
+        crate::ingest::apply_transition(
+            transaction,
+            source_id,
+            crate::ingest::SourceState::Reviewed,
+            None,
+        )?;
+    }
     Ok(())
 }
 

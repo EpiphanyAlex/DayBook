@@ -64,7 +64,8 @@ impl SourceState {
             (Self::Imported, Self::Parsing)
                 | (Self::Parsing, Self::Parsed | Self::Failed)
                 | (Self::Failed, Self::Parsing)
-                | (Self::Parsed, Self::Reviewed)
+                | (Self::Parsed, Self::Parsing | Self::Reviewed)
+                | (Self::Failed, Self::Failed)
         )
     }
 }
@@ -169,43 +170,56 @@ pub fn import_utterance(
     })
 }
 
+/// **`sources.state` 的唯一写入点**（02 §3.4）。
+///
+/// 本函数收在同一个事务里，好让调用方把「推进状态」和它自己的写入（插 `parse_attempts`、
+/// 作废草稿、写审计）放在一次提交里。`source_state_has_one_writer` 守着「别处不许再写」。
+///
+/// **为什么必须只有一处**：M0 曾经有两份状态机——本文件这份（有测试、没人用）和
+/// `agent/runtime.rs` 里内联的 `matches!`（真正生效）。两份对 `parsed → parsing`
+/// 的答案还相反，而穷举 25 种转移的测试全绿，因为它测的是没人调用的那份。
+pub fn apply_transition(
+    transaction: &rusqlite::Transaction<'_>,
+    source_id: &str,
+    next: SourceState,
+    error_code: Option<&str>,
+) -> AppResult<()> {
+    let current = transaction
+        .query_row(
+            "SELECT state FROM sources WHERE id = ?1",
+            [source_id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => AppError::new("data.not_found", "来源不存在"),
+            other => other.into(),
+        })?;
+    let current = SourceState::parse(&current)?;
+    if !current.can_transition_to(next) {
+        return Err(AppError::new(
+            "ingest.invalid_state_transition",
+            format!("不能从 {} 转到 {}", current.as_str(), next.as_str()),
+        ));
+    }
+    if (next == SourceState::Failed) != error_code.is_some() {
+        return Err(AppError::invalid_argument(
+            "failed 状态必须且只能带 parse_error_code",
+        ));
+    }
+    transaction.execute(
+        "UPDATE sources SET state = ?1, parse_error_code = ?2 WHERE id = ?3",
+        params![next.as_str(), error_code, source_id],
+    )?;
+    Ok(())
+}
+
 pub fn transition_source(
     database: &Database,
     source_id: &str,
     next: SourceState,
     error_code: Option<&str>,
 ) -> AppResult<()> {
-    database.write(|transaction| {
-        let current = transaction
-            .query_row(
-                "SELECT state FROM sources WHERE id = ?1",
-                [source_id],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::new("data.not_found", "来源不存在")
-                }
-                other => other.into(),
-            })?;
-        let current = SourceState::parse(&current)?;
-        if !current.can_transition_to(next) {
-            return Err(AppError::new(
-                "ingest.invalid_state_transition",
-                format!("不能从 {} 转到 {}", current.as_str(), next.as_str()),
-            ));
-        }
-        if (next == SourceState::Failed) != error_code.is_some() {
-            return Err(AppError::invalid_argument(
-                "failed 状态必须且只能带 parse_error_code",
-            ));
-        }
-        transaction.execute(
-            "UPDATE sources SET state = ?1, parse_error_code = ?2 WHERE id = ?3",
-            params![next.as_str(), error_code, source_id],
-        )?;
-        Ok(())
-    })
+    database.write(|transaction| apply_transition(transaction, source_id, next, error_code))
 }
 
 pub fn recover_interrupted(database: &Database) -> AppResult<usize> {
@@ -229,10 +243,11 @@ pub fn recover_interrupted(database: &Database) -> AppResult<usize> {
                  WHERE id = ?2 AND ended_at IS NULL",
                 params![timestamp, attempt_id],
             )?;
-            transaction.execute(
-                "UPDATE sources SET state = 'failed', parse_error_code = 'agent.interrupted'
-                 WHERE id = ?1",
-                [source_id],
+            apply_transition(
+                transaction,
+                source_id,
+                SourceState::Failed,
+                Some("agent.interrupted"),
             )?;
             let draft_ids = {
                 let mut statement = transaction.prepare(
@@ -264,12 +279,24 @@ pub fn recover_interrupted(database: &Database) -> AppResult<usize> {
                 )?;
             }
         }
-        let dangling_sources = transaction.execute(
-            "UPDATE sources SET state = 'failed', parse_error_code = 'agent.interrupted'
-             WHERE state = 'parsing'",
-            [],
-        )?;
-        Ok(open_attempts.len().max(dangling_sources))
+        // 「尝试行已插入但来源状态还没推进」的反面：来源卡在 parsing 而尝试行已收束。
+        let dangling = {
+            let mut statement =
+                transaction.prepare("SELECT id FROM sources WHERE state = 'parsing'")?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        for source_id in &dangling {
+            apply_transition(
+                transaction,
+                source_id,
+                SourceState::Failed,
+                Some("agent.interrupted"),
+            )?;
+        }
+        Ok(open_attempts.len().max(dangling.len()))
     })
 }
 
@@ -535,12 +562,57 @@ mod ingest {
                             SourceState::Parsing,
                             SourceState::Parsed | SourceState::Failed
                         )
-                        | (SourceState::Failed, SourceState::Parsing)
-                        | (SourceState::Parsed, SourceState::Reviewed)
+                        | (
+                            SourceState::Failed,
+                            SourceState::Parsing | SourceState::Failed
+                        )
+                        | (
+                            SourceState::Parsed,
+                            SourceState::Parsing | SourceState::Reviewed
+                        )
                 );
                 assert_eq!(from.can_transition_to(to), expected, "{from:?} -> {to:?}");
             }
         }
+    }
+
+    #[test]
+    fn source_state_has_one_writer() {
+        // M0 曾有两份状态机：本文件这份有测试没人用，`agent/runtime.rs` 内联的那份真正生效，
+        // 两份对 `parsed → parsing` 的答案还相反。这条守住「别处不许再写 sources.state」。
+        for (name, source) in [
+            ("agent/runtime.rs", include_str!("agent/runtime.rs")),
+            ("domain/draft.rs", include_str!("domain/draft.rs")),
+            ("domain/confirm.rs", include_str!("domain/confirm.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+        ] {
+            // 只查生产代码：夹具直接摆状态是允许的，它们在造前置条件，不是在走状态机。
+            let production = source.split("#[cfg(test)]").next().unwrap_or_default();
+            let needle = concat!("UPDATE sources SET ", "state");
+            assert!(
+                !production.contains(needle),
+                "{name} 绕过了 ingest::apply_transition 直接改 sources.state",
+            );
+        }
+    }
+
+    #[test]
+    fn reparse_of_a_parsed_source_is_legal() {
+        // 03 §6 的 `total_check_is_scoped_to_attempt` 要求「同一来源成功解析两次」，
+        // 所以 parsed → parsing 必须合法；旧的 can_transition_to 少了这一条。
+        let (_directory, database) = database();
+        let imported = import_file_bytes(&database, "a.png", PNG, false).unwrap();
+        transition_source(&database, &imported.source_id, SourceState::Parsing, None).unwrap();
+        transition_source(&database, &imported.source_id, SourceState::Parsed, None).unwrap();
+        transition_source(&database, &imported.source_id, SourceState::Parsing, None).unwrap();
+        transition_source(&database, &imported.source_id, SourceState::Parsed, None).unwrap();
+        transition_source(&database, &imported.source_id, SourceState::Reviewed, None).unwrap();
+        assert_eq!(
+            transition_source(&database, &imported.source_id, SourceState::Parsing, None)
+                .unwrap_err()
+                .code,
+            "ingest.invalid_state_transition"
+        );
     }
 
     #[test]
