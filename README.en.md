@@ -14,12 +14,46 @@ It is not an expense tracker and not a to-do app. It is a **retroactive recorder
 
 ## Current status
 
-**Skeleton stage (established 2026-08-06).** Constraints and documentation are in place; `src/` and `src-tauri/` **do not exist yet**.
-The first milestone is **M0 — end-to-end smoke test**: drop in a screenshot → the agent reads it → **drafts are written through MCP** → **a human confirms** → the fact tables are written → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
+**M0 implementation under review (2026-08-13).** Tauri / React / Rust have landed: the six-table foundation, the sealed five-tool agent path, screenshot and utterance import, review-and-confirm, and the total cross-check all run end to end; both `src/` and `src-tauri/` now exist. M0 is defined as the **end-to-end smoke test** — drop in a screenshot → the agent reads it → **drafts are written through MCP** → **a human confirms** → the fact tables are written → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
 
-**The spike that blocked M0 was completed on 2026-08-12**: the MCP server lives in a standalone helper binary that talks back to the main process over a Unix domain socket ([`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md); measurements in [`docs/spikes/`](./docs/spikes/)). All four M0 sub-PRDs are now `ready`.
+**M0 is not done yet, though.** Of the four sub-PRDs, [00 Foundation](./docs/prd/00-foundation.md), [01 Agent runtime](./docs/prd/01-agent-runtime.md) and [02 Ingest](./docs/prd/02-ingest.md) are `review`; [03 Review and drafts](./docs/prd/03-review.md) went back to `in-progress` on 2026-08-13. Neither the maintainer's manual review nor the real-sample go / no-go in [`docs/PRD.md` §9.4](./docs/PRD.md) has happened. **The current interface is a functional baseline, not an approved design** — the design and the semantic token system get settled before M1 starts. Status overview: [`docs/prd/INDEX.md`](./docs/prd/INDEX.md).
 
-The only commands that run today are the documentation gates, enforced by CI on every PR (see [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
+**The spike that blocked M0 was completed on 2026-08-12**: the MCP server lives in a standalone helper binary that talks back to the main process over a Unix domain socket ([`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md); measurements in [`docs/spikes/`](./docs/spikes/)).
+
+---
+
+## Running it
+
+**This is a macOS desktop app** ([ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)). Prerequisites:
+
+| Required | Why |
+|---|---|
+| macOS + Xcode Command Line Tools | Needed to build Tauri |
+| Node.js 20.19+ / 22.12+ | Vite 7's requirement |
+| Rust 1.85+ | See `rust-version` in [`src-tauri/Cargo.toml`](./src-tauri/Cargo.toml) |
+| **Your own agent CLI** | Claude Code is the backend implemented today: `claude` installed **and logged in**. Daybook ships no vendor credentials and offers no third-party sign-in — it uses the subscription you already have |
+
+```bash
+npm install
+npm run tauri dev
+```
+
+**Pick a base currency in the left pane before your first parse**, or parsing returns `data.base_currency_required` — Daybook will not guess it from your locale. After that, drag a screenshot into the left pane, or just type out what you remember as a sentence.
+
+Everything persisted (ledger, original evidence files, logs) lives in the application data directory; the "reveal in Finder" button in the UI opens it.
+
+### Gates
+
+Seven of them, all equal — any failure is red ([`CLAUDE.md`](./CLAUDE.md) constraint 16 and「常用命令」/ common commands):
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run build
+cd src-tauri && cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+Four documentation gates, enforced by CI on every PR ([`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
 
 ```bash
 node docs/prd/check-docs.mjs        # frontmatter + links under docs/prd/
@@ -28,7 +62,12 @@ node scripts/check-readme-sync.mjs  # README.en.md is not behind README.md
 node scripts/check-spec-invariants.mjs  # no superseded conclusions left in current sections
 ```
 
-The frontend and Rust commands only exist once [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) lands; the full list is in [`CLAUDE.md`](./CLAUDE.md) under「常用命令」(common commands).
+One command runs all of the above, plus the real-CLI capability probe and the screenshot / utterance happy paths:
+
+```bash
+node scripts/verify-m0.mjs              # includes the two real-CLI steps; spends your own quota
+node scripts/verify-m0.mjs --skip-live  # skips the real CLI; this is not a full M0 pass
+```
 
 ---
 
@@ -133,4 +172,8 @@ Opening a pull request? The workflow and the template are described in [`CLAUDE.
 
 ## License
 
-Released under the [MIT License](./LICENSE).
+**The code**: [MIT](./LICENSE). Use it however you want — fork it, modify it, ship it in a closed-source product, sell it. No permission needed; attribution appreciated, not required.
+
+**Your data is not covered by that license.** The ledger, the evidence screenshots, the transcribed text and the logs have never left your machine, and have never passed through any service operated by this project — so they need nobody's permission, and there is no right here for us to grant or revoke.
+
+**The agent CLI is not part of Daybook.** Claude Code and Codex are published by their respective vendors under their own licenses and terms of service; you are using your own subscription and your own login. **Whether running Daybook's parsing through them complies with those terms is something we have not finished verifying** ([`docs/PRD.md` §12](./docs/PRD.md), [`docs/prd/01-agent-runtime.md` §5](./docs/prd/01-agent-runtime.md) R4) — it has to be settled before packaging and release in M4. Until then, please confirm for yourself that your usage fits the terms of the CLI you use.
