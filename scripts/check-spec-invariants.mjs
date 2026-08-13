@@ -30,6 +30,14 @@ const SELF = 'scripts/check-spec-invariants.mjs'
 // 每条规则都要写清「防的是哪一次回退」——说不出来的规则不该加。
 const RULES = [
   {
+    // 防的是 2026-08-14 定位回写时发现的三处真实漂移：AGENTS.md、品牌说明与
+    // 应用空状态仍把「回溯记录器」当作品类，尽管总 PRD 已改为「个人事务助理」。
+    id: 'retroactive-recorder-positioning',
+    re: /\*\*回溯记录器\*\*|你的回溯记录器|retroactive recorder/i,
+    why: '「个人事务助理」是品类定位；「回溯优先」只是设计原则（总 PRD §1）',
+    fix: '品类改用「个人事务助理」；表达工作方式时改用「回溯优先」',
+  },
+  {
     id: 'declared-total',
     re: /declared_total_/,
     why: '声明合计已改名 `reported_total_*` 并移到 `parse_attempts`（00 §3.6「声明合计归尝试，不归来源」）',

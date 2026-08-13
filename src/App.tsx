@@ -540,9 +540,9 @@ export function App() {
           ) : (
             <div className="empty-evidence">
               <img src={iconUrl} alt="" />
-              <p>你的回溯记录器</p>
-              <h1>把过去的钱和事，补记回来。</h1>
-              <span>拖入一张截图，或把记得的事情说成一段话。</span>
+              <p>你的个人事务助理</p>
+              <h1>把零散的钱和事，整理清楚。</h1>
+              <span>拖入截图，或说一段话。不用逐条填表。</span>
             </div>
           )}
         </section>
