@@ -5,7 +5,8 @@
   </defs>
   <g clip-path="url(#db-plate-64)">
     <rect width="512" height="512" fill="#F1EFEA"/>
-    <g transform="rotate(-11 256 256) skewX(-9)">
+    <!-- 13a 的平移量按本档自己的包围盒算，不能照抄 512 档：这一档的纸更宽 -->
+    <g transform="translate(41.4 -22.8) rotate(-11 256 256) skewX(-9)">
       <!-- 底层：深棕 -->
       <path d="M144 288h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" transform="translate(8 18)" fill="#4E2F1C" opacity=".42"/>
       <path d="M144 288h212v128l-26.5 16-26.5-14-26.5 18-26.5-16-26.5 14-26.5-18-26.5 16-26.5-16z" fill="#4E2F1C"/>

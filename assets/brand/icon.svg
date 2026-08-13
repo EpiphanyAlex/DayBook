@@ -5,7 +5,8 @@
   </defs>
   <g clip-path="url(#db-plate)">
     <rect width="512" height="512" fill="#F1EFEA"/>
-    <g transform="rotate(-11 256 256) skewX(-9)">
+    <!-- translate 在最外层：先转再切得到纸堆，再整体平移到画布正中（13a） -->
+    <g transform="translate(44.5 -10) rotate(-11 256 256) skewX(-9)">
       <!-- 底层：深棕 -->
       <g>
         <path d="M150 268h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" transform="translate(6 16)" fill="#4E2F1C" opacity=".42"/>

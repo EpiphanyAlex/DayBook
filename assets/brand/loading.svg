@@ -28,7 +28,8 @@
   <g clip-path="url(#db-plate-loading)">
     <!-- 底板：内嵌使用时可整行删掉，图形本身不依赖它 -->
     <rect id="db-plate-bg" width="512" height="512" fill="#F1EFEA"/>
-    <g transform="rotate(-11 256 256) skewX(-9)">
+    <!-- translate 在最外层：与 icon.svg 同一个值，静止态才逐像素一致（13a） -->
+    <g transform="translate(44.5 -10) rotate(-11 256 256) skewX(-9)">
       <!-- 底层：深棕 -->
       <g class="db-sheet db-sheet-bot">
         <path d="M150 268h196v128l-24.5 15-24.5-13-24.5 17-24.5-15-24.5 13-24.5-17-24.5 15-24.5-15z" transform="translate(6 16)" fill="#4E2F1C" opacity=".42"/>
