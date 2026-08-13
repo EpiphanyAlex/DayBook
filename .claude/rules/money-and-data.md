@@ -54,7 +54,7 @@ fn currency_exponent(code: &str) -> Result<u32, AppError> { /* ISO 4217 常量�
 const MINOR_PER_MAJOR: i64 = 100;
 format!("{}.{:02}", amount_minor / 100, amount_minor % 100)
 
-// ❌ 也错 —— 未知币种回退到 2 并只记一条告警
+// ❌ 也错 —— 未知币种回退到 2 并只记一条告警 <!-- legacy -->
 fn currency_exponent(code: &str) -> u32 { TABLE.get(code).copied().unwrap_or(2) }
 //    告警落在日志里没人看，而那条金额已经带着错误的 exponent 进了草稿、过了总额校验、
 //    被人一眼扫过去确认入库 ——「有记录但没拦住」和「没记录」对用户是同一件事

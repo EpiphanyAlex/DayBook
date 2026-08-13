@@ -24,7 +24,7 @@ import Database from 'tauri-plugin-sql-api'   // 前端直连 SQLite，破坏分
 ```typescript
 // ✅ 正确
 try {
-  await call('confirm_batch', { sourceId, ids })
+  await call('confirm_batch', { attemptId, ids })
 } catch (e) {
   const err = e as AppError
   if (err.code === 'review.total_mismatch') showTotalWarning(err.detail)
@@ -41,11 +41,11 @@ if (err.message.includes('总额')) { ... }   // 文案改了就挂
 
 ```typescript
 // ❌ 错误 —— 在前端判断能不能入库
-if (sum(drafts) === source.declaredTotal) { await call('confirm_batch', ...) }
+if (sum(drafts) === attempt.reportedTotal) { await call('confirm_batch', ...) }
 
 // ✅ 正确 —— 服务端是唯一判据；前端只是提前给用户看结果
-const check = await call<TotalCheck>('total_check', { sourceId })
-setBatchEnabled(check.status === 'passed')
+const check = await call<TotalCheck>('total_check', { attemptId })
+setBatchEnabled(check.confirmationPolicy !== 'single_only')
 // 但即使前端算错了，服务端仍会拒绝
 ```
 
@@ -186,7 +186,7 @@ import * as Sentry from '@sentry/react'
 // ✅ 正确
 interface Draft { id: string; amountMinor: MinorUnits; evidenceText: string }
 const isLoading = true
-const canConfirm = check.status === 'passed'
+const canConfirm = check.confirmationPolicy !== POLICY.SINGLE_ONLY
 const TOTAL_STATUS = { PASSED: 'passed', FAILED: 'failed', UNAVAILABLE: 'unavailable' } as const
 
 // ❌ 错误

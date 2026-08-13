@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-**仓库处于骨架阶段（2026-08-06 建立）**：约束已就位，`src/` 与 `src-tauri/` **尚未创建**。设计文档是产品与架构的事实源——**版本号不在本文登记**（会腐烂），各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 的状态总览表为准。第一个里程碑是 **M0 端到端点亮**（见 [`docs/PRD.md`](./docs/PRD.md) 里程碑表）。
+**仓库处于 M0 实现 review 阶段（2026-08-13）**：Tauri/React/Rust、六表地基、五工具密封 agent 链路、截图/口述导入与审核确认已经落地，`src/` 与 `src-tauri/` 均已创建。四份 M0 sub-PRD 当前为 `review`；维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go/no-go 尚未完成，所以**不得称 M0 已 done**。当前前端是功能基线，不是设计定稿；M1 开工前确定设计稿与 token design system。设计文档仍是产品与架构的事实源——版本号以各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 为准。
 
-> ✅ **阻塞 M0 的 R6 spike 已于 2026-08-12 做完并关闭，M0 四份 sub-PRD 全部 `ready`。** 结论：**MCP server 跑在独立 helper 二进制里**，由 agent CLI 自己 `fork/exec`，helper 经 Unix domain socket 连回 Tauri 主进程、**自己不碰数据库**（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)）。密封启动配置的具体 flag 组合与已验证的 CLI 版本号在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](./docs/spikes/2026-08-12-r6-agent-runtime.md)——**动 agent 运行时之前先读那一份**，里面三个反直觉的坑（放行自己的工具是必需的、CLI 的「最小模式」恰好留下最危险的三个内置工具、CLI 的「安全模式」是反的）会直接决定实现对不对。
+> ✅ **阻塞 M0 的 R6 spike 已于 2026-08-12 做完并关闭，其结论已在 M0 实现中验证。** **MCP server 跑在独立 helper 二进制里**，由 agent CLI 自己 `fork/exec`，helper 经 Unix domain socket 连回 Tauri 主进程、**自己不碰数据库**（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)）。密封启动配置的具体 flag 组合与已验证的 CLI 版本号在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](./docs/spikes/2026-08-12-r6-agent-runtime.md)——**动 agent 运行时之前先读那一份**，里面三个反直觉的坑会直接决定实现对不对。
 
 ### 常用命令
 

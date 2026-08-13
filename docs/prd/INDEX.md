@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-12
-version: v0.15
+date: 2026-08-13
+version: v0.23
 ---
 
 # sub-PRD 索引
@@ -16,16 +16,18 @@ version: v0.15
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`ready`** | v0.11 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | **`ready`** | v0.13 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`ready`** | v0.8 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`ready`** | v0.8 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.15 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.19 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.12 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.11 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.8 |
 
-**M0 四份已于 2026-08-07 完成开工评审，进入 `ready`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。评审收敛了 5 处跨文档冲突与 8 处缺口，关闭待决 3 项、改期 2 项，各份变更记录有逐条说明。
+**M0 四份已于 2026-08-13 完成实现并进入 `review`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过；当前版本为 v0.15/v0.19/v0.12/v0.11。
+
+**`review` 不等于 M0 产品 go。** 维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测尚未完成；在正式给出 go / no-go 并完成收尾前，四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
 
 > ✅ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-12 回到 `ready`——M0 不再被阻塞。** 它曾于 2026-08-09 退回 `draft`：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。R6 的四项检查已全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
@@ -37,7 +39,7 @@ version: v0.15
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（依据 [`CLAUDE.md`](../../CLAUDE.md)「PRD 体系与工作流」步骤 2）：**R6 已于 2026-08-12 关闭，M0 四份全部 `ready`**——agent 读 M0 四份 → 进 plan mode → 出 M0 实施计划 → 人审 → 批准后 `status: in-progress`。
+**下一步**：维护者 review M0 实现；随后按 [`docs/PRD.md` §9.4](../PRD.md) 完成真实样本度量并给出 go / no-go。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -108,6 +110,10 @@ version: v0.15
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.23 | 2026-08-13 | **M0 四份同步进入 `review`**：00→v0.15 · 01→v0.19 · 02→v0.12 · 03→v0.11。统一门禁、外部 MCP/UDS 与真实 Claude Code 链路通过；明确维护者 review 和 §9.4 真实样本 go/no-go 仍待完成，M0 UI 非设计定稿 |
+| v0.22 | 2026-08-13 | [00 地基](./00-foundation.md) → v0.14：验收选择器对齐真实模块与测试清单，消除 `cargo test <filter>` 匹配 0 项仍返回成功的假绿；状态仍为 `in-progress` |
+| v0.21 | 2026-08-13 | [02 导入](./02-ingest.md) → v0.11：批量失败后继续的验收移到真实前端队列控制点；状态仍为 `in-progress` |
+| v0.16 | 2026-08-13 | **M0 四份同步进入 `in-progress`**：00→v0.12 · 01→v0.14 · 02→v0.9 · 03→v0.9；记录开工前对未知币种、工具 schema 指纹、失败草稿、人工丢弃与验收层级的回流 |
 | v0.1 | 2026-08-06 | 初版：七份 sub-PRD 索引、状态总览、里程碑映射、依赖关系图、共享决定出处表 |
 | v0.15 | 2026-08-12 | **R6 spike 做完，[01 Agent 运行时](./01-agent-runtime.md) 由 `draft` 回到 `ready`（v0.13）——M0 不再被阻塞。** 进程归属定为**独立 MCP helper 二进制 + Unix domain socket**（候选 ①，理由是把全部 SQLite 写入收敛到主进程一处）。**两处规格被实现证伪并已回流 01 §3.7**：capability manifest 的 `input_schema` 后端拿不出来（删字段 + 写明兜底）；hook 不在 CLI 初始化握手里，探测改为「跑一次短会话并主动引发一次工具调用」。**R4 风险上调**：厂商条款核实结果不是绿灯，可插拔后端由「接口先摆着」提为「第二个实现要真能跑」，同步 [`docs/PRD.md` §12](../PRD.md)。**新增 `docs/spikes/`**：带日期的实测记录，装 sub-PRD 不该装的易腐内容（flag 组合、已验证 CLI 版本号）。**其余七份 sub-PRD 的 status 与版本未变** |
 | v0.14 | 2026-08-10 | **公开文档降噪同步**：00→v0.11 · 01→v0.12 · 05→v0.7 · 06→v0.6 · 07→v0.8 · [`docs/PRD.md`](../PRD.md)→v0.13；同时修正状态总览中 00/01/02/03/05 已落后于各文件 frontmatter 的版本号。**所有 status 未变** |

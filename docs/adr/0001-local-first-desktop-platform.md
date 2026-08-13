@@ -6,6 +6,7 @@
 - **相关**：[ADR-0003 Agent 运行时与可插拔后端](./0003-agent-runtime-and-pluggable-backend.md)、[ADR-0005 语音与系统集成](./0005-voice-and-system-integration.md)、[`docs/PRD.md` §3](../PRD.md)
 - **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变。**
 - **2026-08-09 修订**：决策句里的「React 18」改为「React」——主版本改在 [`00-foundation`](../prd/00-foundation.md) 初始化时锁定，见「决策」下的说明。**技术选型（Tauri v2 + React + Rust）未变。**
+- **2026-08-13 修订**：「后果」同步 R6 定案后的进程拓扑：SQLite 只由 Tauri 主进程持有，agent CLI 与独立 Rust MCP helper 都由主进程管理；进程数变化不改变 Tauri command 的唯一应用边界。
 
 ## 背景
 
@@ -61,7 +62,7 @@ v1 目标平台只有 macOS。
 **得到**：
 
 - 审核界面与回顾图表用 web 技术栈，能力上限不受框架限制
-- 单进程内同时持有 SQLite、MCP server、agent 子进程，生命周期集中在 Rust 侧管理
+- SQLite 连接只由 Tauri 主进程持有；主进程统一管理 agent CLI 与独立 Rust MCP helper 的生命周期，helper 经 Unix domain socket 请求受限操作且不直接触库
 - 贡献者只需 Node + Rust 工具链，不需要 Xcode
 - Windows/Linux 是「以后改配置」而非「以后重写」
 

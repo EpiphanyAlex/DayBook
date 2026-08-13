@@ -1,9 +1,9 @@
 ---
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
-status: ready
+status: review
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.8
+date: 2026-08-13
+version: v0.12
 ---
 
 # 02 · 导入 Ingest
@@ -106,7 +106,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | `parsing` | agent 子进程正在处理 |
 | `parsed` | **agent 调过 `complete_source` 且进程正常退出**，草稿已生成，等待人工审核 |
 | `failed` | 解析失败 / 超时 / 取消 / 中断 / **协议失败**；**该次尝试的草稿已全部作废**（[01 Agent 运行时 §3.4](./01-agent-runtime.md) 的补偿性作废，置 `voided_at` 不删行）。失败原因记在 `sources.parse_error_code` |
-| `reviewed` | 该来源的全部草稿都已被确认或丢弃 |
+| `reviewed` | 该来源当前尝试的全部未作废草稿都已被确认（`consumed_at`）或由人丢弃（`discarded_at`） |
 
 > **`parsed` 的判据由「退出码 0」改为「调过 `complete_source`」**（2026-08-10，[01 Agent 运行时 §3.2](./01-agent-runtime.md)）。旧判据下，agent 读了 12 笔里的 9 笔然后正常收工，退出码同样是 0——**静默漏读被判为解析成功**。现在这种情况走 `failed` + `agent.protocol_violation`：我们不知道它是读完了还是走了一半，而**「不知道」不能算通过**。
 
@@ -128,6 +128,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 ### 3.5 解析编排
 
+- 首次解析前必须已有用户明确选择的本位币；没有则返回 `data.base_currency_required`，来源保留在 `imported`，不创建尝试、不消耗 agent 额度（[00 地基 §3.4](./00-foundation.md)）
 - 一次导入 N 个文件 → 生成 N 个解析任务，**串行执行**（v1 同时只跑一个 agent 子进程，见 [01 Agent 运行时 §3.4](./01-agent-runtime.md)）
 - **不预先注入记忆规则**（2026-08-08 改定，[06 记忆 §3.4](./06-memory.md) R1 关闭 · `architecture` A3 关闭）：agent 解析出商户后**自己调 `query_memory` 批量查**。代码侧不做上下文装配，也不在起草后改写分类
 - 解析后由代码触发**总额交叉校验**（[03 审核与草稿区](./03-review.md) 的职责），**入参是本次的 `attempt_id`**——合计与草稿都属于产出它们的那次尝试（2026-08-10 改，此前写「结果落在 `sources` 上」）
@@ -210,16 +211,16 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 - [ ] `cargo test ingest::original_bytes_preserved` 通过——落盘文件与输入文件的 SHA-256 相等
 - [ ] `cargo test ingest::state_machine_transitions` 通过——枚举全部合法/非法转移，非法转移被拒
 - [ ] `cargo test ingest::agent_cannot_change_source_state` 通过——工具面中不存在改 `sources.state` 的工具
-- [ ] `cargo test ingest::failed_source_has_no_drafts` 通过——解析失败后该来源关联草稿数为 0，且 `parse_error_code` 非空
+- [ ] `cargo test ingest::failed_source_has_no_active_drafts` 通过——解析失败后该次尝试不存在 `voided_at IS NULL` 的草稿，且 `parse_error_code` 非空；已作废历史行仍保留
 - [ ] `cargo test ingest::agent_cannot_write_source_columns` 通过——agent 经工具面写不到 `sources` 的任何一列（合计已移到 `parse_attempts`），改 `state` / `evidence_relpath` 无路径可走
 - [ ] `cargo test ingest::startup_scan_clears_stuck_parsing` 通过——预置一条 `state = parsing` 的来源后启动，扫描把它转 `failed` + `agent.interrupted` 并作废其草稿
-- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段**未提及合计**的文本 → `kind = utterance`、`ext = txt`、转写文本已落盘、`evidence_relpath` 非空、本次尝试 `reported_total_*` 全空；**另投一段含「总共 100」的文本 → `reported_total_*` 非空**（§3.1）
+- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段文本 → `kind = utterance`、`ext = txt`、转写文本已落盘且 `evidence_relpath` 非空；合计解析分别由 `cargo test review::utterance_yields_user_attested_batch` 与 `cargo test review::utterance_with_stated_total_reconciles` 覆盖（§3.1）
 - [ ] `cargo test ingest::utterance_idempotent_by_token` 通过——同一段文本配**同一个** `idempotency_key` 投两次只产生一条 `sources`（`deduplicated == true`）；配**不同**令牌投两次产生**两条**，`deduplicated == false`（§3.2，**取代原先的 `utterance_idempotent_by_text`**）
-- [ ] `cargo test ingest::parsed_requires_complete_source` 通过——agent 未调 `complete_source` 时来源转 `failed` + `agent.protocol_violation`，**不得为 `parsed`**（§3.4）
+- [ ] `cargo test agent::missing_complete_source_is_protocol_violation` 通过——agent 未调 `complete_source` 时来源转 `failed` + `agent.protocol_violation`，**不得为 `parsed`**（§3.4）
 - [ ] `cargo test ingest::startup_scan_closes_open_attempts` 通过——预置一行 `ended_at` 为空的 `parse_attempts` 后启动，扫描把它回填为 `outcome = "interrupted"`（§3.4）
-- [ ] `cargo test ingest::batch_continues_after_failure` 通过——队列中一个文件失败，其余照常完成
+- [ ] `npm test -- ingest/batch-continues` 通过——前端逐文件编排中一个文件导入或解析失败，其余照常完成；失败按来源汇总提示
 - [ ] `cargo test ingest::cross_image_dedup_candidates`（**M2**）通过——构造同金额同币种相差 1 天的两条草稿，被标为疑似重复且**未自动合并**
-- [ ] `node scripts/verify-m0.mjs`（**待建**）退出码 0
+- [ ] `node scripts/verify-m0.mjs` 退出码 0
 
 **人工验收**：
 
@@ -230,6 +231,10 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-13 | 完整 live 验收复现 Claude 对「总共」口述起草成功却漏调 `report_source_total`，使对账静默落成 `not_applicable`。口述明显合计词因此增加代码侧完成前闸门；图片不做假 OCR，仍由模型识别 | [01 Agent 运行时 §3.2](./01-agent-runtime.md) `report_source_total` 可信性要求第 6 条；`verify-m0.mjs` 真实 CLI happy path |
+| 2026-08-13 | **批量继续的验收从 Rust 测试移到前端队列测试。** M0 的 Rust command 一次只处理一个来源，批量顺序与“单项失败后继续”由 React 编排；在 Rust 另造一个 UI 不调用的批量函数不能约束真实控制流。前端按来源隔离错误并在队列结束后汇总提示 | M0 验收审计；[`CLAUDE.md`](../../CLAUDE.md) 约束 15「控制流由代码决定」 |
+| 2026-08-13 | 解析编排补本位币前置：未设置时保留 `imported`，不建尝试、不消耗额度 | [00 地基 §3.4](./00-foundation.md) v0.13 实施回流 |
+| 2026-08-13 | 失败来源验收由「关联草稿数为 0」改为「没有未作废草稿」——协议失败要保留 `voided_at` 历史行；`reviewed` 判据明确读取独立的 `consumed_at` / `discarded_at` | [00 地基 §3.6](./00-foundation.md) 的 append-only 历史语义 |
 | 2026-08-10（五轮） | **口述显式合计的改定漏了本文**：§3.1 与 §6 仍写「恒为空」。这是「改了共享决定但没 grep 全仓」的又一次——同一轮里还漏了 [`docs/PRD.md`](../PRD.md)、[03 §3.4](./03-review.md)、[05 §3.4](./05-items.md) 与 `.claude/agents/backend.md`。**本轮同时建立 `scripts/check-spec-invariants.mjs` 把这类漂移变成会红的检查** | 文档审查（五轮） |
 | 2026-08-10（二轮） | **§3.5「总额校验结果落在 `sources` 上」跟着合计一起搬家**：校验入参改为 `attempt_id`，agent 对 `sources` 的写入权限归零。§3.5.1 矩阵补三行（自报条目数对不上、agent 说有一块没读、记忆键没查全），并把两条对账相关行改成「状态 + 确认策略」两个字段 | [00 地基 §3.6](./00-foundation.md) v0.7 · [03 审核 §3.3](./03-review.md) v0.6 · [01 §3.2](./01-agent-runtime.md) v0.8 |
 | 2026-08-10 | **§3.2 的「口述用内容哈希去重」会静默吞掉真实交易。** 跨天各说一句「今天咖啡 5 元」文本逐字相同，第二笔被判重复直接消失，而用户看到的是「已导入过」，不会去追。改为两种来源两把幂等键：`file` 用内容哈希，`utterance` 用一次提交一个令牌；文本重复只提示不阻止。同步 [00 地基 §3.6](./00-foundation.md) 的部分唯一索引与 `idempotency_key` 列 | 文档审查 |
@@ -243,6 +248,10 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.12 | 2026-08-13 | **M0 实现验收进入 `review`。** PNG/JPEG 与口述导入、幂等、串行编排、批量容错、崩溃恢复及真实截图/口述 happy path 已通过统一门禁 |
+| v0.11 | 2026-08-13 | **实现回流：**批量容错验收改到真实的前端队列控制点；单项失败不再中断后续来源，结束后汇总提示。口述合计与完成协议的验收选择器同步对齐实际 `review` / `agent` 测试，消除 0-test 假绿 |
+| v0.10 | 2026-08-13 | **实现回流：**解析前要求明确本位币，未设置时不启动任务 |
+| v0.9 | 2026-08-13 | **M0 开始实施，`status` 进入 `in-progress`。** 修正失败来源与人工丢弃的验收语义 |
 | v0.8 | 2026-08-10 | **文档审查第五轮同步**：§3.1 口述来源的合计由「恒为空」改为「**通常**为空；用户明说「总共 100」时照常对账」——与 [00 地基 §3.6](./00-foundation.md) v0.9 的改定对齐（此前只改了 00 和 03，本文漏同步）。§6 的 `utterance_source_roundtrip` 相应加一条「含合计的文本」断言 |
 | v0.7 | 2026-08-10 | **文档审查第二轮回流**：§3.5 总额校验入参改为 `attempt_id`（合计已移入 `parse_attempts`）、agent 对 `sources` 写入权限归零；§3.5.1 矩阵由 16 行增至 19 行并把对账行改为「状态 + 确认策略」两个字段；§3.1 与 §6 的 `declared_total_*` 全部改为 `reported_total_*` |
 | v0.6 | 2026-08-10 | **文档审查回流四处。** ① §3.2 **口述的幂等键由内容哈希改为一次提交一个令牌**——原写法会让跨天重复的真实交易静默消失。② §3.4 **`parsed` 的判据改为「调过 `complete_source`」**，未调即协议失败；启动扫描补扫未闭合的 `parse_attempts`。③ 新增 **§3.5.1 降级与失败态矩阵**（16 行索引）。④ §3.1 口述的总额校验结果改为 `not_applicable`。§6 验收新增 2 条、改写 1 条 |

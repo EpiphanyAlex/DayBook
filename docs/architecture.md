@@ -10,7 +10,7 @@ version: v0.7
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：骨架阶段，`src/` 与 `src-tauri/` 尚未创建**——本文描述的是**目标结构**，落地由 [`docs/prd/00-foundation.md`](./prd/00-foundation.md) 起步。
+> **当前状态：M0 实现已进入 review。** `src/` 与 `src-tauri/` 已按本文边界落地；维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
 
 ---
 

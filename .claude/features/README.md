@@ -83,4 +83,10 @@ items-lifecycle.md        事项生命周期
 
 ## 当前状态
 
-**空目录。** 仓库处于骨架阶段，`src/` 与 `src-tauri/` 尚未创建（[`CLAUDE.md`](../../CLAUDE.md)「当前状态」）。第一批 feature 速查随 M0 端到端点亮落地，预计是 `ingest-screenshot.md`、`agent-runtime.md`、`review-and-confirm.md`。
+M0 端到端实现已落地，当前速查：
+
+- [`money-and-currency.md`](./money-and-currency.md)
+- [`agent-runtime.md`](./agent-runtime.md)
+- [`ingest-screenshot.md`](./ingest-screenshot.md)
+- [`total-cross-check.md`](./total-cross-check.md)
+- [`review-and-confirm.md`](./review-and-confirm.md)

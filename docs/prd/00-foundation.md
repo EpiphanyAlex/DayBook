@@ -1,9 +1,9 @@
 ---
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
-status: ready
+status: review
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.11
+date: 2026-08-13
+version: v0.15
 ---
 
 # 00 · 地基 Foundation
@@ -51,11 +51,13 @@ version: v0.11
 ├── daybook.db          ← SQLite，唯一事实源
 ├── daybook.db-wal
 ├── daybook.db-shm
+├── preferences.json   ← 本机偏好（M0：当前本位币），不属于账本事实
 └── evidence/           ← 证据原件（截图），普通目录，用户可自行翻看
     └── <yyyy>/<mm>/<source_id>.<ext>
 ```
 
 - 位置必须是**用户看得见、能备份**的地方
+- **M0 落点（2026-08-13 实施回流）**：macOS 使用 Tauri `data_dir()/Daybook`，即 `~/Library/Application Support/Daybook/`；首次告知页显示完整路径，并提供「在访达中显示」，从而让默认位置无需用户配置也能被看见和备份
 - **不得放 iCloud Drive**——按需下载与文件替换会损坏 SQLite（WAL 与主文件不同步）。若检测到路径在 iCloud 容器内，启动时报错并拒绝打开，不静默继续
 - 数据库只存证据文件的**相对路径**，不存绝对路径（用户移动整个目录后仍可用）
 
@@ -146,6 +148,8 @@ base_amount_minor = round_half_even(
 1. **`base_currency` 逐笔存储在交易行上，确认时冻结**——不是只存一个全局设置。全局设置只决定「新交易默认用哪个本位币」。
 2. **切换本位币不改动任何历史行。** 追溯换算需要历史汇率，而历史汇率没有可靠来源（[`docs/PRD.md` §13](../PRD.md) P1）；即便有，改写已确认的事实数据也违反 [ADR-0002](../adr/0002-ai-never-writes-directly.md)（事实表只由人工确认动作写入）。
 3. **跨越切换点的汇总按 `base_currency` 分组呈现，不静默相加。** 把两种本位币的金额加在一起会得到一个无意义的数字——与总额校验的 `unavailable` 不伪装成通过是同一条原则。
+
+**M0 设置落点（2026-08-13 实施回流）**：当前本位币不新增第七张业务表，写入数据目录下的 `preferences.json`。首次解析前必须由用户明确选择 ISO 4217 币种；未选择时解析返回 `data.base_currency_required`，不得从系统地区或来源币种静默猜测。任务下达把这个值作为代码侧上下文明确告诉 agent；同币种交易按 `base_amount_minor = amount_minor`、`base_currency = currency`、`rate_ppm = 1000000` 填全。切换偏好只影响之后的新解析，已确认交易逐行冻结不变。
 
 > **给实现者**：不要写「假设全库只有一个本位币」的查询。任何汇总类 SQL 必须 `GROUP BY base_currency` 或显式断言结果集只含一种本位币。
 
@@ -324,6 +328,7 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 | `attempt_id` | TEXT → `parse_attempts(id)` | 非空 | 溯源到具体哪次尝试。后端、模型、提示词哈希全在那张表上，**不在本表重复一份** |
 | `drafted_json` | TEXT | **非空** | **agent 首次写入时的完整字段快照，写入后永不更新**——见下方 |
 | `voided_at` | TEXT | 可空 | 非空 = 本行已作废（超时/中断的补偿性作废，[01 §3.4](./01-agent-runtime.md)）。**作废不删行** |
+| `discarded_at` | TEXT | 可空 | 非空 = **人主动丢弃**这条草稿。它与协议失败产生的 `voided_at` 语义不同，不能复用同一列；丢弃同样不删行 |
 | `occurred_on` | TEXT | 非空 | 业务日期 |
 | `amount_minor` | INTEGER | 非空 | 原币金额 |
 | `currency` | TEXT | 非空 | 原币币种 |
@@ -446,6 +451,8 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 5. 代码中**不存在**任何会写 `drafted_json` 的 `UPDATE` 语句（2026-08-10 新增，[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
 6. `(attempt_id, source_ordinal)` 上有唯一索引；`kind = utterance` 的草稿 `evidence_span_*` 非空、`file` 的恒空（CHECK）
 7. 金额与汇率**在 IPC 上是字符串**，两侧各有一次范围校验（2026-08-10 新增，§3.4「金额怎么过 IPC」）
+8. `draft_transactions.source_id` 必须等于其 `attempt_id` 所属的 `parse_attempts.source_id`；`sources.latest_attempt_id` 非空时，该尝试也必须属于同一个来源。SQLite 的行内 CHECK 无法跨表表达，迁移用触发器（或等强度的数据层事务检查）强制
+9. `voided_at` 只表达系统对失败尝试的补偿性作废，`discarded_at` 只表达人主动丢弃；两者都保留历史行，审核列表只展示二者均为空且未消费的草稿
 
 ### 3.7 命令契约与错误形状
 
@@ -544,38 +551,42 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 - [ ] `cargo test foundation::migration_drift_rejected` 通过——把 `user_version` 手工调高一号后打开，返回 `data.migration_drift` 且不写入任何数据
 - [ ] `cargo test foundation::money_roundtrip_is_integer` 通过——金额经「写入 → 读出 → IPC 序列化 → 反序列化」四步后逐位相等
 - [ ] `cargo test foundation::money_inconsistent_rejected` 通过——三元组不自洽时写入被拒并返回 `data.money_inconsistent`
-- [ ] `cargo test foundation::currency_exponent_is_not_hardcoded_two` 通过——`currency_exponent("JPY") == 0`、`("KWD") == 3`、`("AUD") == 2`；未知币种回落到 2 且产生一条告警（§3.4「币种精度」）
+- [ ] `cargo test foundation::currency_exponent_is_not_hardcoded_two` 通过——`currency_exponent("JPY") == 0`、`("KWD") == 3`、`("AUD") == 2`；未知币种返回 `data.unsupported_currency` 且不写库（§3.4「币种精度」）
 - [ ] `cargo test foundation::convert_across_exponents` 通过——AUD（exp 2）→ JPY（exp 0）与反向各一例，结果与手算逐位相等；**去掉公式里的 `10^exp` 项时该用例必须变红**
 - [ ] `rg -n '/ 100|\* 100' src-tauri/src src` 无命中，或每处命中都在 exponent 表实现内（§3.4）
 - [ ] `cargo test foundation::base_currency_frozen_per_row` 通过——切换全局本位币后，已确认交易的 `base_currency` 与 `base_amount_minor` 逐行不变
+- [ ] `cargo test foundation::base_currency_required_before_parse` 通过——未选择本位币时解析返回 `data.base_currency_required`，选择后写入 `preferences.json` 且可重启读回
 - [ ] `cargo test foundation::rollup_groups_by_base_currency` 通过——含两种本位币的数据集，汇总按本位币分组返回，**不产生跨本位币的单一合计**
 - [ ] `rg -n 'SUM\(base_amount_minor\)' src-tauri/src` 的每处命中都伴随 `GROUP BY base_currency` 或单本位币断言
 - [ ] `cargo test foundation::draft_requires_evidence` 通过——`source_id` 或 `evidence_text` 为空时插入 `draft_transactions` 失败
 - [ ] `cargo test foundation::reported_total_all_or_nothing` 通过——`parse_attempts.reported_total_*` 四列只填一部分时 CHECK 拒绝
 - [ ] `cargo test foundation::reported_total_lives_on_attempt` 通过——`sources` 表**不存在** `declared_total_*` 列；同一来源解析两次，两行 `parse_attempts` 各自带自己的 `reported_total_*`，第一次的值不被第二次覆盖（§3.6「声明合计归尝试，不归来源」） <!-- legacy -->
-- [ ] `cargo test foundation::utterance_evidence_is_a_file` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
-- [ ] `cargo test foundation::utterance_has_no_reported_total` 通过——`kind = utterance` 的尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
+- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
+- [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——未报告合计的 `utterance` 尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
 - [ ] `cargo test foundation::m0_insert_transaction_with_null_account` 通过——`PRAGMA foreign_keys = ON` 下，M0 schema 里插入 `account_id IS NULL` 的交易**成功**（`accounts` 骨架表存在）；同时插入一个不存在的 `account_id` **被 FK 拒绝**
-- [ ] `cargo test foundation::money_crosses_ipc_as_string` 通过——金额与 `rate_ppm` 序列化出去是十进制字符串，`i64::MAX` 往返后逐位相等（走 JSON 数字时该用例必须变红）
+- [ ] `cargo test foundation::money_crosses_ipc_as_string` 通过——金额与 `rate_ppm` 序列化出去是十进制字符串，允许范围上界 `10^15` 往返后逐位相等（走 JSON 数字时该用例必须变红）；`i64::MAX` 必须由下一条范围验收拒绝
 - [ ] `cargo test foundation::amount_out_of_range_rejected` 通过——`|v| > 10^15` 的金额在序列化前被拒并返回 `data.amount_out_of_range`
 - [ ] `npm test -- bridge/money-parse` 通过——`call<T>` 把字符串金额解析成安全整数，超范围抛 `data.amount_out_of_range`；组件里不存在第二处解析
-- [ ] `cargo test foundation::utterance_idempotency_is_by_token` 通过——同一段文本配**不同** `idempotency_key` 提交两次产生**两条** `sources`；配**同一个**令牌提交两次只产生一条（§3.6「口述的幂等键不是内容哈希」）
+- [ ] `cargo test ingest::utterance_idempotent_by_token` 通过——同一段文本配**不同** `idempotency_key` 提交两次产生**两条** `sources`；配**同一个**令牌提交两次只产生一条（§3.6「口述的幂等键不是内容哈希」）
 - [ ] `cargo test foundation::file_hash_unique_only_for_files` 通过——两条 `kind = utterance` 且 `content_hash` 相同的行可以共存，而两条 `kind = file` 且哈希相同的不行（部分唯一索引）
 - [ ] `cargo test foundation::draft_links_to_attempt` 通过——每条草稿的 `attempt_id` 指向真实的 `parse_attempts` 行，且该行 `backend_id` 非空（[07 评测 §3.2](./07-eval.md) 的必要条件）
+- [ ] `cargo test foundation::draft_attempt_source_must_match` 通过——草稿的 `source_id` 与所属尝试的 `source_id` 不同时插入被拒
+- [ ] `cargo test foundation::latest_attempt_must_belong_to_source` 通过——来源不能把另一个来源的尝试设为 `latest_attempt_id`
+- [ ] `cargo test foundation::discard_is_distinct_from_void` 通过——人工丢弃只写 `discarded_at`，失败补偿只写 `voided_at`，二者均不删除行
 - [ ] `cargo test foundation::draft_ordinal_is_unique_per_attempt` 通过——同一尝试内两条草稿用同一个 `source_ordinal` 时插入被拒（§3.6「位置是 agent 报的」）
 - [ ] `cargo test foundation::utterance_draft_requires_span` 通过——`kind = utterance` 的草稿缺 `evidence_span_*` 时被拒；`file` 的草稿带 span 时被拒
-- [ ] `cargo test foundation::span_bounds_rejected` 通过——`start == end`、`start > end`、`end > code_point_length(text)`、负数四种越界都被拒（§3.6 第一条校验）；**只实现 substring 相等检查会漏掉全部四种**
-- [ ] `cargo test foundation::span_is_code_point_indexed` 通过——转写文本含 emoji 与中文时，`slice_by_code_points(text, start, end) == evidence_text`；**改用字节偏移或 UTF-16 索引的实现必须让该用例变红**（§3.6「span 用哪套坐标」）
+- [ ] `cargo test agent::draft_span_bounds_are_checked` 通过——`start == end`、`start > end`、`end > code_point_length(text)`、负数四种越界都被拒（§3.6 第一条校验）；**只实现 substring 相等检查会漏掉全部四种**
+- [ ] `cargo test agent::draft_span_must_match_text` 通过——转写文本含 emoji 与中文时，`slice_by_code_points(text, start, end) == evidence_text`；**改用字节偏移或 UTF-16 索引的实现必须让该用例变红**（§3.6「span 用哪套坐标」）
 - [ ] `npm test -- bridge/span-roundtrip` 通过——同一份含 emoji 的文本与同一对 `(start, end)`，Rust 与 TS 两端切出的子串**逐字相等**
 - [ ] `rg -n 'as_bytes\(\)|\.slice\(|&s\[' src-tauri/src src` 的命中都不在 span 计算路径上（§3.6：Rust 用 `.chars()`、TS 用 `Array.from`）
 - [ ] `cargo test foundation::unknown_currency_rejected` 通过——币种码不在 ISO 4217 表内时返回 `data.unsupported_currency` 且**不写库**；**回退到 exponent 2 的实现必须让该用例变红**
 - [ ] `cargo test foundation::drafted_json_is_immutable` 通过——草稿被行内编辑后 `drafted_json` 逐字节不变，而 `amount_minor` 等列已改（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
 - [ ] `rg -n 'drafted_json' src-tauri/src` 的命中中**不存在** `UPDATE`（与 `audit_log` 同级的 append-only 检查）
-- [ ] `cargo test foundation::attempt_records_provenance` 通过——一次解析后 `parse_attempts` 恰好多一行，`prompt_hash` / `tool_surface_version` / `app_version` 均非空
-- [ ] `cargo test foundation::retry_creates_new_attempt` 通过——同一来源解析两次产生**两行** `parse_attempts`，第一行不被覆盖，`sources.latest_attempt_id` 指向第二行
+- [ ] `cargo test agent::attempt_inherits_probe_hash` 通过——一次解析后 `parse_attempts` 恰好多一行，`prompt_hash` / `tool_surface_version` / `app_version` 均非空，且继承本次探测的 `effective_capability_hash`
+- [ ] `cargo test agent::retry_creates_new_attempt` 通过——同一来源解析两次产生**两行** `parse_attempts`，第一行不被覆盖，`sources.latest_attempt_id` 指向第二行
 - [ ] `cargo test foundation::draft_triple_all_or_nothing` 通过——草稿三元组只填部分时 CHECK 拒绝
-- [ ] `cargo test foundation::confirm_requires_complete_triple` 通过——三元组不齐的草稿确认时返回 `review.incomplete_triple`
-- [ ] `cargo test foundation::transaction_traces_to_draft` 通过——由草稿确认而来的 `transactions` 行，`source_draft_id` 指向该草稿且该草稿 `consumed_at` 非空
+- [ ] `cargo test review::confirm_rejects_incomplete_triple` 通过——三元组不齐的草稿确认时返回 `review.incomplete_triple`
+- [ ] `cargo test review::transaction_traces_to_draft` 通过——由草稿确认而来的 `transactions` 行，`source_draft_id` 指向该草稿且该草稿 `consumed_at` 非空
 - [ ] `cargo test foundation::audit_actor_accepts_system` 通过——`actor = "system"` 可写入（超时作废等代码触发的动作有合法 actor）
 - [ ] `cargo test foundation::icloud_path_rejected` 通过——数据目录指向 iCloud 容器路径时返回 `data.icloud_path_rejected`
 - [ ] `rg -n 'f32|f64' src-tauri/src` 在金额相关模块无命中（浮点禁令，见 [`.claude/rules/money-and-data.md`](../../.claude/rules/money-and-data.md)）
@@ -589,6 +600,9 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-13 | **验收选择器按真实职责对齐。** 口述落盘/幂等归 `ingest`，span 工具边界与 attempt 生命周期归 `agent`，确认完整性/溯源归 `review`；原来的 `foundation::*` 名称会让 `cargo test <filter>` 在 0 个测试时仍 exit 0，制造假绿。行为判据不变，只把选择器改到实际执行它的测试 | M0 验收清单逐条与 `cargo test -- --list` 对照 |
+| 2026-08-13 | **实现发现“全局本位币决定新交易”没有任何存储与首选路径。** M0 定为本地 `preferences.json` + 首次解析前人工选择；不从地区或来源静默猜，切换不改历史行 | §3.4 已有的逐笔冻结语义；M0 真实确认链路需要完整三元组 |
+| 2026-08-13 | **M0 实施开工前补齐四处数据硬约束。** ① 未知币种验收与正文统一为拒绝写入；② `draft_transactions` 新增 `discarded_at`，不再让人工丢弃复用协议失败的 `voided_at`；③ 明确草稿与尝试、来源与最新尝试的跨行归属不变式，并要求触发器或等强度的数据层检查；④ IPC 往返验收由与范围不变式冲突的 `i64::MAX` 改为允许上界 `10^15`，前者应被拒绝。实施落点另明确为 Tauri `data_dir()/Daybook`，首次告知显示路径并可在访达中揭示 | M0 实施计划与首轮 Foundation 测试；否则可产生跨来源证据链与无法区分的作废原因 |
 | 2026-08-10（四轮） | **`evidence_span` 只写了「字符区间」，而「字符」在 Rust 与 TS 之间有四种互不相同的含义**（UTF-8 字节 / UTF-16 code unit / code point / grapheme）。**中文夹一个 emoji 就会立刻错位**，且表现为「高亮选错半句话」，看起来像模型报错了位置。定死：零起、左闭右开、**Unicode code point**、对象是未经 normalize 的落盘文本；Rust 用 `.chars()`、TS 用 `Array.from`，**不许用原生字符串索引**；写入时强制两条校验。退路（`evidence_occurrence`）登记为 R10 | 文档审查（四轮） |
 | 2026-08-10（四轮） | 新增 R11：**M3 的 ordinal 跨表唯一**——两张草稿表各自的 `UNIQUE(attempt_id, source_ordinal)` 保证不了跨表唯一，而同一段口述会同时产出两类草稿。不阻塞 M0，登记以免被沉默填掉 | 文档审查（四轮） |
 | 2026-08-10（三轮） | **eval 的条目对齐在 `file` 来源上写不出来**：[07 §3.2](./07-eval.md) 要求预测侧也有位置，而它写的是「草稿按 `evidence_text` 在原件上的位置排序」——**系统里没有 OCR 也没有坐标**，这与同一份文档承认的「子串断言对图像来源无法实现」是同一个事实，上一版只认了一半。改为**位置由 agent 起草时一并报告**：`draft_transactions` 新增 `source_ordinal`（两种来源都必填、`(attempt_id, ordinal)` 唯一、允许跳号）与 `evidence_span_*`（`utterance` 必填）。同步 [01 §3.2](./01-agent-runtime.md) 工具参数、[07 §3.2](./07-eval.md) 对齐算法、[03 §3.4](./03-review.md) 排序 | 文档审查（三轮） |
@@ -610,6 +624,10 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.15 | 2026-08-13 | **M0 实现验收进入 `review`。** 六表迁移、整数金额/IPC、证据目录、本位币偏好与访达揭示入口已落地，统一 M0 门禁通过 |
+| v0.14 | 2026-08-13 | **验收审计回流：**把 10 条已漂移的 `foundation::*` 测试选择器对齐到真实的 `ingest` / `agent` / `review` 测试，消除 0-test 假绿；验收行为不变 |
+| v0.13 | 2026-08-13 | **实现回流：补齐当前本位币设置。** 本地 `preferences.json` 持久化、首次解析前人工选择、未选明确拒绝；切换只影响后续解析 |
+| v0.12 | 2026-08-13 | **M0 开始实施，`status` 进入 `in-progress`。** 修正未知币种与 IPC 上界的旧验收；新增 `discarded_at` 与两条跨行归属不变式；补 4 条可执行验收；确定默认数据目录与首次告知呈现 |
 | v0.1 | 2026-08-06 | 初版：存储引擎与数据目录、标识/时间/金额/汇率约定、迁移策略、M0 四表与 v1 全表清单、命令契约与 `AppError` 形状、TS 桥；否决方案六条；待决 R1–R5；验收标准 11 条可执行 + 1 条人工 |
 | v0.11 | 2026-08-10 | **公开文档降噪。** §3.6 对评测目标的引用去掉第一人称会话式表述，schema 与验收标准未变 |
 | v0.10 | 2026-08-10 | **文档审查第五轮回流**：`effective_tool_surface_hash` **改名 `effective_capability_hash`** 并扩到非工具型能力（[01 §3.7](./01-agent-runtime.md)）；§6 补 span 的四种越界用例 |
