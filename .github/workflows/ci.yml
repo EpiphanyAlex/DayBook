@@ -1,0 +1,88 @@
+# 代码门禁。docs.yml 只查文档，这一份查代码——
+# 在它落地之前，一个 `cargo test` 挂掉的 PR 在 GitHub 上会显示全绿。
+#
+# 依据：仓库根 CLAUDE.md 约束 16「前端四条与 Rust 三条并列，任一失败即红」。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 只读即可：本 workflow 不写回仓库、不发布任何产物。
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    # 产品是 macOS 本地优先桌面应用（ADR-0001），而 Linux 上 tauri crate 要装
+    # webkit2gtk / libsoup 一串系统依赖，且 #[cfg(target_os = "macos")] 的路径
+    # 根本跑不到。在真实目标平台上跑，比省几分钟重要。公开仓库的 macOS runner 免费。
+    name: 代码门禁
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify-m0.mjs 会跑 check-readme-sync.mjs，它按**提交历史的祖先关系**
+          # 判定英文镜像有没有落后；浅克隆没有历史可查，脚本会直接报错。
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Rust 工具链
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc --version && cargo clippy --version && cargo fmt --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: ripgrep
+        # verify-m0.mjs 的几条禁用模式检查靠 rg；macOS runner 镜像不保证自带。
+        run: brew list ripgrep >/dev/null 2>&1 || brew install ripgrep
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 预取 crate
+        # verify-m0.mjs 里的 cargo 步骤一律带 --offline（保证 CI 不在跑测试的
+        # 中途去联网解析依赖）。空的 registry 上 --offline 会直接失败，所以先 fetch。
+        run: cargo fetch --locked
+        working-directory: src-tauri
+
+      - name: 全部门禁
+        # **刻意只跑这一条命令，不把七条门禁在这里再抄一遍。**
+        # 抄一遍就等于多了一份手工维护的门禁清单，它会和 verify-m0.mjs 分叉——
+        # 而这正是 2026-08-13 那轮 review 反复找到的同一类缺陷（前端第二张币种表、
+        # 手写的密封指纹、两份状态机）。docs/prd/03-review.md §6 的验收原文
+        # 就是「node scripts/verify-m0.mjs 退出码 0」，CI 跑的应当是那一条。
+        #
+        # 代价如实写下来：前端改一行也要等一次 Rust 编译。缓存命中时约一分钟，
+        # 觉得不值再拆成两个 job——但拆的时候要一并想清楚清单怎么防漂移。
+        run: node scripts/verify-m0.mjs --skip-live
+
+# ── 为什么是 --skip-live ────────────────────────────────────────────
+#
+# 跳过的两步需要一个**已登录的** agent CLI，并且每次都消耗维护者自己的订阅额度：
+#   agent::effective_tool_surface_equals_registry   真实 CLI 的有效能力 == 五工具注册表
+#   real_cli_screenshot_and_utterance_happy_paths   真实截图与口述的 happy path
+# CI 环境两者都不具备（依据 docs/prd/07-eval.md §3.1 与 §4：任何调用 agent CLI
+# 的步骤都不进 CI）。**因此 CI 绿不等于 M0 通过**——合并前由维护者在本机跑
+# `node scripts/verify-m0.mjs`（不带 --skip-live）。
+#
+# 同样不进 CI：eval 跑批（烧额度）、真实夹具（含真实金额，不进 git，07-eval §3.7）。

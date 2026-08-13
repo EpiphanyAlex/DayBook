@@ -27,7 +27,7 @@
 - `node scripts/check-readme-sync.mjs` — [`README.en.md`](./README.en.md) 不落后于 [`README.md`](./README.md)（判据见「文档层级」的同步规则）
 - `node scripts/check-spec-invariants.mjs` — **现行章节里不得残留已被推翻的结论**（禁用表见脚本内，每条都注明它防的是哪一次真实回退）
 
-四条都由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。
+四条都由 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) 在 push 到 `main` 与全部 PR 上跑。**约束 16 的七条代码门禁由 [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) 跑**（一条 `node scripts/verify-m0.mjs --skip-live`，不在 CI 里再抄一份清单）——**但 CI 绿不等于 M0 通过**：真实 CLI 那两步需要已登录的 agent CLI 且消耗额度，只能在本机跑。
 
 > **第四条为什么存在**（2026-08-10 建立）：前三条查的是格式、链接可达性与提交关系。**一轮把「口述合计恒为空」改成「通常为空、说了就对账」的改动之后，它们全是绿的，而七处文档仍在说旧结论**——其中一处还写在 agent 提示词里，会直接把实现者引回错误的做法。**跨文档一致性（[`docs/prd/CLAUDE.md`](./docs/prd/CLAUDE.md) 硬规则 5）此前完全靠人记得 grep**，而这正是最容易忘的一步。 <!-- legacy -->
 >

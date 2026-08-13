@@ -1,5 +1,4 @@
-# 文档门禁。仓库当前处于骨架阶段（src/ 与 src-tauri/ 尚未创建），
-# 因此这里只有文档一套 job；代码门禁的位置见文件末尾的注释。
+# 文档门禁。代码门禁（前端四条 + Rust 三条）在 ci.yml，见文件末尾的注释。
 #
 # 依据：仓库根 CLAUDE.md 约束 16「前端与 Rust 门禁并列，任一失败即红」——
 # 文档门禁同样是并列的一条，不是次要项。
@@ -48,23 +47,15 @@ jobs:
       - name: 规格不变式检查（决策漂移）
         run: node scripts/check-spec-invariants.mjs
 
-# ── 待建：00 基础设施 落地后在此并列增加两个 job ──────────────────
+# ── 代码门禁在 ci.yml ─────────────────────────────────────────────
 #
-#   frontend:
-#     - npm ci
-#     - npm run lint
-#     - npm run typecheck
-#     - npm test
-#     - npm run build
-#
-#   rust:（working-directory: src-tauri）
-#     - cargo fmt --all -- --check
-#     - cargo clippy --all-targets --all-features -- -D warnings
-#     - cargo test
+# 本文件此前在这里留了「待建：00 基础设施落地后在此并列增加两个 job」的计划。
+# M0 落地后代码门禁改放独立的 ci.yml：本文件跑 4 秒、只依赖 node 内置模块，
+# 而代码门禁要装 Rust 工具链与 npm 依赖、跑在 macos-latest 上。分开之后
+# 文档改动仍然几秒就有反馈，且 CLAUDE.md 与两份 README 里对 docs.yml
+# 「跑那四条」的描述保持成立。
 #
 # 明确不进 CI（依据 docs/prd/07-eval.md §3.1 与 §4）：
 #   - eval 跑批：每轮烧订阅额度，且 CI 环境没有已登录的 agent CLI
 #   - 任何调用 agent CLI 的步骤（同上）
 #   - 真实夹具：含真实截图与真实金额，不进 git（07-eval §3.7）
-# 可以进 CI 的是夹具重放（07-eval §3.6，零额度、确定性），
-# 但它依赖 src-tauri/ 存在，等基础设施落地后再加。
