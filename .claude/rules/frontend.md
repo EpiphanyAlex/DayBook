@@ -153,6 +153,18 @@ const canBatchConfirm = check.status === 'passed' || check.status === 'not_appli
 
 **`user_attested_batch` 放行的前提是三条 UI 硬要求全部满足**——整段转写原文全文可见、全部拆分结果并排、条数显式呈现。**做不到就不许放行**：它不是「口述可以免检」，是把机器校验换成了人的那一眼。
 
+**它也不是「对不上账就当没看见」**（2026-08-13，[`docs/prd/03-review.md` §3.4](../../docs/prd/03-review.md) 第 2 档）。口述里说了合计但拆出来对不上时，`reconciliationStatus === 'failed'` 而策略仍是 `user_attested_batch`，批量确认**照常放行**——但差额与「确认前请对着原文过一遍」必须与按钮同屏。
+
+```tsx
+// ❌ 错误 —— 只给 not_applicable 配了背书文案，failed 那档只有一个「差额报警」和一个可点的按钮
+const copy = { passed: […], failed: ['差额报警', …], not_applicable: ['请你背书', '请对着全文过一遍'] }
+
+// ✅ 正确 —— 策略是 user_attested_batch 时，无论对账结果都带背书提示
+{policy === POLICY.USER_ATTESTED_BATCH && <AttestationHint status={reconciliationStatus} />}
+```
+
+**这是全产品唯一一条「机器已判定不符却仍允许批量」的路径。放行而不告知，等于两道闸门都没有**——机器那道判了 `failed` 被忽略，人那道因为用户不知情而没有真的发生。
+
 **另外一条 UI 硬要求**：`parse_attempts.outcome === 'completed_with_gaps'` 时（agent 自己说「有一块我没读」），审核界面**必须显眼呈现 `unparsed_note`**，与普通成功视觉可区分——它存在的全部意义是让用户知道该去看原件的哪里（[`docs/prd/01-agent-runtime.md` §3.2](../../docs/prd/01-agent-runtime.md)）。
 
 ## 6. 性能

@@ -32,7 +32,7 @@ agent report_source_total
 - `expense_total` 只加支出，`income_total` 只加收入，`net_change = income - expense`。transfer 或无法取得金额时结果为 `unavailable`。
 - 文件没声明合计：`unavailable + single_only`。口述没声明合计：`not_applicable + user_attested_batch`。
 - 口述说出合计时仍正常得到 `passed/failed`，但确认策略保持 `user_attested_batch`。
-- `failed` 与 `unavailable` 都禁止批量，逐条确认仍可用；没有 force/ignore 旁路。
+- 放行批量的只有 `confirmation_policy`：`reconciled_batch` 与 `user_attested_batch` 放行，`single_only` 拒绝。**`kind = utterance` 恒为 `user_attested_batch`，所以对账 `failed` 时批量仍然放行**——挡住 `failed` 的只有 `kind = file`（它拿不到 `user_attested_batch`）。逐条确认在任何状态下都可用；没有 force/ignore 旁路。
 
 ## 已知边界与坑
 

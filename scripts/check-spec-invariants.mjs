@@ -54,6 +54,16 @@ const RULES = [
     fix: '改成「`user_attested_batch` 放行批量」——把两个维度焊回一起正是这条要防的',
   },
   {
+    // 防的是 2026-08-13 实现验收发现的那一起：根 CLAUDE.md 约束 5 无条件写着
+    // 「不符时阻止批量入库」，而 03 §3.3 自 2026-08-10 起规定 utterance 的确认策略
+    // 与对账结果无关。四条门禁全绿，顶层文件与三份下游文档一直在说相反的话。
+    // 行内出现 kind 限定词（utterance / 口述 / user_attested / kind = file）即豁免。
+    id: 'mismatch-blocks-all-batch',
+    re: /^(?![^\n]*(utterance|口述|user_attested|kind\s*=\s*`?file))[^\n]*(不符|对不上|failed)[^\n]{0,24}(阻止|禁止)[^\n]{0,6}批量/,
+    why: '对账 `failed` 只对 `kind = file` 阻止批量；`utterance` 的确认策略与对账结果无关（03 §3.3）',
+    fix: '补上 `kind` 限定，或点名 `user_attested_batch` 这道人工闸门',
+  },
+  {
     id: 'probe-equals-tools-list',
     re: /(有效工具集|能力清单|capability manifest)[^\n]{0,30}(就是|等同于|即)[^\n]{0,20}tools\/list/,
     why: 'MCP `tools/list` 看不见 `Bash` / `Read` / `Edit`，也看不见 hook（01 §3.7）',

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     db::Database,
     error::{AppError, AppResult},
-    money::{currency_exponent, ensure_range, validate_triple, DecimalI64},
+    money::{convert_minor, currency_exponent, ensure_range, validate_triple, DecimalI64},
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub struct DraftPatch {
     pub occurred_on: Option<String>,
     pub amount_minor: Option<DecimalI64>,
     pub currency: Option<String>,
-    pub base_amount_minor: Option<DecimalI64>,
+    // 没有 base_amount_minor：本位币金额是导出值，不是独立输入（03 §3.5）。
     pub base_currency: Option<String>,
     pub rate_ppm: Option<DecimalI64>,
     pub direction: Option<String>,
@@ -417,27 +417,26 @@ pub fn edit_draft(database: &Database, draft_id: &str, patch: &DraftPatch) -> Ap
         let amount = patch.amount_minor.unwrap_or(before.amount_minor).0;
         let currency = patch.currency.as_ref().unwrap_or(&before.currency);
         currency_exponent(currency)?;
-        let base_amount = patch
-            .base_amount_minor
-            .or(before.base_amount_minor)
-            .map(|v| v.0);
         let base_currency = patch
             .base_currency
             .as_ref()
             .or(before.base_currency.as_ref());
         let rate = patch.rate_ppm.or(before.rate_ppm).map(|v| v.0);
-        match (base_amount, base_currency, rate) {
-            (Some(base_amount), Some(base_currency), Some(rate)) => {
-                validate_triple(amount, currency, base_amount, base_currency, rate)?;
+        // 本位币金额是导出值，不是独立输入（03 §3.5）：`rate_ppm` 是来源上印着的那个数，
+        // 用户纠正金额时它不变，所以本位币金额只能跟着重算。把它也当输入，就存在一个
+        // 「三者互相矛盾」的可表达状态——只改金额时必然 data.money_inconsistent。
+        let base_amount = match (base_currency, rate) {
+            (Some(base_currency), Some(rate)) => {
+                Some(convert_minor(amount, currency, base_currency, rate)?)
             }
-            (None, None, None) => {}
+            (None, None) => None,
             _ => {
                 return Err(AppError::new(
                     "review.incomplete_triple",
-                    "本位币金额、币种与汇率必须全填或全空",
+                    "本位币币种与汇率必须同时填写或同时留空",
                 ))
             }
-        }
+        };
         let direction = patch.direction.as_ref().unwrap_or(&before.direction);
         if !matches!(direction.as_str(), "expense" | "income" | "transfer") {
             return Err(AppError::invalid_argument("direction 不在允许集合中"));
@@ -996,15 +995,83 @@ mod review {
         );
     }
 
+    fn stored_triple(
+        fixture: &Fixture,
+        id: &str,
+    ) -> (i64, Option<i64>, Option<String>, Option<i64>) {
+        fixture
+            .database
+            .read(|connection| {
+                connection.query_row(
+                    "SELECT amount_minor, base_amount_minor, base_currency, rate_ppm
+                     FROM draft_transactions WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn inline_edit_amount_recomputes_base() {
+        // §1 的头号场景：用户把 AI 读错的 1680 改回 168，界面上只有金额这一个输入。
+        let same_currency = Fixture::new("file", None);
+        same_currency.draft("d1", 1, 1680, "AUD", "expense");
+        edit_draft(
+            &same_currency.database,
+            "d1",
+            &DraftPatch {
+                amount_minor: Some(DecimalI64(168)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (amount, base, base_currency, rate) = stored_triple(&same_currency, "d1");
+        assert_eq!((amount, base), (168, Some(168)));
+        validate_triple(
+            amount,
+            "AUD",
+            base.unwrap(),
+            &base_currency.unwrap(),
+            rate.unwrap(),
+        )
+        .unwrap();
+
+        // 跨币种：证明它真的走了换算，不只是原币等于本位币时的恒等退化。
+        let cross = Fixture::new("file", None);
+        cross.draft_with_base("d2", 1, 65, "USD", Some((100, "AUD", 1_538_462)), "expense");
+        edit_draft(
+            &cross.database,
+            "d2",
+            &DraftPatch {
+                amount_minor: Some(DecimalI64(130)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (amount, base, base_currency, rate) = stored_triple(&cross, "d2");
+        assert_eq!((amount, base), (130, Some(200)));
+        validate_triple(
+            amount,
+            "USD",
+            base.unwrap(),
+            &base_currency.unwrap(),
+            rate.unwrap(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn inline_edit_preserves_drafted_json() {
+        // 改的是**金额**，与 §6 验收原文一致。改回「只改 merchant」本条即失去意义——
+        // v0.11 正是那样写的，于是「只改金额必失败」漏出了门禁。
         let fixture = Fixture::new("file", None);
-        fixture.draft("d1", 1, 100, "AUD", "expense");
+        fixture.draft("d1", 1, 1680, "AUD", "expense");
         edit_draft(
             &fixture.database,
             "d1",
             &DraftPatch {
-                merchant: Some("New".to_owned()),
+                amount_minor: Some(DecimalI64(168)),
                 ..Default::default()
             },
         )
@@ -1020,6 +1087,50 @@ mod review {
             })
             .unwrap();
         assert_eq!(drafted, "{\"original\":true}");
+        assert_eq!(stored_triple(&fixture, "d1").0, 168);
+    }
+
+    #[test]
+    fn inline_edit_rejects_half_triple() {
+        let fixture = Fixture::new("file", None);
+        fixture.draft_with_base("d1", 1, 100, "AUD", None, "expense");
+        assert_eq!(
+            edit_draft(
+                &fixture.database,
+                "d1",
+                &DraftPatch {
+                    rate_ppm: Some(DecimalI64(1_000_000)),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err()
+            .code,
+            "review.incomplete_triple"
+        );
+        assert_eq!(stored_triple(&fixture, "d1"), (100, None, None, None));
+    }
+
+    #[test]
+    fn inline_edit_completes_missing_triple() {
+        // §3.5「三元组补全」：缺三元组的草稿要能当场补齐，而不是只能丢弃重解析。
+        let fixture = Fixture::new("file", None);
+        fixture.draft_with_base("d1", 1, 100, "AUD", None, "expense");
+        assert_eq!(
+            confirm_one(&fixture.database, "d1").unwrap_err().code,
+            "review.incomplete_triple"
+        );
+        edit_draft(
+            &fixture.database,
+            "d1",
+            &DraftPatch {
+                base_currency: Some("AUD".to_owned()),
+                rate_ppm: Some(DecimalI64(1_000_000)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(stored_triple(&fixture, "d1").1, Some(100));
+        confirm_one(&fixture.database, "d1").unwrap();
     }
 
     #[test]

@@ -4,6 +4,7 @@ import iconUrl from '../assets/brand/icon.svg'
 import { backendPresentation } from './agent/presentation'
 import { runQueueContinuing } from './ingest/queue'
 import { AppError, call, type MinorUnits, type RatePpm } from './lib/bridge'
+import { AttestationHint } from './review/AttestationHint'
 import { CompletedWithGapsBanner } from './review/CompletedWithGapsBanner'
 import { canBatchConfirm, type ReviewPolicy, type UtteranceGateState } from './review/policy'
 
@@ -115,6 +116,21 @@ function formatMinor(amount: number | null, currency: string | null): string {
     ? absolute
     : `${absolute.slice(0, -exponent)}.${absolute.slice(-exponent)}`
   return `${sign}${value} ${currency}`
+}
+
+function formatRate(ratePpm: number | null): string {
+  if (ratePpm === null) return ''
+  const absolute = Math.abs(ratePpm).toString().padStart(7, '0')
+  const value = `${absolute.slice(0, -6)}.${absolute.slice(-6)}`.replace(/\.?0+$/, '')
+  return `${ratePpm < 0 ? '−' : ''}${value || '0'}`
+}
+
+function parseRateInput(value: string): number | null {
+  const normalized = value.trim()
+  if (!/^\d+(?:\.\d{1,6})?$/.test(normalized)) return null
+  const [whole, fraction = ''] = normalized.split('.')
+  const result = Number(`${whole}${fraction.padEnd(6, '0')}`)
+  return Number.isSafeInteger(result) && result > 0 ? result : null
 }
 
 function parseDisplayAmount(value: string, currency: string): number | null {
@@ -591,6 +607,7 @@ export function App() {
                 onPatch={(next) => void patchDraft(draft.id, next)}
                 onConfirm={() => void confirmOne(draft.id)}
                 onDiscard={() => void discard(draft.id)}
+                defaultBaseCurrency={foundation?.baseCurrency ?? ''}
               />
             ))}
             {selectedSource && !drafts.length && (
@@ -609,6 +626,13 @@ export function App() {
             <button disabled={!batchReady} onClick={() => void confirmSelected()}>
               确认所选入账
             </button>
+            {check && (
+              <AttestationHint
+                policy={check}
+                reportedTotalText={formatMinor(check.reportedTotalMinor, check.reportedTotalCurrency)}
+                calculatedTotalText={formatMinor(check.calculatedTotalMinor, check.reportedTotalCurrency)}
+              />
+            )}
             {check?.confirmationPolicy === 'single_only' && (
               <small>{check.reconciliationStatus === 'failed' ? '合计不符，只能逐条确认' : '无法核对合计，只能逐条确认'}</small>
             )}
@@ -650,10 +674,13 @@ interface DraftCardProps {
   onPatch: (patch: Record<string, unknown>) => void
   onConfirm: () => void
   onDiscard: () => void
+  defaultBaseCurrency: string
 }
 
-function DraftCard({ draft, selected, unavailable, onToggle, onPatch, onConfirm, onDiscard }: DraftCardProps) {
+function DraftCard({ draft, selected, unavailable, onToggle, onPatch, onConfirm, onDiscard, defaultBaseCurrency }: DraftCardProps) {
   const [amount, setAmount] = useState(formatMinor(draft.amountMinor, draft.currency).split(' ')[0])
+  const [baseCurrency, setBaseCurrency] = useState(defaultBaseCurrency)
+  const [rate, setRate] = useState(() => (draft.currency === defaultBaseCurrency ? '1' : ''))
   useEffect(() => setAmount(formatMinor(draft.amountMinor, draft.currency).split(' ')[0]), [draft.amountMinor, draft.currency])
   return (
     <article className={`draft-card ${selected ? 'is-selected' : ''} ${unavailable ? 'has-warning' : ''}`}>
@@ -685,7 +712,37 @@ function DraftCard({ draft, selected, unavailable, onToggle, onPatch, onConfirm,
           <input aria-label="分类" defaultValue={draft.category ?? ''} placeholder="未分类" onBlur={(event) => onPatch({ category: event.target.value })} />
         </div>
         <p className="evidence-claim"><span>原件位置</span>“{draft.evidenceText}”</p>
-        {draft.baseAmountMinor === null && <p className="triple-warning">确认前需要补全本位币与汇率</p>}
+        {draft.baseAmountMinor === null ? (
+          // 只提示不给入口是死路：用户只能丢弃草稿重解析整个来源（03 §3.5「三元组补全」）。
+          <div className="triple-completion">
+            <p className="triple-warning">确认前需要补全本位币与汇率</p>
+            <input
+              aria-label="本位币"
+              maxLength={3}
+              value={baseCurrency}
+              placeholder="AUD"
+              onChange={(event) => setBaseCurrency(event.target.value.toUpperCase())}
+            />
+            <input
+              aria-label="汇率"
+              value={rate}
+              placeholder={`1 ${draft.currency} = ?`}
+              onChange={(event) => setRate(event.target.value)}
+            />
+            <button
+              disabled={baseCurrency.length !== 3 || parseRateInput(rate) === null}
+              onClick={() => {
+                const ratePpm = parseRateInput(rate)
+                if (baseCurrency.length !== 3 || ratePpm === null) return
+                onPatch({ baseCurrency, ratePpm })
+              }}
+            >补齐</button>
+          </div>
+        ) : (
+          <p className="triple-rate">
+            1 {draft.currency} = {formatRate(draft.ratePpm)} {draft.baseCurrency}
+          </p>
+        )}
       </div>
       <div className="draft-card__actions">
         <button onClick={onConfirm}>单条确认</button>

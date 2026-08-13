@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-13
-version: v0.23
+version: v0.24
 ---
 
 # sub-PRD 索引
@@ -19,13 +19,15 @@ version: v0.23
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.15 |
 | 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.19 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.12 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.11 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`in-progress`** | v0.12 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.8 |
 
-**M0 四份已于 2026-08-13 完成实现并进入 `review`**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md)、[03 审核与草稿区](./03-review.md)。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过；当前版本为 v0.15/v0.19/v0.12/v0.11。
+**M0 四份已于 2026-08-13 完成实现**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md) 在 `review`；**[03 审核与草稿区](./03-review.md) 于同日退回 `in-progress`**。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过；当前版本为 v0.15/v0.19/v0.12/v0.12。
+
+> **03 为什么退回**（2026-08-13 实现验收）：**「行内改一条草稿的金额」这条主路径必然失败**（`edit_draft` 把本位币金额当独立输入，只改金额时三元组校验必然拒绝），而 §6 对应的验收测试改的是 `merchant` 而非金额，所以门禁全绿。进入 `review` 的判据是「验收标准全部跑过」，该判据当时并不成立。修复与四条回流见 [03 §7](./03-review.md) v0.12。**另两处一并改定**：根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（它与 [03 §3.3](./03-review.md) 的口述确认策略正面冲突）；`review.incomplete_triple` 在界面上此前是死路，M0 补本位币与汇率输入。
 
 **`review` 不等于 M0 产品 go。** 维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测尚未完成；在正式给出 go / no-go 并完成收尾前，四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
 
@@ -110,6 +112,7 @@ version: v0.23
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.24 | 2026-08-13 | **[03 审核与草稿区](./03-review.md) → v0.12，`status` 由 `review` 退回 `in-progress`。** 实现验收发现「行内改金额」主路径必然返回 `data.money_inconsistent`，而对应验收测试改的是 `merchant`，门禁看不见——进入 `review` 的判据当时不成立。同批改定：本位币金额改为导出值；根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（解开它与 [03 §3.3](./03-review.md) 的正面冲突）；口述报了合计时的背书提示补成硬要求；`review.incomplete_triple` 补上界面入口。**00 / 01 / 02 状态与版本未变** |
 | v0.23 | 2026-08-13 | **M0 四份同步进入 `review`**：00→v0.15 · 01→v0.19 · 02→v0.12 · 03→v0.11。统一门禁、外部 MCP/UDS 与真实 Claude Code 链路通过；明确维护者 review 和 §9.4 真实样本 go/no-go 仍待完成，M0 UI 非设计定稿 |
 | v0.22 | 2026-08-13 | [00 地基](./00-foundation.md) → v0.14：验收选择器对齐真实模块与测试清单，消除 `cargo test <filter>` 匹配 0 项仍返回成功的假绿；状态仍为 `in-progress` |
 | v0.21 | 2026-08-13 | [02 导入](./02-ingest.md) → v0.11：批量失败后继续的验收移到真实前端队列控制点；状态仍为 `in-progress` |

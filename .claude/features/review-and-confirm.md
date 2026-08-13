@@ -25,10 +25,12 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 | `src-tauri/src/domain/confirm.rs` | 查询 DTO、编辑、丢弃、单条/批量确认、事实表写入、人工审计 |
 | `src-tauri/src/lib.rs` | 审核相关 Tauri commands；不被 MCP 模块引用 |
 | `src/review/policy.ts` | 口述批量确认的三项 UI 展示 attestation |
+| `src/review/AttestationHint.tsx` | `user_attested_batch` 的背书提示，与确认按钮同屏；`failed` 时同屏给出差额 |
 
 ## 数据结构
 
 - 草稿原始值在 `drafted_json`，永不可更新；行内编辑只改结构化列并写 before/after 审计。
+- **`DraftPatch` 没有 `base_amount_minor`**：本位币金额由 `amount_minor` + `currency` + `base_currency` + `rate_ppm` 经 `convert_minor` 导出（`domain/confirm.rs::edit_draft`）。三元组自洽由构造保证，不靠事后校验。
 - 人工丢弃写 `discarded_at`，解析失败作废写 `voided_at`，确认写 `consumed_at`；三者互斥且都保留行。
 - 事实交易通过 `source_draft_id` 回指草稿，并复制 `source_id` 与 `evidence_text`。
 
@@ -37,6 +39,8 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 - 确认服务端重新检查证据非空、三元组完整且自洽；UI 通过不能绕过。
 - 单条确认不受合计失败阻挡；批量确认必须经过 `confirmation_policy`。
 - 口述批量确认还必须由前端证明全文可见、结果并排、条数显式；服务端要求三项 attestation 都为真。
+- **口述报了合计且对账 `failed` 时，批量确认仍然放行**（策略恒为 `user_attested_batch`），所以 `AttestationHint` 必须把差额与「由你背书」放在按钮旁 —— 这是全产品唯一一条「机器判定不符仍允许批量」的路径。
+- **缺三元组的草稿能在卡片上当场补齐**：填本位币 + 汇率 → `update_draft` 导出 `base_amount_minor` → 该草稿随即可确认，不必丢弃后重解析整个来源。
 - 批量中证据或三元组不完整的草稿逐条列为 rejected，其余可确认；策略级失败则整批拒绝。
 - 所有活动草稿被确认或丢弃后，来源转 `reviewed`。
 
@@ -46,6 +50,8 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 - M0 三栏界面是功能基线，不是批准后的设计稿；`src/styles.css` 里的 `:root` 变量不是 token design system。M1 开工前先确定设计稿与语义 token，再做视觉精修。
 - `evidence_text` 是 agent 的抽取声明，不是独立证据，所以截图或口述全文默认可见。
 - 当前界面是证据检查台，不是传统记账表单；金额汇总不在 React 内计算。
+- **改金额时不要再把本位币金额当独立输入**：v0.11 的 `edit_draft` 那样写，于是「把 AI 读错的 1680 改回 168」必然返回 `data.money_inconsistent`，而当时的验收测试改的是 `merchant`，门禁全绿。见 [03 §3.5](../../docs/prd/03-review.md)「本位币金额是导出值」。
+- 卡片上的汇率输入是主单位小数（`1 USD = 1.538462 AUD`），`parseRateInput` 转成 `rate_ppm` 整数后过 IPC；**除法只出现在 `formatRate` 里**。
 
 ## 相关
 
