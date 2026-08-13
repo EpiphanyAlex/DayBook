@@ -53,7 +53,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-Four documentation gates, enforced by CI on every PR ([`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
+Plus four documentation gates ([`.github/workflows/docs.yml`](./.github/workflows/docs.yml)):
 
 ```bash
 node docs/prd/check-docs.mjs        # frontmatter + links under docs/prd/
@@ -62,12 +62,14 @@ node scripts/check-readme-sync.mjs  # README.en.md is not behind README.md
 node scripts/check-spec-invariants.mjs  # no superseded conclusions left in current sections
 ```
 
-One command runs all of the above, plus the real-CLI capability probe and the screenshot / utterance happy paths:
+One command runs all eleven of the above, plus the real-CLI capability probe and the screenshot / utterance happy paths:
 
 ```bash
 node scripts/verify-m0.mjs              # includes the two real-CLI steps; spends your own quota
 node scripts/verify-m0.mjs --skip-live  # skips the real CLI; this is not a full M0 pass
 ```
+
+CI runs both on every PR: the documentation gates via [`docs.yml`](./.github/workflows/docs.yml), the code gates via [`ci.yml`](./.github/workflows/ci.yml) (that is, the `--skip-live` command above). **A green CI is not an M0 pass** — the two real-CLI steps need a logged-in agent CLI and can only run on your own machine.
 
 ---
 

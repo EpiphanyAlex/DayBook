@@ -51,7 +51,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
-四条文档门禁由 CI 在所有 PR 上强制（[`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
+外加四条文档门禁（[`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
 
 ```bash
 node docs/prd/check-docs.mjs        # docs/prd/ 的 frontmatter + 链接
@@ -60,12 +60,14 @@ node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
 node scripts/check-spec-invariants.mjs  # 现行章节不得残留已被推翻的结论
 ```
 
-一条命令把上面全部跑一遍，外加真实 CLI 的能力探测与截图/口述 happy path：
+一条命令把上面十一条全部跑一遍，外加真实 CLI 的能力探测与截图/口述 happy path：
 
 ```bash
 node scripts/verify-m0.mjs              # 含真实 CLI 两步，会消耗你自己的额度
 node scripts/verify-m0.mjs --skip-live  # 跳过真实 CLI；这不是完整 M0 通过
 ```
+
+CI 在所有 PR 上跑：文档门禁走 [`docs.yml`](./.github/workflows/docs.yml)，代码门禁走 [`ci.yml`](./.github/workflows/ci.yml)（即上面那条 `--skip-live`）。**CI 绿不等于 M0 通过**——真实 CLI 那两步需要一个已登录的 agent CLI，只能在本机跑。
 
 ---
 
