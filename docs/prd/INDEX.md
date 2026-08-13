@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-13
-version: v0.25
+version: v0.26
 ---
 
 # sub-PRD 索引
@@ -19,15 +19,17 @@ version: v0.25
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.15 |
 | 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.20 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.13 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`in-progress`** | v0.12 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.13 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.8 |
 
-**M0 四份已于 2026-08-13 完成实现**：[00 地基](./00-foundation.md)、[01 Agent 运行时](./01-agent-runtime.md)、[02 导入](./02-ingest.md) 在 `review`；**[03 审核与草稿区](./03-review.md) 于同日退回 `in-progress`**。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过；当前版本为 v0.15/v0.20/v0.13/v0.12。
+**M0 四份已于 2026-08-13 完成实现，且全部处在 `review`**：[00 地基](./00-foundation.md) v0.15、[01 Agent 运行时](./01-agent-runtime.md) v0.20、[02 导入](./02-ingest.md) v0.13、[03 审核与草稿区](./03-review.md) v0.13。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过。
 
-> **03 为什么退回**（2026-08-13 实现验收）：**「行内改一条草稿的金额」这条主路径必然失败**（`edit_draft` 把本位币金额当独立输入，只改金额时三元组校验必然拒绝），而 §6 对应的验收测试改的是 `merchant` 而非金额，所以门禁全绿。进入 `review` 的判据是「验收标准全部跑过」，该判据当时并不成立。修复与四条回流见 [03 §7](./03-review.md) v0.12。**另两处一并改定**：根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（它与 [03 §3.3](./03-review.md) 的口述确认策略正面冲突）；`review.incomplete_triple` 在界面上此前是死路，M0 补本位币与汇率输入。
+> **03 当天先退回 `in-progress`、再回到 `review`**（2026-08-13）。**退回的原因**：「行内改一条草稿的金额」这条主路径必然失败（`edit_draft` 把本位币金额当独立输入，只改金额时三元组校验必然拒绝），而 §6 对应的验收测试改的是 `merchant` 而非金额，所以门禁全绿；进入 `review` 的判据「验收标准全部跑过」当时并不成立。同批改定：根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（它与 [03 §3.3](./03-review.md) 的口述确认策略正面冲突）；`review.incomplete_triple` 在界面上此前是死路，M0 补本位币与汇率输入。**回到 `review` 的依据**：[03 §6](./03-review.md) 的 M0 人工验收六条当天由真实 CLI 逐条实测通过（含「缺三元组当场补齐并确认」），逐条结论见 [03 §7](./03-review.md) v0.13。
+>
+> **同一次人工验收暴露了一个门禁盲区，值得单独记一笔**：桌面应用当天**根本起不来**（`src-tauri` 两个 bin 缺 `default-run`；`icons/icon.png` 是 16 位/通道，tauri 判定图标无效后 abort），而 `node scripts/verify-m0.mjs` 不带 `--skip-live` 全绿。**M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有一条会启动桌面壳。** 两条已修复并各补一条 `cargo test` 断言（[03 §6](./03-review.md)）。
 
 **`review` 不等于 M0 产品 go。** 维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测尚未完成；在正式给出 go / no-go 并完成收尾前，四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
 
@@ -112,6 +114,7 @@ version: v0.25
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.26 | 2026-08-13 | **[03 审核与草稿区](./03-review.md) → v0.13，`status` 由 `in-progress` 回到 `review`——M0 四份现在全部在 `review`。** 依据是 [03 §6](./03-review.md) 的 M0 人工验收六条由真实 CLI 逐条实测通过，含 v0.12 新增的「缺三元组当场补齐并确认」。同批修掉两个让桌面应用起不来的缺陷（缺 `default-run`、图标 16 位/通道），并记下根因：**M0 门禁没有一条会启动桌面壳**。**00 / 01 / 02 状态与版本未变** |
 | v0.25 | 2026-08-13 | **实现验收第二批回流：**[01 Agent 运行时](./01-agent-runtime.md) → v0.20（合计词闸门补出口与边界；CLI 发现路径补 nvm / fnm / volta / pnpm）、[02 导入](./02-ingest.md) → v0.13（状态机在实现里有两份且互相矛盾，转移表补 `parsed → parsing` 与 `failed → failed`，并要求 `sources.state` 只有一处写入点）。同批修好前端第二张币种 exponent 表与 Rust 那张的分叉（新增逐条比对测试）。**两份 status 均未变** |
 | v0.24 | 2026-08-13 | **[03 审核与草稿区](./03-review.md) → v0.12，`status` 由 `review` 退回 `in-progress`。** 实现验收发现「行内改金额」主路径必然返回 `data.money_inconsistent`，而对应验收测试改的是 `merchant`，门禁看不见——进入 `review` 的判据当时不成立。同批改定：本位币金额改为导出值；根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（解开它与 [03 §3.3](./03-review.md) 的正面冲突）；口述报了合计时的背书提示补成硬要求；`review.incomplete_triple` 补上界面入口。**00 / 01 / 02 状态与版本未变** |
 | v0.23 | 2026-08-13 | **M0 四份同步进入 `review`**：00→v0.15 · 01→v0.19 · 02→v0.12 · 03→v0.11。统一门禁、外部 MCP/UDS 与真实 Claude Code 链路通过；明确维护者 review 和 §9.4 真实样本 go/no-go 仍待完成，M0 UI 非设计定稿 |

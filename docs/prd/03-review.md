@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: in-progress
+status: review
 owner: "@maintainer"
 date: 2026-08-13
-version: v0.12
+version: v0.13
 ---
 
 # 03 · 审核与草稿区
@@ -359,8 +359,12 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] `cargo test review::discarded_draft_is_marked_not_voided` 通过——人工丢弃只置 `discarded_at`，`voided_at` 仍为空，草稿与 `drafted_json` 均保留
 - [ ] `cargo test review::total_check_survives_discard` 通过——丢弃一条草稿前后，本次尝试的总额校验结果不变
 - [ ] `node scripts/verify-m0.mjs`（检查项定义见 [`docs/PRD.md` §9.3](../PRD.md)）退出码 0
+- [ ] `cargo test m0::cargo_manifest_declares_default_run` 通过——`src-tauri` 两个 bin 并存时声明了 `default-run`
+- [ ] `cargo test m0::app_icon_decodes_to_eight_bit_rgba` 通过——`icons/icon.png` 解码后正好 4 字节/像素
 
-**M0 人工验收**：
+  > **这两条是「桌面应用真的起得来」的下限，放在本节是因为下面的人工验收是全仓库唯一需要启动应用的验收**（2026-08-13 人工验收当天新增）。**M0 的全部门禁都只测库、确定性链路与外部 MCP 链路，没有一条会启动桌面壳**——当天 `npm run tauri dev` 连续两次起不来（缺 `default-run`；图标是 16 位/通道，tauri 判定无效后在 `did_finish_launching` 里 abort），而 `node scripts/verify-m0.mjs` 不带 `--skip-live` 全绿。**两条都不是本模块的规格问题，但两条都会让本节的人工验收无从做起。**
+
+**M0 人工验收**（**2026-08-13 首次实测执行完毕**，结论见 [§7 回流记录](#7-回流记录)；执行方式：真实 Claude Code CLI 解析两张截图与一段口述，逐条对照下列判据）：
 
 - [ ] **来源原件本身在审核屏上可见**——截图能看到图、`utterance` 能看到整段转写文本，不是只有 `evidence_text` 那一列（§3.2，2026-08-10 新增）
 - [ ] 每条草稿的 `evidence_text` 与解析结果在同一屏可见，无需额外点击
@@ -384,6 +388,9 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-13（人工验收） | **§6 的 M0 人工验收六条全部实测通过**，`status` 由 `in-progress` 回到 `review`。做法：本机真实 Claude Code CLI，两张截图 + 一段口述。① 原件同屏——截图渲染成图、口述显示整段转写；② `evidence_text` 与解析结果同屏无需点击；③ 声明合计与原文片段（「TOTAL SPENT 147.65」）与批量确认按钮**始终同屏**——`.reconciliation` 在 `.draft-stack` 这个滚动容器之外，条目再多也不会把它滚走；④ 一张无声明合计的截图落在 `unavailable` + `single_only`，提示可见、批量按钮禁用；⑤ 一段口述拆出 4 条、一次批量确认入库，整段原文与全部条目及条数同屏；⑥ **缺三元组的草稿当场补齐并确认**——补 `AUD` + `0.21` 后 `base_amount_minor` 由 3800 CNY 导出为 798 AUD（§3.5「本位币金额是导出值」），随即单条确认入库，`drafted_json` 里 `baseAmountMinor` 仍为 `null` | 人工验收实测（2026-08-13）：`transactions` 9 行、`audit_log` 28 行，含 `human/update` 与 `human/confirm` 各自的 before/after |
+| 2026-08-13（人工验收） | **桌面应用当天根本起不来，而 `node scripts/verify-m0.mjs`（不带 `--skip-live`）全绿。** 两个独立缺陷：① `src-tauri` 自 MCP helper 拆出第二个 bin 后一直缺 `default-run`，`npm run tauri dev` / `tauri build` 停在「could not determine which binary to run」；② `icons/icon.png` 是 **16 位/通道** RGBA，`tauri-build` 按 8 字节/像素编进二进制，运行时 tauri 按 4 字节/像素反推像素数，判定图标无效后在 `did_finish_launching` 里 abort。**根因是同一条：M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有任何一条会启动桌面壳。** 两条都已修复并各加一条 `cargo test` 断言（见 §6）。**本节记它是因为 §6 的人工验收是全仓库唯一需要启动应用的验收，被它挡住的是这一节** | 人工验收实测（2026-08-13）：`npm run tauri dev` 两次 abort 的真实输出 |
+| 2026-08-13（人工验收） | **`parse_attempts` 的中断补偿在真机上按规格生效**（顺带实测，非本次目标）：解析进行中应用被重启 → `outcome = interrupted`、来源 `failed` + `agent.interrupted`、该次尝试的三条草稿 `voided_at` 置非空且**行与 `drafted_json` 均保留**；界面显示「解析失败」与重试入口，重试后走新的 `attempt_id` | 人工验收实测（2026-08-13）；[01 §3.4](./01-agent-runtime.md) |
 | 2026-08-13（实现验收） | **§3.5 的行内编辑把本位币金额当成了独立可编辑字段，导致「只改金额」这一条主路径必然返回 `data.money_inconsistent`**——而它正是 §1 举的头号场景（把 AI 读错的 1680 改回 168）。改定：`base_amount_minor` 由 `amount_minor` + `currency` + `base_currency` + `rate_ppm` **导出**，不接受直接编辑，三元组自洽由构造保证而非事后校验。同步 [`money-and-data.md §3`](../../.claude/rules/money-and-data.md)。**§6 原验收写的是「行内改一条草稿的金额后」，而实现的测试改的是 `merchant`**——按验收原文写它会红；验收由 1 条拆成 4 条，其中一条专门断言「只给金额」返回 `Ok`。`status` 由 `review` 退回 `in-progress`：进入 `review` 的前提（验收标准全部跑过）当时并不成立 | M0 实施验收（2026-08-13）实测：`edit_draft` 只传 `amountMinor` 返回 `data.money_inconsistent` |
 | 2026-08-13（实现验收） | **§3.4 第 2 档「报了合计时仍提示『确认前请对着原文过一遍』」在实现里落空**：`ReconciliationCard` 只给 `not_applicable` 那一档配了背书文案，`passed` / `failed` 两档没有，而 `failed` 档同时显示差额报警与一个可点的批量确认按钮。补成硬要求并加一条前端验收——**这是全产品唯一一条「机器判定不符仍允许批量」的路径，放行而不告知等于两道闸门都没有**。同步根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5（见下一行） | M0 实施验收（2026-08-13）代码审查 `src/App.tsx` `ReconciliationCard` |
 | 2026-08-13（实现验收） | **根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 与本文 §3.3 正面冲突**：约束 5 无条件要求「不符时阻止批量入库」，而 §3.3 自 2026-08-10 起规定 `kind = utterance` 的确认策略与对账结果无关。实现跟的是本文，四条门禁全绿而顶层文件一直在说相反的话。改定：**约束 5 补 `kind` 限定**（`file` 一律阻止；`utterance` 走 `user_attested_batch` 的人工闸门，代价是三条 UI 硬要求 + `failed` 时差额必须与按钮同屏）。**本文 §3.3 不变**——[`docs/PRD.md` §1.1](../PRD.md) 把「口述一次批量确认」当作对竞品的唯一差异，反向改会把 2026-08-10 那次产品决定解开的死结重新焊上 | 维护者裁定（2026-08-13）；[`docs/PRD.md` §1.1](../PRD.md)、本文 §3.3「`user_attested_batch` 换的是另一道闸门」 |
@@ -408,6 +415,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.13 | 2026-08-13 | **M0 人工验收六条全部实测通过，`status` 由 `in-progress` 回到 `review`。** 真实 CLI 跑两张截图 + 一段口述，逐条走完原件同屏、合计与按钮同屏、`unavailable` 禁用批量、口述一次批量确认、**缺三元组当场补齐并确认**（v0.12 新增的那条）。同批修掉两个让桌面应用**根本起不来**的缺陷——缺 `default-run`、图标 16 位/通道；**根因是十一条 M0 门禁没有一条会启动桌面壳**，两条各补一条 `cargo test` 断言进 §6。**§3 决定与依据一字未改**——本次没有证伪任何规格 |
 | v0.12 | 2026-08-13 | **M0 实现验收回流四处，`status` 由 `review` 退回 `in-progress`。** ① §3.5 **本位币金额改为导出值**，修好「只改金额必失败」；②§3.4 第 2 档口述报了合计时的背书提示补成硬要求（`failed` 时差额须与按钮同屏）；③ 根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定，解开它与 §3.3 的正面冲突（本文 §3.3 不变）；④ §3.5 新增「三元组补全」——`review.incomplete_triple` 此前在界面上是死路。§6 行内编辑验收由 1 条拆成 4 条、新增 1 条前端验收与 1 条人工验收，堵掉「测试内容与验收原文不符仍能过门禁」的口子 |
 | v0.11 | 2026-08-13 | **M0 实现验收进入 `review`。** 功能基线完成并通过确定性、外部 MCP 与真实 CLI 链路；明确当前界面非设计定稿，M1 开工前确定设计稿与 token design system |
 | v0.10 | 2026-08-13 | **实现回流：**首屏呈现本位币选择，并明确切换不改已有草稿/事实 |
