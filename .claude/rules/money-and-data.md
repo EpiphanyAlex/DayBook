@@ -54,7 +54,7 @@ fn currency_exponent(code: &str) -> Result<u32, AppError> { /* ISO 4217 常量�
 const MINOR_PER_MAJOR: i64 = 100;
 format!("{}.{:02}", amount_minor / 100, amount_minor % 100)
 
-// ❌ 也错 —— 未知币种回退到 2 并只记一条告警
+// ❌ 也错 —— 未知币种回退到 2 并只记一条告警 <!-- legacy -->
 fn currency_exponent(code: &str) -> u32 { TABLE.get(code).copied().unwrap_or(2) }
 //    告警落在日志里没人看，而那条金额已经带着错误的 exponent 进了草稿、过了总额校验、
 //    被人一眼扫过去确认入库 ——「有记录但没拦住」和「没记录」对用户是同一件事
@@ -158,6 +158,30 @@ fn validate(tx: &Transaction) -> Result<(), AppError> {
     Ok(())
 }
 ```
+
+### 3.1 本位币金额是导出值，不是独立输入
+
+**编辑路径上，自洽要由构造保证，不能靠一次事后校验挡住**（2026-08-13，[`docs/prd/03-review.md` §3.5](../../docs/prd/03-review.md)「本位币金额是导出值」）。
+
+```rust
+// ❌ 错误 —— 三者都当独立输入，于是「互相矛盾」是一个可表达的状态
+let amount = patch.amount_minor.unwrap_or(before.amount_minor);
+let base   = patch.base_amount_minor.or(before.base_amount_minor);   // 用户只改了 amount
+validate_triple(amount, &currency, base, &base_currency, rate)?;     // 必然 money_inconsistent
+
+// ✅ 正确 —— rate_ppm 是来源上印的事实，base 只能算出来
+let base = match (base_currency, rate_ppm) {
+    (Some(currency), Some(rate)) => Some(to_base(amount, rate, &original_currency, currency)?),
+    (None, None)                 => None,
+    _ => return Err(AppError::new("review.incomplete_triple", "本位币金额、币种与汇率必须全填或全空")),
+};
+```
+
+**`rate_ppm` 是账单上印着、用户会手填的那个数**（§2）——用户纠正金额时它不变，所以本位币金额只能跟着重算。**这不是「少一个输入框」的取舍**：M0 曾把它当独立字段，于是「把 AI 读错的 1680 改回 168」这条审核界面的主路径**必然**返回 `data.money_inconsistent`，而当时的验收测试改的是 `merchant`，门禁全绿。
+
+**判据**：能不能构造出一个「三元组不自洽」的入参？能，说明本位币金额还是输入而不是导出值。
+
+**推论**：补齐 `base_currency` + `rate_ppm` 就能让缺三元组的草稿变得可确认——所以**界面必须提供这两个输入**，否则 `review.incomplete_triple` 是一条用户点不动的死路。
 
 ## 4. AI 只写草稿表
 

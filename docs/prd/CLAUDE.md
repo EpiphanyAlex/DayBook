@@ -72,7 +72,7 @@ review → done          收尾三件事做完（回流 + INDEX.md 同步 + feat
 
 ✅ 给 agent 跑
 - [ ] `cargo test ingest::idempotent_source` 通过
-- [ ] `node scripts/verify-m0.mjs`（待建）退出码 0
+- [ ] `node scripts/verify-m0.mjs` 退出码 0
 ```
 
 理由和整个产品的哲学同源：**把「你信不信 agent 说完成了」换成「跑一下就知道」**——正如产品里把「信任 AI 的解析」换成「扫一眼原文 + 总额对账」（[ADR-0002](../adr/0002-ai-never-writes-directly.md)）。

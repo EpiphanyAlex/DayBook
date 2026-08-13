@@ -54,6 +54,16 @@ const RULES = [
     fix: '改成「`user_attested_batch` 放行批量」——把两个维度焊回一起正是这条要防的',
   },
   {
+    // 防的是 2026-08-13 实现验收发现的那一起：根 CLAUDE.md 约束 5 无条件写着
+    // 「不符时阻止批量入库」，而 03 §3.3 自 2026-08-10 起规定 utterance 的确认策略
+    // 与对账结果无关。四条门禁全绿，顶层文件与三份下游文档一直在说相反的话。
+    // 行内出现 kind 限定词（utterance / 口述 / user_attested / kind = file）即豁免。
+    id: 'mismatch-blocks-all-batch',
+    re: /^(?![^\n]*(utterance|口述|user_attested|kind\s*=\s*`?file))[^\n]*(不符|对不上|failed)[^\n]{0,24}(阻止|禁止)[^\n]{0,6}批量/,
+    why: '对账 `failed` 只对 `kind = file` 阻止批量；`utterance` 的确认策略与对账结果无关（03 §3.3）',
+    fix: '补上 `kind` 限定，或点名 `user_attested_batch` 这道人工闸门',
+  },
+  {
     id: 'probe-equals-tools-list',
     re: /(有效工具集|能力清单|capability manifest)[^\n]{0,30}(就是|等同于|即)[^\n]{0,20}tools\/list/,
     why: 'MCP `tools/list` 看不见 `Bash` / `Read` / `Edit`，也看不见 hook（01 §3.7）',
@@ -70,6 +80,24 @@ const RULES = [
     re: /M0[^\n]{0,12}(四|五)张表|(四|五)张\s*M0\s*表/,
     why: 'M0 已是六张表（含 `parse_attempts` 与 `accounts` 骨架）',
     fix: '改成六张；这个数漂移过两次，所以列进不变式',
+  },
+  {
+    id: 'unknown-currency-fallback',
+    re: /未知币种(?![^\n]*(?:不是|不应|不得|不回退|缺陷|错误|拒绝|❌))[^\n]{0,40}(回退|回落)[^\n]{0,12}(exponent\s*=\s*)?2|表里没有的币种(?![^\n]*(?:非法|不是|不应|不得|不回退|缺陷|错误|拒绝|❌))[^\n]{0,40}(回退|按)[^\n]{0,12}2/,
+    why: '未知币种已改为 `data.unsupported_currency` 并拒绝写入（00 §3.4）',
+    fix: '改成拒绝写入；解释旧结论的历史行请放进回流/变更记录或标记 legacy',
+  },
+  {
+    id: 'frontend-total-check-by-source',
+    re: /total_check['"`]?\s*,\s*\{\s*sourceId|confirm_batch['"`]?\s*,\s*\{\s*sourceId/,
+    why: '总额校验与批量确认按 `attempt_id` 定位，按来源会把重试输出混在一起',
+    fix: '前端参数改为 `attemptId`',
+  },
+  {
+    id: 'failed-source-zero-history',
+    re: /failed_source_has_no_drafts|失败后[^\n]{0,30}关联草稿数为\s*0/,
+    why: '失败尝试的草稿置 `voided_at` 并保留历史，只有「未作废草稿数为 0」成立',
+    fix: '改为 `failed_source_has_no_active_drafts` 并按 `voided_at IS NULL` 断言',
   },
 ]
 

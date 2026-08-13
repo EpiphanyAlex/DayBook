@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: ready
+status: in-progress
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.8
+date: 2026-08-13
+version: v0.12
 ---
 
 # 03 · 审核与草稿区
@@ -25,6 +25,8 @@ version: v0.8
 ## 2. 范围与非目标
 
 **范围**：`draft_*` 表与事实表的隔离 · 确认动作（单条 / 批量） · 证据链呈现（原文并排） · 总额交叉校验 · 异常前置排序 · 键盘流 · 行内编辑 · 虚拟滚动 · 每次纠正的审计与记忆投递。
+
+**M0 的界面是功能基线，不是设计定稿。** 它只锁定信息架构、可信闸门、状态反馈、可访问性与可操作性；当前 CSS 变量是局部实现变量，**不是已经批准的 token design system**。M1 开工前必须先确定审核主路径的设计稿与语义 token 体系（至少覆盖颜色、字体、间距、圆角、动效和交互状态），再做 40 笔 30 秒、完整键盘流与视觉精修。这个分期不允许 M0 省掉原件同屏、报警可见、禁用态和键盘可达等功能要求。
 
 **非目标**：
 
@@ -59,6 +61,8 @@ version: v0.8
 | 批量确认时 `confirmation_policy` 不为 `single_only`（§3.3） | `review.total_mismatch` / `review.total_unavailable` |
 
 三元组那条对应 [00 地基 §3.6](./00-foundation.md)「草稿可空、确认必填」与 [04 交易 §3.2](./04-transactions.md)「缺汇率不入库」。
+
+M0 首屏同时呈现当前本位币选择；修改只影响之后的新解析。已有草稿的三元组逐条保留，不能因切换偏好被后台改写（[00 地基 §3.4](./00-foundation.md) v0.13）。
 
 ### 3.2 证据链呈现
 
@@ -232,7 +236,9 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 排序优先级（高 → 低）：
 
 1. 总额校验 `failed` 的来源下的全部条目
-2. **`kind = utterance` 来源的条目**（2026-08-08 新增，2026-08-10 改述）——它们的确认策略恒为 `user_attested_batch`，靠的是「整段原文并排 + 一次人工确认」那道闸门，而**不是**机器对账。UI 文案随对账结果分两种：**没报合计**（`not_applicable`）→「语音来源，无合计可校验，请对着原文过一遍」；**报了合计**（`passed` / `failed`）→ 照常显示对账结果，但仍提示「确认前请对着原文过一遍」。**两种都不让它们看起来和已通过合计校验的截图草稿一样安全**
+2. **`kind = utterance` 来源的条目**（2026-08-08 新增，2026-08-10 改述，2026-08-13 补硬要求）——它们的确认策略恒为 `user_attested_batch`，靠的是「整段原文并排 + 一次人工确认」那道闸门，而**不是**机器对账。UI 文案随对账结果分两种：**没报合计**（`not_applicable`）→「语音来源，无合计可校验，请对着原文过一遍」；**报了合计**（`passed` / `failed`）→ 照常显示对账结果，**并在批量确认按钮旁同屏显示「确认前请对着原文过一遍」**。**两种都不让它们看起来和已通过合计校验的截图草稿一样安全**
+
+   > **`failed` 那一档是硬要求，不是文案偏好**（2026-08-13 实施回流）：它是全产品**唯一**一条「机器已经判定对不上，却仍然允许批量确认」的路径。差额本身必须与确认按钮同屏可见，用户要能看出自己正在替机器背书。**放行而不告知，等于两道闸门都没有**——机器那道判了 `failed` 被忽略，人那道因为不知情而没有真的发生。
 3. 跨图疑似重复（[02 导入 §3.6](./02-ingest.md)）
 4. agent 标注的低置信条目
 5. 与记忆规则冲突的条目（例：这家商户历史上一直归「餐饮」，这次被起草成「购物」）。**这一档要求 domain 侧也能读 `memory_rules`**——但那是**标记冲突**，不是**覆盖分类**，不违反 [`CLAUDE.md`](../../CLAUDE.md) 约束 15（见 [06 记忆 §3.4](./06-memory.md)）
@@ -257,7 +263,17 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - **默认全选**——多数条目是对的，用户的动作应该是「取消掉不对的」而不是「勾选对的」
 - 行内编辑直接改金额/商户/分类/日期，不弹模态框
 
+**本位币金额是导出值，不是独立输入**（2026-08-13 实施回流）。行内编辑接受 `amount_minor` / `currency` / `base_currency` / `rate_ppm`，**`base_amount_minor` 由这四项按 [00 地基 §3.4](./00-foundation.md)「币种精度」的换算公式导出**，不接受直接编辑。
+
+**理由不是「少一个输入框」，是三元组自洽必须由构造保证。** `rate_ppm` 是来源上印着的那个数（[`money-and-data.md §2`](../../.claude/rules/money-and-data.md)），用户纠正金额时它不变；把本位币金额也当成独立输入，就存在一个「三者互相矛盾」的可表达状态，而它唯一的守卫是一次事后校验。**本节 v0.1–v0.11 的写法就落进了这个状态**：只改金额时校验必然失败，返回 `data.money_inconsistent`——而那正是本模块 §1 举的头号例子（把 AI 读错的 1680 改回 168）。
+
+原币与本位币相同时 `rate_ppm = 1_000_000`，走同一条换算路径，**不设特例分支**。四项都不给、且草稿本就没有三元组时，导出结果仍是空——确认时照旧 `review.incomplete_triple`。反过来，**用户补齐 `base_currency` 与 `rate_ppm` 即可让缺三元组的草稿变得可确认**，界面必须提供这两个输入（见本节末「三元组补全」）。
+
 **行内编辑不得覆盖 `drafted_json`**（2026-08-10 新增，[00 地基 §3.6](./00-foundation.md)、[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）：编辑改的是草稿行的业务列，那列不可变快照原样保留。**否则「AI 当初起草成什么样」在用户改完的一瞬间就没了**——[07 评测 §3.2](./07-eval.md) 的整套真值机制建立在它上面，而 §3.1 承诺的「审计能回答当初起草成什么样」也只兑现了一半（`source_draft_id` 只指得到行，指不到行的原始内容）。
+
+**人工丢弃写 `discarded_at`，不写 `voided_at`。** 前者是人的审核决定，后者是超时、取消、协议失败后的系统补偿；两者都保留草稿与 `drafted_json`。总额校验仍包含已丢弃但未作废的草稿，因为它校验的是本次解析是否完整，而不是用户最后选择入库哪些条目。
+
+**三元组补全（M0 即需要）**（2026-08-13 新增）。缺三元组的草稿确认时返回 `review.incomplete_triple`（§3.1），界面必须**同时**给出本位币与汇率两个输入框，让用户当场补齐。**只提示不给入口是死路**：M0 曾出现「确认前需要补全本位币与汇率」的提示，而界面上没有任何地方能补，用户只能丢弃草稿重新解析整个来源。**一条点不动的警告比没有警告更伤信任**，而这一屏的全部意义就是信任（§1）。
 
 ### 3.6 每次纠正都留痕并投递记忆
 
@@ -297,6 +313,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 | R4 | 「40 笔 30 秒」如何客观测量——秒表人测的方差可能大于优化幅度 | 本文 §6 人工验收 | M1 开工前定测量协议，**写进本文 §6** |
 | R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 4 档 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
 | R7（**新增 2026-08-10**） | **`file` 来源的「适用性」信号**——§3.3 现在保守判：`file` + 没报合计 ⇒ `unavailable`，因为 `reported_total_* IS NULL` 分不清「结构性没有」「agent 漏读」「截图裁掉了」。真要支持 `file` 的 `not_applicable`，需要一个**独立于字段为空**的适用性信号（来源画像，或 agent 显式声明「这版式里不存在合计行」并附证据） | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) | M2 拿到真实单笔小票样本后决。**M0/M1 保守判**——误判的代价是一整类漏读变得不可见 |
+| R8（**新增 2026-08-13**） | **M1 设计稿与 token design system 的具体形态**——设计事实源放在哪里、token 的命名与分层、是否直接映射 CSS custom properties | 本文 §2、[`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) | **M1 开工前决**；M0 的局部 CSS 变量不得被倒推为已批准设计系统 |
 | R6（**新增 2026-08-07**） | §3.3 的舍入敏感性——逐笔 `base_amount_minor` 各自舍入后求和，与账单印刷的合计可能差几分（[00 地基 §5](./00-foundation.md) R3 的具体失败模式） | 本文 §3.3 校验式 | M2 实测真实外币账单；若系统性偏差成立，可能需要在**外币行参与合计**这条路径上另立规则，**结果回流本文与 [00 地基](./00-foundation.md)** |
 
 ## 6. 验收标准
@@ -311,7 +328,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] `cargo test review::confirm_rejects_draft_without_evidence` 通过——服务端二次校验返回 `review.missing_evidence`
 - [ ] `cargo test review::confirm_rejects_incomplete_triple` 通过——三元组不齐时返回 `review.incomplete_triple`（§3.1 完整性校验）
 - [ ] `cargo test review::total_check_exact_equality` 通过——差 1 分即 `failed`
-- [ ] `cargo test review::total_check_uses_declared_currency` 通过——原币 == 声明币种时取 `amount_minor`、不等时取 `base_amount_minor`，混合币种来源能正确求和（§3.3 校验式）
+- [ ] `cargo test review::total_check_uses_reported_currency` 通过——原币 == 报告币种时取 `amount_minor`、不等时取 `base_amount_minor`，混合币种来源能正确求和（§3.3 校验式）
 - [ ] `cargo test review::total_check_unavailable_when_not_reported` 通过——`kind = file` 且本次尝试 `reported_total_*` 为空时 `reconciliation_status == unavailable`、`confirmation_policy == single_only`
 - [ ] `cargo test review::total_check_survives_partial_confirm` 通过（**§3.3 修正的回归**）——`failed` 的尝试逐条确认掉一条后**再次校验结果不变**；全部确认完后结果仍不变。**把求和范围改回「未消费草稿」时该用例必须变红**
 - [ ] `cargo test review::total_check_is_scoped_to_attempt` 通过——同一来源成功解析**两次**、两次草稿都未作废时，各自的校验只算自己那次的草稿；**按 `source_id` 求和的实现必须变红**（§3.3「入参是 `attempt_id`」）
@@ -321,21 +338,27 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] `cargo test review::total_check_unavailable_on_transfer` 通过——含 `direction = transfer` 的条目时 `reconciliation_status == unavailable`，**不是把它按支出算进去**
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——`kind = utterance` 且未报合计时 `reconciliation_status == not_applicable` 且 `confirmation_policy == user_attested_batch`，**批量确认可用**
 - [ ] `cargo test review::utterance_with_stated_total_reconciles` 通过——口述里报了合计时 `reconciliation_status` 为 `passed` / `failed`（**不是 `not_applicable`**），而 `confirmation_policy` **仍是** `user_attested_batch`（§3.3「两个维度」）
+- [ ] `cargo test agent::explicit_utterance_total_must_be_reported` 通过——口述原文命中明显合计词时，漏报合计不能完成解析并静默落到 `not_applicable`；报告后才可完成（[01 §3.2](./01-agent-runtime.md) 代码侧完成前闸门）
 - [ ] `cargo test review::file_source_never_user_attested` 通过——`kind = file` 在任何输入下都拿不到 `user_attested_batch`，也拿不到 `not_applicable`
 - [ ] `cargo test review::file_without_total_is_unavailable_not_na` 通过——**只有一条草稿**且没报合计的 `file` 来源，结果是 `unavailable` + `single_only`（**不是 `not_applicable`**）——§3.3「`file` 为什么永远不判 `not_applicable`」
 - [ ] `cargo test review::batch_gate_reads_policy_not_status` 通过——批量确认的准入只看 `confirmation_policy`；构造一个 `reconciliation_status == passed` 但策略为 `single_only` 的输入，批量仍被拒（§3.3「两个维度」）
 - [ ] `npm test -- review/utterance-batch-gate` 通过——`user_attested_batch` 的批量确认按钮，在「整段原文全文可见 + 拆分结果并排 + 条数显式」三者任一缺失时不可点（§3.3 的三条 UI 硬要求）
+- [ ] `npm test -- review/utterance-attested-warning` 通过——`kind = utterance` 且本次尝试报了合计时（`reconciliationStatus` 为 `passed` 或 `failed`），批量确认按钮旁同屏出现「确认前请对着原文过一遍」；`failed` 一档还须同屏给出差额（§3.4 第 2 档）。**这是唯一一条「机器判定不符仍允许批量」的路径**
 - [ ] `npm test -- review/completed-with-gaps-banner` 通过——`parse_attempts.outcome == "completed_with_gaps"` 时审核界面显眼呈现 `unparsed_note`，与普通 `completed` 视觉上可区分（[01 §3.2](./01-agent-runtime.md)）
-- [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `cargo test review::total_check_unavailable_when_amount_unobtainable` 通过——存在缺三元组或 `base_currency` 不匹配的草稿时结果为 `unavailable`（**不是 `failed`**），且返回体列出是哪几条
-- [ ] `cargo test review::inline_edit_preserves_drafted_json` 通过——行内改一条草稿的金额后，`drafted_json` 逐字节不变（§3.5、[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）
+- [ ] `cargo test review::inline_edit_amount_recomputes_base` 通过——**只给 `amountMinor`**（不给任何本位币字段）改一条带完整三元组的草稿，返回 `Ok`，且 `base_amount_minor` 按原 `rate_ppm` 重算、三元组仍自洽（§3.5「本位币金额是导出值」）
+- [ ] `cargo test review::inline_edit_preserves_drafted_json` 通过——**同一次改金额**之后，`drafted_json` 逐字节不变（§3.5、[ADR-0002](../adr/0002-ai-never-writes-directly.md) 硬性要求 7）。**把它改回「只改 `merchant`」时本条必须失去意义**——那正是 v0.11 让「只改金额必失败」漏出门禁的写法
+- [ ] `cargo test review::inline_edit_rejects_half_triple` 通过——只给 `ratePpm` 不给 `baseCurrency` 时返回 `review.incomplete_triple`，且草稿未被修改
+- [ ] `cargo test review::inline_edit_completes_missing_triple` 通过——给缺三元组的草稿补 `baseCurrency` + `ratePpm` 后，`base_amount_minor` 被导出且该草稿随即可确认（§3.5「三元组补全」）
 - [ ] `cargo test review::batch_confirm_blocked_when_total_failed` 通过——返回 `review.total_mismatch`
 - [ ] `cargo test review::batch_confirm_blocked_when_total_unavailable` 通过——返回 `review.total_unavailable`
 - [ ] `cargo test review::no_force_bypass_exists` 通过——确认相关命令的参数里不存在 force/ignore 类旁路
 - [ ] `cargo test review::single_confirm_allowed_when_total_failed` 通过——逐条确认仍可用
 - [ ] `cargo test review::every_edit_writes_audit` 通过——每次修改后 `audit_log` 多一条且含 before/after
 - [ ] `cargo test review::confirmed_draft_is_marked_not_deleted` 通过——`consumed_at` 置非空，行仍在
-- [ ] `node scripts/verify-m0.mjs`（**待建**，检查项定义见 [`docs/PRD.md` §9.3](../PRD.md)）退出码 0
+- [ ] `cargo test review::discarded_draft_is_marked_not_voided` 通过——人工丢弃只置 `discarded_at`，`voided_at` 仍为空，草稿与 `drafted_json` 均保留
+- [ ] `cargo test review::total_check_survives_discard` 通过——丢弃一条草稿前后，本次尝试的总额校验结果不变
+- [ ] `node scripts/verify-m0.mjs`（检查项定义见 [`docs/PRD.md` §9.3](../PRD.md)）退出码 0
 
 **M0 人工验收**：
 
@@ -344,10 +367,12 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] 声明合计与它的原文片段显示在批量确认按钮附近（§3.3「基准值本身必须可核对」）
 - [ ] 总额不符或无法校验时，提示可见且批量确认按钮不可点
 - [ ] 一段口述拆出的多条草稿，**能一次批量确认**，且确认前整段原文与全部条目同屏（§3.3 `not_applicable`）
+- [ ] **缺本位币三元组的草稿，能在审核界面当场补齐并确认**——本位币与汇率两个输入框可见可填，不需要丢弃后重新解析整个来源（§3.5「三元组补全」，2026-08-13 新增）
 
 #### M1 必过（在 M0 全部通过之上）
 
 - [ ] `npm test -- review/sorting` 通过——异常前置的六级排序按 §3.4 优先级
+- [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
 - [ ] **40 笔真实草稿，从打开审核界面到全部入库，不碰鼠标，≤ 30 秒**（测量协议见 §5 待决 R4，**M1 开工前必须先把协议写进本节**）
 
@@ -359,6 +384,13 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-13（实现验收） | **§3.5 的行内编辑把本位币金额当成了独立可编辑字段，导致「只改金额」这一条主路径必然返回 `data.money_inconsistent`**——而它正是 §1 举的头号场景（把 AI 读错的 1680 改回 168）。改定：`base_amount_minor` 由 `amount_minor` + `currency` + `base_currency` + `rate_ppm` **导出**，不接受直接编辑，三元组自洽由构造保证而非事后校验。同步 [`money-and-data.md §3`](../../.claude/rules/money-and-data.md)。**§6 原验收写的是「行内改一条草稿的金额后」，而实现的测试改的是 `merchant`**——按验收原文写它会红；验收由 1 条拆成 4 条，其中一条专门断言「只给金额」返回 `Ok`。`status` 由 `review` 退回 `in-progress`：进入 `review` 的前提（验收标准全部跑过）当时并不成立 | M0 实施验收（2026-08-13）实测：`edit_draft` 只传 `amountMinor` 返回 `data.money_inconsistent` |
+| 2026-08-13（实现验收） | **§3.4 第 2 档「报了合计时仍提示『确认前请对着原文过一遍』」在实现里落空**：`ReconciliationCard` 只给 `not_applicable` 那一档配了背书文案，`passed` / `failed` 两档没有，而 `failed` 档同时显示差额报警与一个可点的批量确认按钮。补成硬要求并加一条前端验收——**这是全产品唯一一条「机器判定不符仍允许批量」的路径，放行而不告知等于两道闸门都没有**。同步根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5（见下一行） | M0 实施验收（2026-08-13）代码审查 `src/App.tsx` `ReconciliationCard` |
+| 2026-08-13（实现验收） | **根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 与本文 §3.3 正面冲突**：约束 5 无条件要求「不符时阻止批量入库」，而 §3.3 自 2026-08-10 起规定 `kind = utterance` 的确认策略与对账结果无关。实现跟的是本文，四条门禁全绿而顶层文件一直在说相反的话。改定：**约束 5 补 `kind` 限定**（`file` 一律阻止；`utterance` 走 `user_attested_batch` 的人工闸门，代价是三条 UI 硬要求 + `failed` 时差额必须与按钮同屏）。**本文 §3.3 不变**——[`docs/PRD.md` §1.1](../PRD.md) 把「口述一次批量确认」当作对竞品的唯一差异，反向改会把 2026-08-10 那次产品决定解开的死结重新焊上 | 维护者裁定（2026-08-13）；[`docs/PRD.md` §1.1](../PRD.md)、本文 §3.3「`user_attested_batch` 换的是另一道闸门」 |
+| 2026-08-13（实现验收） | **§3.1 的 `review.incomplete_triple` 在界面上是死路**：M0 会提示「确认前需要补全本位币与汇率」，而界面没有任何地方能补，用户只能丢弃草稿重新解析整个来源。§3.5 新增「三元组补全」——本位币与汇率两个输入框 M0 即需要，并加 1 条人工验收 | M0 实施验收（2026-08-13）：`src/App.tsx` 有该提示、无对应输入 |
+| 2026-08-13 | **M0 前端明确为功能基线，不是设计定稿。** M0 锁信息架构、闸门与可用性；设计稿和语义 token design system 推到 M1 开工前确定，当前 CSS 变量不获得事实源地位 | 里程碑目标：M0 验链路，M1 做深审核界面；产品确认（2026-08-13） |
+| 2026-08-13 | M0 首屏补当前本位币选择；切换不回写已有草稿或事实行 | [00 地基 §3.4](./00-foundation.md) v0.13 实施回流 |
+| 2026-08-13 | 人工丢弃获得独立的 `discarded_at` 语义；明确丢弃不改变解析完整性的总额校验。把完整异常排序中的 `sorting-utterance` 从 M0 移回本节已经定义的 M1 范围，并把 `declared_currency` 测试名同步为 `reported_currency` | M0 实施计划审查；[00 地基 §3.6](./00-foundation.md) |
 | 2026-08-10（五轮） | **§3.3 拿「单笔截图没有合计」当论据时，隐含了「它理论上确实对账不适用」——那把问题的位置放错了。** 真正的理由是：`reported_total_* IS NULL` **这一个信号对应三种现实**（结构性没有 / agent 漏读 / 截图裁掉了），**从「没读到」反推「本来就没有」是把后两种伪装成第一种**，而第二种正是闸门 3 存在的全部理由。M0 保守判 `unavailable` + `single_only`；适用性信号登记为 R7。同步 [ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md) | 文档审查（五轮） |
 | 2026-08-10（五轮） | §3.4 异常前置第 2 档的 UI 文案随「口述也可能报合计」分成两种；§6 新增 2 条验收 | [00 地基 §3.6](./00-foundation.md) v0.9 |
 | 2026-08-10（三轮） | **§3.3 拿「口述里说了总共 100」当拆两个维度的论据，而 [00 地基 §3.6](./00-foundation.md) 同时规定 `utterance` 的 `reported_total_*` 恒为空**——同一轮改动里留下的自相矛盾。改定：**口述明说合计时照常对账**（`passed` / `failed`），**确认策略不变**（恒 `user_attested_batch`）。这正是两个维度各自独立的实例 | 文档审查（三轮） |
@@ -376,6 +408,10 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.12 | 2026-08-13 | **M0 实现验收回流四处，`status` 由 `review` 退回 `in-progress`。** ① §3.5 **本位币金额改为导出值**，修好「只改金额必失败」；②§3.4 第 2 档口述报了合计时的背书提示补成硬要求（`failed` 时差额须与按钮同屏）；③ 根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定，解开它与 §3.3 的正面冲突（本文 §3.3 不变）；④ §3.5 新增「三元组补全」——`review.incomplete_triple` 此前在界面上是死路。§6 行内编辑验收由 1 条拆成 4 条、新增 1 条前端验收与 1 条人工验收，堵掉「测试内容与验收原文不符仍能过门禁」的口子 |
+| v0.11 | 2026-08-13 | **M0 实现验收进入 `review`。** 功能基线完成并通过确定性、外部 MCP 与真实 CLI 链路；明确当前界面非设计定稿，M1 开工前确定设计稿与 token design system |
+| v0.10 | 2026-08-13 | **实现回流：**首屏呈现本位币选择，并明确切换不改已有草稿/事实 |
+| v0.9 | 2026-08-13 | **M0 开始实施，`status` 进入 `in-progress`。** 补人工丢弃契约与验收；修正两个验收层级/命名漂移 |
 | v0.8 | 2026-08-10 | **文档审查第五轮回流两处。** ① **`file` 永不判 `not_applicable` 补上真正的理由**——不是「单笔截图理论上不适用」，而是 `reported_total_* IS NULL` 分不清「结构性没有 / 漏读 / 截图裁掉」三种现实，从「没读到」反推「本来就没有」会把漏读伪装成正常；适用性信号登记为 R7。② §3.4 的 UI 文案随「口述也可能报合计」分两种。§6 新增 2 条验收 |
 | v0.7 | 2026-08-10 | **文档审查第三轮回流**：口述里明说合计时**允许对账**（`passed` / `failed`），确认策略仍恒为 `user_attested_batch`——解开 §3.3 的论据与 [00](./00-foundation.md)「恒为空」的自相矛盾。§3.1 完整性校验那行改按 `confirmation_policy` 判；§6 新增 1 条验收 |
 | v0.6 | 2026-08-10 | **文档审查第二轮回流两处。** ① **总额校验的入参由 `source_id` 改为 `attempt_id`**——按来源求和会把重试后两次尝试的草稿混在一起，且合计与草稿的生命周期脱钩（合计已随 [00 地基](./00-foundation.md) v0.7 移入 `parse_attempts.reported_total_*`）。② **`not_applicable` 拆成两个维度**：`reconciliation_status`（能不能对账）+ `confirmation_policy`（能不能批量确认），**放行批量的是后者**；`kind = file` 永远拿不到 `user_attested_batch`。§6 验收新增 5 条、改写 6 条 |

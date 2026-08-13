@@ -12,12 +12,46 @@
 
 ## 当前状态
 
-**骨架阶段（2026-08-06 建立）。** 约束与文档已就位，`src/` 与 `src-tauri/` **尚未创建**。
-第一个里程碑是 **M0 端到端点亮**：拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
+**M0 实现 review 阶段（2026-08-13）。** Tauri / React / Rust 已落地：六表地基、五工具密封 agent 链路、截图与口述导入、审核确认与总额交叉校验能端到端跑通，`src/` 与 `src-tauri/` 均已创建。M0 的定义是**端到端点亮**——拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
 
-**阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。M0 四份 sub-PRD 现已全部 `ready`。
+**但还不能称 M0 已完成。** 四份 sub-PRD 中 [00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[02 导入](./docs/prd/02-ingest.md) 为 `review`，[03 审核与草稿区](./docs/prd/03-review.md) 于 2026-08-13 退回 `in-progress`；维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go / no-go 都尚未完成。**当前界面是功能基线，不是设计定稿**——M1 开工前先确定设计稿与 token design system。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
 
-现在唯一可跑的命令是文档门禁（CI 对所有 PR 强制，见 [`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
+**阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。
+
+---
+
+## 跑起来
+
+**这是一个 macOS 桌面应用**（[ADR-0001](./docs/adr/0001-local-first-desktop-platform.md)）。前置条件：
+
+| 需要 | 说明 |
+|---|---|
+| macOS + Xcode Command Line Tools | Tauri 构建需要 |
+| Node.js 20.19+ / 22.12+ | Vite 7 的要求 |
+| Rust 1.85+ | 见 [`src-tauri/Cargo.toml`](./src-tauri/Cargo.toml) 的 `rust-version` |
+| **你自己的 agent CLI** | 目前实现的是 Claude Code：`claude` 已安装**且已登录**。Daybook 不打包任何厂商凭证，也不提供第三方登录——用的是你自己那份订阅 |
+
+```bash
+npm install
+npm run tauri dev
+```
+
+**首次使用要先在左栏选本位币**，否则解析会返回 `data.base_currency_required`——Daybook 不按地区替你猜。之后把截图拖进左栏，或者直接把记得的事情说成一段话。
+
+数据（账本、证据原件、日志）都在应用数据目录里，界面上「在访达中显示」可以直接打开。
+
+### 门禁
+
+七条并列，任一失败即红（[`CLAUDE.md`](./CLAUDE.md) 约束 16 与「常用命令」）：
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run build
+cd src-tauri && cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+四条文档门禁由 CI 在所有 PR 上强制（[`.github/workflows/docs.yml`](./.github/workflows/docs.yml)）：
 
 ```bash
 node docs/prd/check-docs.mjs        # docs/prd/ 的 frontmatter + 链接
@@ -26,7 +60,12 @@ node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
 node scripts/check-spec-invariants.mjs  # 现行章节不得残留已被推翻的结论
 ```
 
-前端与 Rust 的命令要等 [`docs/prd/00-foundation.md`](./docs/prd/00-foundation.md) 落地后才存在，清单见 [`CLAUDE.md`](./CLAUDE.md)「常用命令」。
+一条命令把上面全部跑一遍，外加真实 CLI 的能力探测与截图/口述 happy path：
+
+```bash
+node scripts/verify-m0.mjs              # 含真实 CLI 两步，会消耗你自己的额度
+node scripts/verify-m0.mjs --skip-live  # 跳过真实 CLI；这不是完整 M0 通过
+```
 
 ---
 
@@ -131,4 +170,8 @@ Daybook 的前提相反：**默认你是事后补的。**
 
 ## 许可
 
-本项目以 [MIT 许可证](./LICENSE) 发布。
+**代码**：[MIT](./LICENSE)。随便用——fork、改、闭源商用、打包卖都行，不需要经过谁同意；署名欢迎，但不强制。
+
+**你的数据不在这份许可的管辖范围内。** 账本、证据截图、转写文本和日志从来没有离开过你的机器，也从来没有进过任何由本项目运营的服务——所以它们不需要任何人授权，我们也没有任何可以授予或撤销的权利。
+
+**agent CLI 不是 Daybook 的一部分。** Claude Code / Codex 由各自厂商发布，遵守它们自己的许可与服务条款；你用的是你自己的订阅与登录态。**用它们跑 Daybook 的解析是否符合各自条款，我们尚未完成核实**（[`docs/PRD.md` §12](./docs/PRD.md)、[`docs/prd/01-agent-runtime.md` §5](./docs/prd/01-agent-runtime.md) R4）——这条在 M4 打包发布前必须有结论。在那之前，请自己确认你的使用方式符合你所用 CLI 的条款。

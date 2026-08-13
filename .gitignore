@@ -54,3 +54,7 @@ pnpm-debug.log*
 
 # ── Claude Code 本地覆盖 ─────────────────────────────────
 .claude/settings.local.json
+
+# ── 本地 UI 验证产物 ─────────────────────────────────────
+/.playwright-mcp/
+/output/
