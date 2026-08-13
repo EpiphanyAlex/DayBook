@@ -287,6 +287,44 @@ mod m0 {
         domain::draft::{Assignment, DraftStore},
     };
 
+    // `src-tauri` 有两个 bin（daybook / daybook-mcp）。缺 `default-run` 时 `cargo run` 不知道
+    // 该起哪个，`npm run tauri dev` 与 `npm run tauri build` 都停在
+    // 「could not determine which binary to run」——**桌面应用一次都没起来过，而门禁全绿**。
+    #[test]
+    fn cargo_manifest_declares_default_run() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(
+            manifest.contains("default-run = \"daybook\""),
+            "两个 bin 并存时必须声明 default-run，否则 tauri dev / tauri build 起不来"
+        );
+    }
+
+    // `tauri-build` 把 icons/icon.png 解码成裸 RGBA 编进二进制，运行时 tauri 拿字节数除以 4
+    // 反推像素数。图标若是 16 位/通道，解码结果是 8 字节/像素，两边差一倍——应用在
+    // `did_finish_launching` 里 panic，一个窗口都开不出来。
+    // 2026-08-13 M0 人工验收实测：当时的 icon.png 正是 16 位，`npm run tauri dev` 直接 abort，
+    // 而全部 cargo test 与七条 CI 门禁都是绿的——它们从不启动应用。
+    #[test]
+    fn app_icon_decodes_to_eight_bit_rgba() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/icons/icon.png");
+        let reader = png::Decoder::new(std::fs::File::open(path).unwrap())
+            .read_info()
+            .unwrap();
+        let info = reader.info();
+        assert_eq!(info.color_type, png::ColorType::Rgba, "应用图标必须是 RGBA");
+        assert_eq!(
+            info.bit_depth,
+            png::BitDepth::Eight,
+            "应用图标必须是 8 位/通道"
+        );
+        let expected = info.width as usize * info.height as usize * 4;
+        assert_eq!(
+            reader.output_buffer_size(),
+            expected,
+            "解码后必须正好 4 字节/像素，否则 tauri 启动时判定图标无效"
+        );
+    }
+
     struct DeterministicBackend;
 
     #[async_trait]

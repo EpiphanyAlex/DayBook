@@ -5,6 +5,9 @@ description = "Daybook local-first retrospective recorder"
 authors = ["Daybook contributors"]
 edition = "2021"
 rust-version = "1.85"
+# MCP helper 是第二个 bin（daybook-mcp），没有这一行 `cargo run` 不知道该起哪个，
+# `npm run tauri dev` / `tauri build` 会直接失败在「could not determine which binary to run」。
+default-run = "daybook"
 
 [lib]
 name = "daybook_lib"
