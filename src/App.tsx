@@ -7,7 +7,16 @@ import { AppError, call, type MinorUnits, type RatePpm } from './lib/bridge'
 import { formatMoney, formatRate, parseMoneyInput, parseRateInput } from './lib/money'
 import { AttestationHint } from './review/AttestationHint'
 import { CompletedWithGapsBanner } from './review/CompletedWithGapsBanner'
-import { canBatchConfirm, type ReviewPolicy, type UtteranceGateState } from './review/policy'
+import {
+  canBatchConfirm,
+  POLICY,
+  RECONCILIATION,
+  SOURCE_STATE,
+  type ReconciliationStatus,
+  type ReviewPolicy,
+  type SourceStateValue,
+  type UtteranceGateState,
+} from './review/policy'
 
 interface FoundationStatus {
   schemaVersion: number
@@ -28,7 +37,7 @@ interface ReviewSource {
   kind: 'file' | 'utterance'
   originalFilename: string | null
   ext: string
-  state: 'imported' | 'parsing' | 'parsed' | 'failed' | 'reviewed'
+  state: SourceStateValue
   parseErrorCode: string | null
   latestAttemptId: string | null
   importedAt: string
@@ -91,7 +100,7 @@ function sourceTitle(source: ReviewSource): string {
 }
 
 function sourceStateLabel(source: ReviewSource): string {
-  const labels = {
+  const labels: Record<SourceStateValue, string> = {
     imported: '等待解析',
     parsing: '正在还原',
     parsed: source.activeDraftCount ? `${source.activeDraftCount} 条待确认` : '等待审核',
@@ -126,7 +135,9 @@ export function App() {
     [selectedId, sources],
   )
 
-  const refreshSources = useCallback(async (preferId?: string) => {
+  // 返回刚取到的那一份：`setSources` 之后本轮闭包里的 `sources` 仍是旧值，
+  // 调用方要用新数据必须拿返回值，不能读 state。
+  const refreshSources = useCallback(async (preferId?: string): Promise<ReviewSource[]> => {
     const next = await call<ReviewSource[]>('list_review_sources')
     setSources(next)
     setSelectedId((current) => {
@@ -134,6 +145,7 @@ export function App() {
       if (current && next.some((source) => source.id === current)) return current
       return next[0]?.id ?? null
     })
+    return next
   }, [])
 
   const refreshAgentLogs = useCallback(async () => {
@@ -312,9 +324,9 @@ export function App() {
 
   const afterReviewAction = async () => {
     if (!selectedSource) return
-    await refreshSources(selectedSource.id)
-    const latest = sources.find((source) => source.id === selectedSource.id) ?? selectedSource
-    await refreshSelected(latest)
+    const next = await refreshSources(selectedSource.id)
+    const latest = next.find((source) => source.id === selectedSource.id)
+    if (latest) await refreshSelected(latest)
   }
 
   const confirmOne = async (draftId: string) => {
@@ -342,7 +354,7 @@ export function App() {
         'confirm_drafts',
         {
           draftIds: selectedList.map((draft) => draft.id),
-          attestation: check.confirmationPolicy === 'user_attested_batch' ? gateState : null,
+          attestation: check.confirmationPolicy === POLICY.USER_ATTESTED_BATCH ? gateState : null,
         },
       )
       setNotice(result.rejected.length
@@ -449,39 +461,39 @@ export function App() {
 
           <nav className="source-list" aria-label="已导入来源">
             {sources.map((source) => (
-              <button
+              // 两个按钮是兄弟，不是嵌套：`<button>` 套 `<button>`（或套 role="button"）
+              // 在读屏与键盘导航下都不成立，而原来的 span 还只响应 Enter、不响应 Space。
+              <div
                 key={source.id}
                 className={`source-ticket ${source.id === selectedId ? 'is-selected' : ''}`}
-                onClick={() => setSelectedId(source.id)}
               >
-                <span className="source-ticket__kind">{source.kind === 'file' ? 'IMG' : 'SAY'}</span>
-                <span className="source-ticket__copy">
-                  <strong>{sourceTitle(source)}</strong>
-                  <small className={`state-${source.state}`}>{sourceStateLabel(source)}</small>
-                </span>
-                {(source.state === 'failed' || source.state === 'imported') && (
-                  <span
+                <button
+                  type="button"
+                  className="source-ticket__main"
+                  aria-current={source.id === selectedId || undefined}
+                  onClick={() => setSelectedId(source.id)}
+                >
+                  <span className="source-ticket__kind">{source.kind === 'file' ? 'IMG' : 'SAY'}</span>
+                  <span className="source-ticket__copy">
+                    <strong>{sourceTitle(source)}</strong>
+                    <small className={`state-${source.state}`}>{sourceStateLabel(source)}</small>
+                  </span>
+                </button>
+                {(source.state === SOURCE_STATE.FAILED || source.state === SOURCE_STATE.IMPORTED) && (
+                  <button
+                    type="button"
                     className="retry-link"
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => { event.stopPropagation(); void retrySource(source.id) }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') void retrySource(source.id)
-                    }}
-                  >{source.state === 'failed' ? '重试' : '解析'}</span>
+                    onClick={() => void retrySource(source.id)}
+                  >{source.state === SOURCE_STATE.FAILED ? '重试' : '解析'}</button>
                 )}
-                {source.state === 'parsing' && (
-                  <span
+                {source.state === SOURCE_STATE.PARSING && (
+                  <button
+                    type="button"
                     className="retry-link stop-link"
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => { event.stopPropagation(); void stopParsing() }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') void stopParsing()
-                    }}
-                  >停止</span>
+                    onClick={() => void stopParsing()}
+                  >停止</button>
                 )}
-              </button>
+              </div>
             ))}
           </nav>
 
@@ -568,7 +580,7 @@ export function App() {
             ))}
             {selectedSource && !drafts.length && (
               <div className="empty-drafts">
-                <p>{selectedSource.state === 'parsing' ? '正在辨认原件里的交易…' : '这里还没有待确认条目。'}</p>
+                <p>{selectedSource.state === SOURCE_STATE.PARSING ? '正在辨认原件里的交易…' : '这里还没有待确认条目。'}</p>
                 {selectedSource.parseErrorCode && <small>{selectedSource.parseErrorCode}</small>}
               </div>
             )}
@@ -589,8 +601,8 @@ export function App() {
                 calculatedTotalText={formatMoney(check.calculatedTotalMinor, check.reportedTotalCurrency)}
               />
             )}
-            {check?.confirmationPolicy === 'single_only' && (
-              <small>{check.reconciliationStatus === 'failed' ? '合计不符，只能逐条确认' : '无法核对合计，只能逐条确认'}</small>
+            {check?.confirmationPolicy === POLICY.SINGLE_ONLY && (
+              <small>{check.reconciliationStatus === RECONCILIATION.FAILED ? '合计不符，只能逐条确认' : '无法核对合计，只能逐条确认'}</small>
             )}
           </footer>
         </section>
@@ -600,13 +612,16 @@ export function App() {
   )
 }
 
+const RECONCILIATION_COPY: Record<ReconciliationStatus, [string, string]> = {
+  passed: ['账已对上', '机器合计与来源声明完全一致'],
+  failed: ['差额报警', '草稿合计与来源声明不一致'],
+  unavailable: ['无法校验', '来源合计缺失，或有条目无法折算'],
+  not_applicable: ['请你背书', '口述本身没有结构化合计，请对着全文过一遍'],
+}
+
 function ReconciliationCard({ check }: { check: TotalCheck }) {
-  const copy = {
-    passed: ['账已对上', '机器合计与来源声明完全一致'],
-    failed: ['差额报警', '草稿合计与来源声明不一致'],
-    unavailable: ['无法校验', '来源合计缺失，或有条目无法折算'],
-    not_applicable: ['请你背书', '口述本身没有结构化合计，请对着全文过一遍'],
-  }[check.reconciliationStatus]
+  // Record<ReconciliationStatus, …>：将来加第五态时这里会直接编译失败，而不是渲染 undefined。
+  const copy = RECONCILIATION_COPY[check.reconciliationStatus]
   return (
     <aside className={`reconciliation reconciliation--${check.reconciliationStatus}`}>
       <div className="reconciliation__status"><span aria-hidden="true" /> <strong>{copy[0]}</strong></div>

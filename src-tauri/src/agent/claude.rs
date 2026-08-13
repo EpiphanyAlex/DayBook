@@ -109,38 +109,16 @@ impl ClaudeCodeBackend {
                 }
             }
         });
-        let allowed_tools = m0_tool_registry()
-            .into_iter()
-            .map(|tool| format!("mcp__daybook__{}", tool.name))
-            .collect::<Vec<_>>()
-            .join(",");
+        let allowed_tools = allowed_tool_names().join(",");
         let mut command = Command::new(self.executable()?);
+        seal(&mut command);
         command
             .arg("-p")
             .arg(prompt)
-            .arg("--tools")
-            .arg("")
-            .arg("--agents")
-            .arg("{}")
-            .arg("--strict-mcp-config")
             .arg("--mcp-config")
             .arg(config.to_string())
-            .arg("--setting-sources")
-            .arg("")
-            .arg("--no-session-persistence")
-            .arg("--disable-slash-commands")
             .arg("--allowedTools")
             .arg(allowed_tools)
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--verbose")
-            .arg("--include-hook-events")
-            .arg("--no-chrome")
-            .env("DISABLE_AUTOUPDATER", "1")
-            .env("CLAUDE_CODE_DISABLE_AGENT_VIEW", "1")
-            .env("CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS", "1")
-            .env("CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION", "0")
-            .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")
             .current_dir(
                 session
                     .socket_path()
@@ -223,31 +201,95 @@ impl ClaudeCodeBackend {
         Ok(output)
     }
 
-    fn sealed_config_fingerprint(&self) -> String {
-        let contract = json!({
-            "backend": self.id(),
-            "flags": [
-                "-p", "--tools=", "--agents={}",
-                "--strict-mcp-config", "--setting-sources=",
-                "--no-session-persistence", "--disable-slash-commands",
-                "--output-format=stream-json", "--verbose", "--include-hook-events",
-                "--no-chrome"
-            ],
-            "environment": {
-                "DISABLE_AUTOUPDATER": "1",
-                "CLAUDE_CODE_DISABLE_AGENT_VIEW": "1",
-                "CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS": "1",
-                "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION": "0",
-                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"
-            },
-            "allowedTools": m0_tool_registry()
-                .into_iter()
-                .map(|tool| format!("mcp__daybook__{}", tool.name))
-                .collect::<Vec<_>>(),
-            "helper": self.helper_path.file_name().and_then(|name| name.to_str()),
-        });
-        format!("{:x}", Sha256::digest(contract.to_string().as_bytes()))
+    /// 密封契约 = **实际会传给 CLI 的每一个 flag 与 env**，不是一份手抄的清单。
+    ///
+    /// 指纹此前是一个手写的 JSON 字面量：改 `sealed_command` 里的 flag，指纹纹丝不动——
+    /// 而指纹存在的全部意义就是「密封配置变没变」。现在它从同一条命令读回来，
+    /// 加一个 `--dangerously-skip-permissions` 而指纹不变在构造上不可能。
+    ///
+    /// 每次会话都不同的三样（socket 路径、token、prompt）用固定占位串，
+    /// 于是指纹既覆盖全部 flag，又不随机器和会话漂移。
+    fn sealed_config_contract(&self) -> Value {
+        let mut command = Command::new("<claude>");
+        seal(&mut command);
+        command
+            .arg("-p")
+            .arg("<prompt>")
+            .arg("--mcp-config")
+            .arg(
+                json!({
+                    "mcpServers": {
+                        "daybook": {
+                            "command": self.helper_path.file_name().unwrap_or_default(),
+                            "args": [],
+                            "env": {
+                                "DAYBOOK_MCP_SOCKET": "<socket>",
+                                "DAYBOOK_MCP_TOKEN": "<token>",
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            )
+            .arg("--allowedTools")
+            .arg(allowed_tool_names().join(","));
+        let standard = command.as_std();
+        let args = standard
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let mut environment = standard
+            .get_envs()
+            .map(|(key, value)| {
+                format!(
+                    "{}={}",
+                    key.to_string_lossy(),
+                    value.unwrap_or_default().to_string_lossy()
+                )
+            })
+            .collect::<Vec<_>>();
+        environment.sort();
+        json!({ "backend": self.id(), "args": args, "environment": environment })
     }
+
+    fn sealed_config_fingerprint(&self) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(self.sealed_config_contract().to_string().as_bytes())
+        )
+    }
+}
+
+/// 密封本身：关掉内置工具、子 agent、外部配置来源与自动记忆。
+/// **`sealed_command` 与指纹共用这一处**——两者不可能再分叉。
+fn seal(command: &mut Command) {
+    command
+        .arg("--tools")
+        .arg("")
+        .arg("--agents")
+        .arg("{}")
+        .arg("--strict-mcp-config")
+        .arg("--setting-sources")
+        .arg("")
+        .arg("--no-session-persistence")
+        .arg("--disable-slash-commands")
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
+        .arg("--include-hook-events")
+        .arg("--no-chrome")
+        .env("DISABLE_AUTOUPDATER", "1")
+        .env("CLAUDE_CODE_DISABLE_AGENT_VIEW", "1")
+        .env("CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS", "1")
+        .env("CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION", "0")
+        .env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+}
+
+fn allowed_tool_names() -> Vec<String> {
+    m0_tool_registry()
+        .into_iter()
+        .map(|tool| format!("mcp__daybook__{}", tool.name))
+        .collect()
 }
 
 async fn collect_reader_output(
@@ -702,6 +744,66 @@ mod agent {
             status.error_code.as_deref(),
             Some("agent.backend_unavailable")
         );
+    }
+
+    fn fingerprint_backend() -> ClaudeCodeBackend {
+        ClaudeCodeBackend::with_paths(
+            Some(PathBuf::from("/opt/homebrew/bin/claude")),
+            PathBuf::from("/Applications/Daybook.app/Contents/MacOS/daybook-mcp"),
+        )
+    }
+
+    #[test]
+    fn fingerprint_is_derived_from_the_real_command() {
+        // 指纹此前是手写字面量：改 sealed_command 的 flag 它纹丝不动。
+        let contract = fingerprint_backend().sealed_config_contract().to_string();
+        for flag in [
+            "--tools",
+            "--agents",
+            "--strict-mcp-config",
+            "--setting-sources",
+            "--no-session-persistence",
+            "--disable-slash-commands",
+            "--include-hook-events",
+            "--no-chrome",
+            "--allowedTools",
+            "--mcp-config",
+        ] {
+            assert!(contract.contains(flag), "{flag} 不在密封指纹的输入里");
+        }
+        assert!(contract.contains("CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION=0"));
+        for tool in m0_tool_registry() {
+            assert!(contract.contains(&format!("mcp__daybook__{}", tool.name)));
+        }
+    }
+
+    #[test]
+    fn fingerprint_moves_when_the_seal_is_loosened() {
+        let sealed = fingerprint_backend().sealed_config_contract();
+        let mut loosened = Command::new("<claude>");
+        seal(&mut loosened);
+        loosened.arg("--dangerously-skip-permissions");
+        let loosened_args = loosened
+            .as_std()
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_ne!(sealed["args"], serde_json::to_value(loosened_args).unwrap());
+    }
+
+    #[test]
+    fn fingerprint_does_not_drift_with_install_location() {
+        // 会话 token、socket 路径与 helper 所在目录都不该进指纹。
+        let packaged = fingerprint_backend();
+        let development = ClaudeCodeBackend::with_paths(
+            Some(PathBuf::from("/usr/local/bin/claude")),
+            PathBuf::from("/Users/someone/repo/src-tauri/target/debug/daybook-mcp"),
+        );
+        assert_eq!(
+            packaged.sealed_config_fingerprint(),
+            development.sealed_config_fingerprint()
+        );
+        assert_eq!(packaged.sealed_config_fingerprint().len(), 64);
     }
 
     #[test]

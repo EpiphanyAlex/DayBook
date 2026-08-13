@@ -1,4 +1,4 @@
-import type { ReviewPolicy } from './policy'
+import { POLICY, RECONCILIATION, type ReviewPolicy } from './policy'
 
 interface AttestationHintProps {
   policy: ReviewPolicy
@@ -17,8 +17,8 @@ export function AttestationHint({
   reportedTotalText,
   calculatedTotalText,
 }: AttestationHintProps) {
-  if (policy.confirmationPolicy !== 'user_attested_batch') return null
-  const mismatch = policy.reconciliationStatus === 'failed'
+  if (policy.confirmationPolicy !== POLICY.USER_ATTESTED_BATCH) return null
+  const mismatch = policy.reconciliationStatus === RECONCILIATION.FAILED
   return (
     <aside className={`attestation-hint ${mismatch ? 'is-mismatch' : ''}`} role="note">
       {mismatch && (

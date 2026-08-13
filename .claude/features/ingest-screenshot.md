@@ -24,7 +24,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `src/App.tsx` | 拖放、口述提交令牌、来源列表、失败重试与停止 |
+| `src/App.tsx` | 拖放、口述提交令牌、来源列表、失败重试与停止。来源行是一个容器 + 两个**兄弟** `<button>`（选中 / 重试或停止），不是嵌套按钮——嵌套在读屏与键盘下不成立 |
 | `src-tauri/src/ingest.rs` | magic bytes 校验、SHA-256、证据落盘、幂等、状态机、启动恢复 |
 | `src-tauri/src/lib.rs` | 导入、口述、解析与取消 Tauri commands；窗口出现前恢复中断任务 |
 | `src-tauri/migrations/0001_m0.sql` | `sources`、文件部分唯一索引、口述令牌唯一索引、状态约束 |

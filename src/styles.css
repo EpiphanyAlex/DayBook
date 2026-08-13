@@ -78,7 +78,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .data-location strong { color: #c6d1cd; }
 .data-location code { overflow-wrap: anywhere; color: #809591; font: 8px/1.5 "SFMono-Regular", Consolas, monospace; }
 .data-location button { justify-self: start; padding: 0; color: var(--brass); background: none; border: 0; text-decoration: underline; cursor: pointer; }
-.source-ticket { width: 100%; padding: 12px 13px; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 9px; align-items: center; text-align: left; color: #dde6e2; background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,.07); cursor: pointer; }
+.source-ticket { width: 100%; padding-right: 13px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 9px; align-items: center; color: #dde6e2; border-bottom: 1px solid rgba(255,255,255,.07); }
+.source-ticket__main { min-width: 0; padding: 12px 0 12px 13px; display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 9px; align-items: center; text-align: left; color: inherit; background: transparent; border: 0; cursor: pointer; }
 .source-ticket:hover { background: rgba(255,255,255,.04); }
 .source-ticket.is-selected { background: var(--paper); color: var(--ink); box-shadow: inset 3px 0 var(--signal); }
 .source-ticket__kind { padding: 4px 3px; text-align: center; color: var(--brass); border: 1px solid currentColor; font: 700 9px/1 "SFMono-Regular", Consolas, monospace; }
@@ -87,7 +88,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .source-ticket__copy small { color: #94aaa5; font-size: 10px; }
 .source-ticket.is-selected small { color: #647471; }
 .source-ticket__copy .state-failed { color: #f28d71; }
-.retry-link { color: var(--signal); font-size: 10px; text-decoration: underline; }
+.retry-link { padding: 4px 2px; color: var(--signal); background: none; border: 0; font-size: 10px; text-decoration: underline; cursor: pointer; }
 .stop-link { color: #f28d71; }
 
 .evidence-stage { min-width: 0; overflow: auto; padding: 23px 26px 16px; background-color: #d7d2c7; background-image: radial-gradient(rgba(23,39,45,.07) .7px, transparent .7px); background-size: 6px 6px; }
