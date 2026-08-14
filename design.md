@@ -698,12 +698,12 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 
 | Token | size / lh / ls | 族 | 示例 |
 |---|---|---|---|
-| `{typography.display-lg}` | 46 / 1.24 / -.005em | display | 把过去的钱和事，补记回来。 |
-| `{typography.display-md}` | 36 / 1.26 / 0 | display | 你的回溯记录器 |
+| `{typography.display-lg}` | 46 / 1.24 / -.005em | display | 把零散的钱和事，整理清楚。 |
+| `{typography.display-md}` | 36 / 1.26 / 0 | display | 你的个人事务助理 |
 | `{typography.title-lg}` | 27 / 1.3 / 0 | display | 4 条待确认 |
 | `{typography.title-md}` | 21 / 1.35 / 0 | display | 一段口述 |
 | `{typography.title-sm}` | 17 / 1.4 / 0 | display | Coles 日用采买 |
-| `{typography.body-lg}` | 15 / 1.6 / 0 | sans | 拖入一张截图，或把记得的事情说成一段话。 |
+| `{typography.body-lg}` | 15 / 1.6 / 0 | sans | 拖入截图，或说一段话。不用逐条填表。 |
 | `{typography.body-md}` | 13 / 1.6 / 0 | sans | **界面默认字号。** |
 | `{typography.body-sm}` | 12 / 1.55 / 0 | sans | 辅助说明与列表次级信息。 |
 | `{typography.label}` | 11 / 1.4 / .02em | sans | 控件标签 · **最小可读字号，低于 11px 一律不允许** |

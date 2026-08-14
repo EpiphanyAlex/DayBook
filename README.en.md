@@ -2,9 +2,11 @@
 
 [中文](./README.md) · **English**
 
-**A local-first AI desktop assistant that helps you reconstruct the money and the days you never got around to recording.**
+**A local-first AI personal admin assistant that turns scattered money and life details into financial records and plans — without making you fill out one form at a time.**
 
-It is not an expense tracker and not a to-do app. It is a **retroactive recorder** — built for *catching up after the fact*, not for *capturing in the moment*.
+**Life can happen first. The record can catch up later.** Give Daybook screenshots or tell it what happened and what comes next; it separates the transactions and items into drafts for you to review.
+
+In v1, “personal admin” means exactly two entities: transactions and items. Daybook is not a full calendar or a general-purpose secretary; its core promise is to remove the repetitive, one-record-at-a-time form work from tracking money and planning tasks.
 
 > `daybook` is the accounting term for a day book: a chronological register of original vouchers. Read literally it is also "the book of days." One word covers both halves of the product — money and time — and it happens to describe the data model exactly: a single timeline of evidence-backed raw records, ordered by date.
 
@@ -79,7 +81,9 @@ Expense trackers are designed around the premise that you record a transaction a
 
 **Existing tools abandon the user at exactly that step.** They keep optimizing for capture-in-the-moment and leave after-the-fact reconstruction entirely manual: scrolling statements, cross-checking screenshots, typing entries one at a time, doing exchange-rate math by hand. Catching up once costs far more than recording ten times in the moment — so people quit.
 
-Daybook starts from the opposite premise: **you are catching up, by default.**
+The same friction appears in planning: calendar and to-do tools ask you to create each item separately and keep filling in titles, dates, states and durations. Money and tasks live in different apps, but the burden is the same — **repeatedly translating a life that has happened, or is about to happen, into forms.**
+
+Daybook starts from the opposite premise: **the primary path should not require one form per record; life can happen first, and the record can catch up later.** You hand over screenshots, an utterance or text, and the agent organizes the transactions and items into drafts for review.
 
 ## How it works
 
@@ -168,7 +172,7 @@ Opening a pull request? The workflow and the template are described in [`CLAUDE.
 
 ## Success criteria
 
-- **One month in**: three catch-up sessions done with it, **and not one of them followed by going back to the original screenshots out of doubt**. The moment quiet double-checking starts, it has already failed.
+- **One month in**: three focused sessions organizing both money and items, **and not one of them followed by going back to the original screenshots out of doubt about the ledger**. The moment quiet double-checking starts, it has already failed.
 - **End state**: the old expense app and the old calendar app stop being opened.
 
 ---
