@@ -1,5 +1,5 @@
 ---
-version: 0.3
+version: 0.4
 name: Daybook-desktop-tokens
 description: 日簿 Daybook 桌面端的 token design system —— 一套为「事后补记」写的全亮界面。底色是 Cloud Dancer 米白 ({colors.paper-200})，也正是应用图标的底板；棕墨 ({colors.ink-950}) 只作为文字、图标与线，层次由四级浅面加一根发丝线承担，不靠明暗反转。四个语义色同亮度 (L .58) 同彩度 (C .105) 站在一个色环上——靛青 action、松绿 settled、麻黄 caution、朱砂 alarm，全部取自应用图标里已有的颜色。三层单向依赖：primitive → semantic（按区域重映射）→ component，组件只准引用 semantic。产品最生死的一条约束在 token 层就有名字：AI 写入的草稿只给中性灰与 45° 斜纹，机器写的东西不配拥有颜色。
 
@@ -477,15 +477,16 @@ components:
     border: "1px dashed rgba(33,18,8,.30)"
 ---
 
-# Daybook 桌面端 Token Design System v0.3
+# Daybook 桌面端 Token Design System v0.4
 
-> 出处：Claude Design 项目「Daybook桌面端设计」的 `Daybook Token System v3.dc.html`（v0.3 · 全亮），2026-08-14 落到本仓库。
+> 出处：Claude Design 项目「Daybook桌面端设计」的 `Daybook Token System v3.dc.html`（v0.4 · 全亮），2026-08-14 落到本仓库。
+> **两边同步。** 本文与设计稿都是 v0.4，意图色六列、品类措辞一致；差异出现时以本文为准，并回流设计稿。
 > **状态：待评审，不是定稿。** 仓库根 [`CLAUDE.md`](./CLAUDE.md)「当前状态」写明 M1 开工前才确定 token design system；当前 `src/` 的界面是 M0 功能基线，**尚未按本文实现**。
 > 图形的事实源在 [`assets/brand/README.md`](./assets/brand/README.md)，不在这里——本文只取它的颜色。
 
 ## Overview
 
-M0 的界面已经把概念说对了：一张纸摊在工作台上，纸上是不可改写的原件，右侧是等待人确认的草稿。v0.3 保留那个概念，但把整个应用改成**全亮**：底色就是 Cloud Dancer 那一档米白 `{colors.paper-200}`，棕墨只作为文字、图标与线。桌面工具整天开着，大面积深色会压人——层次改由四级浅面加一根发丝线承担，不靠明暗反转。**全亮界面里唯一的深色面是通知条**（`{colors.ink-900}`）。
+M0 的界面已经把概念说对了：一张纸摊在工作台上，纸上是不可改写的原件，右侧是等待人确认的草稿。本版保留那个概念，但把整个应用改成**全亮**：底色就是 Cloud Dancer 那一档米白 `{colors.paper-200}`，棕墨只作为文字、图标与线。桌面工具整天开着，大面积深色会压人——层次改由四级浅面加一根发丝线承担，不靠明暗反转。**全亮界面里唯一的深色面是通知条**（`{colors.ink-900}`）。
 
 颜色全部取自应用图标：棕墨 `#4E2F1C`、麻色 `#C4B79C`、那抹蓝 `#A9C6E8`、底板米白 `#F1EFEA`。四个语义色同亮度（L .58）同彩度（C .105）站在一个色环上——靛青 action、松绿 settled、麻黄 caution、朱砂 alarm。**彩度压到 .105 是刻意的**：它们要和图标里那些哑光颜色坐在一起，不是和 SaaS 的霓虹坐在一起。结构上参考 Notion 的取向：中性面占绝大多数、淡色底承载分类、一个签名色只留给主行动、方角而非胶囊。
 
@@ -906,22 +907,22 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 
 ## 相对设计稿的偏离
 
-**只有一处，但它改了语义层的形状，所以单列一节。**
+**只有一处，它改了语义层的形状，所以单列一节。已于同日回流设计稿，两边现在一致。**
 
-### 意图色从五列变成六列（2026-08-14 定）
+### 意图色从五列变成六列（2026-08-14 定，同日回流）
 
-设计稿的 intent 表是 `.surface / .border / .fill / .fill-hover / .text` 五列。**本文是六列**——在 `.fill` 前面插了一个 `.accent`。
+v0.3 的 intent 表是 `.surface / .border / .fill / .fill-hover / .text` 五列。**v0.4 是六列**——在 `.fill` 前面插了一个 `.accent`。
 
-**为什么**：设计稿同一段里有两句话互相矛盾——
+**为什么**：v0.3 同一段里有两句话互相矛盾——
 
 > 「`.fill` 上的文字统一用 `intent.*.on-fill = paper.50`：action 6.6:1 / settled 6.4:1 / pending 6.7:1 / alarm 7.0:1，**全部过 AA**。」
 > 「`.fill`（L .58）只做图标、进度、色条，**不承载小字**。」
 
-实测把两句话分开了：**那四个声称的对比度全部是 600 档的值，而设计稿 `.fill` 那一列画的是 500 档**（`settled` 行除外——它本来就画的 600，与另外三行不齐）。500 档实测 3.96–4.37，**四个全部不过 AA**。
+实测把两句话分开了：**那四个声称的对比度全部是 600 档的值，而 v0.3 `.fill` 那一列画的是 500 档**（`settled` 行除外——它本来就画的 600，与另外三行不齐）。500 档实测 3.96–4.37，**四个全部不过 AA**。
 
-也就是说，设计稿的 `.fill` 同时被要求做两件互相冲突的事：**当按钮底（要能压白字）** 和 **当进度条/图标（要那个更亮的调子）**。一个 token 满足不了两个约束，所以拆成两个：
+也就是说，v0.3 的 `.fill` 同时被要求做两件互相冲突的事：**当按钮底（要能压白字）** 和 **当进度条/图标（要那个更亮的调子）**。一个 token 满足不了两个约束，所以拆成两个：
 
-| | 设计稿 | 本文 | 干什么 |
+| | v0.3 | v0.4 | 干什么 |
 |---|---|---|---|
 | — | — | `.accent` = 500 | 图标、进度、色条、描边、焦点环。**永不承载文字** |
 | `.fill` | 500 | `.fill` = 600 | 能压白字的实底：主按钮、开关的「开」 |
@@ -931,7 +932,7 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 
 **受影响的组件引用**（都在本文 `components:` 里）：`button-primary` 与 `button-primary-lg` 取 `.fill`；banner 的 2px 竖线、`progress-parse-fill`、`field-*-focus` 的焦点环与描边取 `.accent`；`list-row-source-selected` 的 3px 标记线取 `.fill`（＝ `brand.600`，与 `ring.marker`、`color.draft.marker.picked` 同值）。
 
-> 这一处需要**回流到设计稿**：Claude Design 项目里的 `Daybook Token System v3.dc.html` 仍是五列。
+> **已回流**（2026-08-14）：Claude Design 项目里的 `Daybook Token System v3.dc.html` 已更新为六列并升到 v0.4，同一处还附了「v0.4 更正」说明为什么拆。回读逐字节校验一致，**两边不再有分叉**。
 
 ## 待澄清
 
