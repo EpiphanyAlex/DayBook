@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "verify:m0": "node scripts/verify-m0.mjs",
     "eval": "node scripts/eval.mjs",
+    "eval:export": "node scripts/export-fixture.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
