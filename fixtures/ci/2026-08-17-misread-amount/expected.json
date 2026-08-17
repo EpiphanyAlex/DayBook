@@ -1,0 +1,30 @@
+{
+  "_": "唯一的真值（07 §3.2）。这四条就是 input.png 上印着的东西——人工数行号标注的。全部为合成数据，非真实账目。",
+  "sourceKind": "file",
+  "items": [
+    {
+      "sourceOrdinal": 1,
+      "occurredOn": "2026-08-03",
+      "amountMinor": "1680",
+      "currency": "AUD",
+      "direction": "expense",
+      "merchant": "MARKET"
+    },
+    {
+      "sourceOrdinal": 2,
+      "occurredOn": "2026-08-03",
+      "amountMinor": "4250",
+      "currency": "AUD",
+      "direction": "expense",
+      "merchant": "BAKERY"
+    },
+    {
+      "sourceOrdinal": 3,
+      "occurredOn": "2026-08-04",
+      "amountMinor": "990",
+      "currency": "AUD",
+      "direction": "expense",
+      "merchant": "CINEMA"
+    }
+  ]
+}

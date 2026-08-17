@@ -1,0 +1,17 @@
+{
+  "_": "eval 用例清单（docs/prd/07-eval.md §3.4）。用例清单是显式的、进 git 的——每次跑动态从数据库挑 20 条，跑出来的两轮数字就不可比，而 §3.5 的整套判定建立在「逐条对比上一轮」上。改这个文件是一次显式的动作。",
+  "_pool": "分池标记必填，三选一：screenshot / utterance 是判定池，control 是对照栏（如实报数，不参与 go / no-go）。缺标记 `node scripts/eval.mjs --dry-run` 直接非零退出——分池是判定口径的一部分，不是展示选项（docs/PRD.md §9.4 口径①）。",
+  "_local": "真实样本的用例进 fixtures/local/ 且不进 git（§3.7）。本文件里现在只有合成的 CI 用例。",
+  "version": 1,
+  "cases": [
+    {
+      "id": "misread-amount",
+      "dir": "fixtures/ci/2026-08-17-misread-amount",
+      "expected": "expected.json",
+      "pool": "screenshot",
+      "enabled": true,
+      "addedOn": "2026-08-17",
+      "flaky": false
+    }
+  ]
+}

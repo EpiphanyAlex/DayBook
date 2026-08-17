@@ -64,6 +64,10 @@ function verifyAcceptanceSelectors() {
     'docs/prd/01-agent-runtime.md',
     'docs/prd/02-ingest.md',
     'docs/prd/03-review.md',
+    // 07 评测的 §6 也点名了一批 `cargo test eval::…` 选择器，而它们此前无人强制——
+    // 只要有一条改了名或没落地，这里就红。它不属于 M0 四份，但它的回归夹具是零额度、
+    // 进 CI 的那一半（07 §3.6 的成本表），和 M0 门禁跑在同一条命令里。
+    'docs/prd/07-eval.md',
   ]
   const missing = []
   for (const path of docs) {
@@ -107,6 +111,11 @@ run('Rust clippy', 'cargo', ['clippy', '--offline', '--all-targets', '--all-feat
 run('Rust 单元与确定性端到端', 'cargo', ['test', '--offline'], { cwd: rust })
 verifyAcceptanceSelectors()
 run('MCP helper 构建', 'cargo', ['build', '--offline', '--bins'], { cwd: rust })
+
+// 07 评测 §6：不调用 agent 的情况下校验 eval 集完整性。零额度、确定性，所以进 CI；
+// **真跑 agent 的 eval 轮次不在这里**，那一条烧订阅额度（07 §3.1 与 §4）。
+// 放在 `--bins` 之后，是为了让 eval.mjs 直接用刚构建好的 daybook-eval，不再触发一次编译。
+run('eval 集完整性（不调用 agent）', 'node', ['scripts/eval.mjs', '--dry-run'])
 
 noMatches('MCP 不依赖提示词目录', 'prompts/', ['src-tauri/src/mcp'])
 noMatches('MCP 不可达确认动作', 'confirm', ['src-tauri/src/mcp'])

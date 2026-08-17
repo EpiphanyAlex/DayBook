@@ -1,0 +1,89 @@
+{
+  "_": "agent 那次调了哪些工具、每次的完整参数（07 §3.6）。这是一次「把 16.80 读成 168.00」的录像：第 1 条的 amountMinor 是 16800，而原件上印的是 16.80。声明合计抄对了（6920），于是逐笔之和 22040 与它对不上——闸门 3 必须报警，批量确认必须被拒。",
+  "calls": [
+    {
+      "tool": "read_source",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111"
+      }
+    },
+    {
+      "tool": "draft_transaction",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111",
+        "evidenceText": "2026-08-03  MARKET  168.00 AUD",
+        "sourceOrdinal": 1,
+        "evidenceSpan": null,
+        "occurredOn": "2026-08-03",
+        "amountMinor": "16800",
+        "currency": "AUD",
+        "baseAmountMinor": "16800",
+        "baseCurrency": "AUD",
+        "ratePpm": "1000000",
+        "direction": "expense",
+        "merchant": "MARKET",
+        "category": null,
+        "channel": null,
+        "confidence": 88
+      }
+    },
+    {
+      "tool": "draft_transaction",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111",
+        "evidenceText": "2026-08-03  BAKERY  42.50 AUD",
+        "sourceOrdinal": 2,
+        "evidenceSpan": null,
+        "occurredOn": "2026-08-03",
+        "amountMinor": "4250",
+        "currency": "AUD",
+        "baseAmountMinor": "4250",
+        "baseCurrency": "AUD",
+        "ratePpm": "1000000",
+        "direction": "expense",
+        "merchant": "BAKERY",
+        "category": null,
+        "channel": null,
+        "confidence": 95
+      }
+    },
+    {
+      "tool": "draft_transaction",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111",
+        "evidenceText": "2026-08-04  CINEMA  9.90 AUD",
+        "sourceOrdinal": 3,
+        "evidenceSpan": null,
+        "occurredOn": "2026-08-04",
+        "amountMinor": "990",
+        "currency": "AUD",
+        "baseAmountMinor": "990",
+        "baseCurrency": "AUD",
+        "ratePpm": "1000000",
+        "direction": "expense",
+        "merchant": "CINEMA",
+        "category": null,
+        "channel": null,
+        "confidence": 94
+      }
+    },
+    {
+      "tool": "report_source_total",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111",
+        "amountMinor": "6920",
+        "currency": "AUD",
+        "kind": "expense_total",
+        "evidenceText": "TOTAL  69.20 AUD"
+      }
+    },
+    {
+      "tool": "complete_source",
+      "arguments": {
+        "sourceId": "11111111-1111-4111-8111-111111111111",
+        "itemCount": 3,
+        "unparsedNote": ""
+      }
+    }
+  ]
+}

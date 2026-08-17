@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:m0": "node scripts/verify-m0.mjs",
+    "eval": "node scripts/eval.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
