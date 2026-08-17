@@ -3,7 +3,7 @@ title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: ready
 owner: "@maintainer"
 date: 2026-08-17
-version: v0.21
+version: v0.22
 ---
 
 # 01 · Agent 运行时
@@ -17,7 +17,7 @@ version: v0.21
 
 1. 把数据库读写能力交给用户本机已登录的 agent CLI；
 2. **在结构上保证** agent 无法绕过草稿区（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）；
-3. 不被单一厂商绑死——**厂商对「第三方应用能不能用订阅额度」的政策会变**（[`docs/PRD.md` §12](../PRD.md)，那里的具体日期未经核实，本文不复述）。
+3. 不被单一厂商绑死——**厂商对「第三方应用能不能用订阅额度」的政策会变**。现行条款与 2026-08-12 实测见 [`docs/PRD.md` §12](../PRD.md) 和 [spike 记录](../spikes/2026-08-12-r6-agent-runtime.md)；易腐的日期与条款原文不在本文复述。
 
 **本模块是 [ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1 的物理实现处。** 如果这里的工具面开错一个口子，上层所有校验都是装饰。
 
@@ -69,9 +69,23 @@ version: v0.21
 | `report_source_total` | **M0** | 回报它在来源上看到的合计 | `{parse_attempts.reported_total_*}`（列级，**只写本次尝试那一行**） | ∅ |
 | `complete_source` | **M0** | **声明「这个来源我读完了」**，附条目数与未解析区域 | `{parse_attempts.reported_item_count, .unparsed_note}`（列级，同上） | ∅ |
 | `query_memory` | M3 | 查记忆规则 | ∅ | **仅显式传入的键**（商户名、语境词）；**不提供「列出全部规则」** |
-| `draft_item` | M3 | 起草一个事项 | `{draft_items}` | ∅ |
+| `find_item_candidates` | M3 | 为当前来源中的修改意图查找有界事项候选 | ∅ | 每次最多返回 8 个 `id / title / status / plan摘要 / result摘要 / due / list`；不得列出全表，不返回来源、审计或完整备注 |
+| `draft_item` | M3 | 起草事项的新建或对已有事项的更新/待消歧意图 | `{draft_items}` | target/candidate id 必须来自本次 `find_item_candidates` 快照；不得自行搜索/列举 `items` |
 
 > **两列都是工具注册时必须声明的元数据，不是文档里的说明文字。** 验收 `agent::tools_cannot_write_fact_tables` 与 `agent::tools_declare_read_scope` 遍历的正是这两份声明——没有它们，测试无法实现。
+
+#### `draft_item`：M3 的 create / update 共用草稿工具
+
+依据 [05 事项 §3.4](./05-items.md) 与 [03 审核 §3.6](./03-review.md)：
+
+- `operation = create` 起草新事项，不带 `target_item_id`；
+- update 先经 `find_item_candidates` 取得最多 8 个候选摘要。唯一目标时写 `resolution_state = ready` + `target_item_id`；零个或仍有多个候选时写 `resolution_state = needs_target` + 候选 id 快照，目标为空；
+- 两种 update payload 都只含用户明确要求修改的 tri-state patch（未提及 / 清空 / 新值）；needs_target 也写真实 `draft_items` 行并计入 `complete_source.item_count`，但不可确认；
+- 工具只验证 target/candidate 属于本次快照并写 `draft_items`，**不能写 `items`、不能自行搜索全表、不能确认变更**；
+- 用户选择候选或改为新建后由 domain 更新草稿可确认状态并写人工审计，不再次请求 agent；
+- `drafted_json` 完整冻结 operation、resolution_state、目标/候选与原始 patch，确认后的事实更新仍由 [03 审核](./03-review.md) 的人工确认路径完成。
+
+这项 M3 扩展不改变 M0 的五工具集合、密封能力探测或当前安装资格/解析就绪度实现计划。
 
 #### `complete_source`：没有完成协议，`parsed` 就是猜的（2026-08-10 新增，产品决定）
 
@@ -427,7 +441,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 **spike 的结论要落到文档里，不能只活在某次会话中**（2026-08-10 提出，**2026-08-12 已兑现**）：具体 flag 组合与**已验证的 CLI 版本号**落在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。**不写进本文**——CLI 的 flag 会变，规格跟着它腐烂；但**也不能不写**，否则下一个人只能把这次考古重做一遍。
 
-> 原定落点是 `.claude/features/agent-runtime.md`（随 M0 落地）。M0 尚未开工，而 [`.claude/features/README.md`](../../.claude/features/README.md) 要求那个目录**只写实况、路径带到文件级**——运行时还不存在，写进去就违反它自己的规矩。**`.claude/features/agent-runtime.md` 建立时把密封配置一节搬过去并链回 spike 记录。**
+> M0 首轮实现已落地，当前实况与具体文件路径记录在 [`.claude/features/agent-runtime.md`](../../.claude/features/agent-runtime.md)，并链回上述 spike。本文继续只规定目标状态与验证方式，不复制易腐 flag。
 
 **为什么必须是运行时探测而不是「设置对了就行」**：密封依赖的是**别人家 CLI 的行为**。它升级一次、加一个默认开启的内置工具、改一个 flag 语义，我们的密封就悄悄漏了，而**本地测试不会有任何反应**——因为它们测的是我们自己那张表。探测把「厂商改了什么」这件我们控制不了的事，变成一个启动时就红的检查。
 
@@ -587,6 +601,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.22 | 2026-08-17 | **补齐 M3 事项 create/update 与目标消歧的工具边界，`status` 仍为 `ready`。** 新增只读有界 `find_item_candidates`（最多 8 个最小摘要）；`draft_item` 的 ready update 带唯一 target，needs_target update 持久化候选快照并计入完成条数但不可确认。两工具不得搜索/列举全表、不得写事实或确认。该扩展来自 [05 事项](./05-items.md) v0.8，只影响 M3；M0 五工具集合与 v0.21 readiness 修正计划不变 |
 | v0.21 | 2026-08-17 | **安装资格 / 解析就绪度规格重写，`status` 由 `review → draft → ready`。** §3.5 拆开 Daybook 安装启动、CLI 合格安装与完整 readiness probe：可执行文件 + 可读版本只说明 CLI 可用候选，认证 + helper + 密封 capability manifest 全过才 `ready = true`；探测完成前 fail closed，后端失败不阻止应用启动，本位币仍是任务级前置。补 IPC 状态矩阵、7 条自动验收与 1 条人工验收。当前实现存在 `is_file()` 假阳性与 probe 前短暂假 ready；下一步须从当前 ready 规格产出实施计划、经人批准并真正开始开发时转 `in-progress`，验收通过后才回到 `review` |
 | v0.20 | 2026-08-13 | **实现验收回流两处，`status` 仍为 `review`。** ① §3.2 可信性要求第 6 条的合计词闸门补出口（`unparsed_note` 说明即可完成）与边界（第二次仍未满足即 `agent.protocol_violation`）——此前这条既无出口也不计次，非金额的「一共」会让整次解析挂到硬超时。② CLI 发现路径补 nvm / fnm / volta / pnpm 等位置，修 Finder 启动的 `.app` 上「装了却说没装」。§6 验收新增 2 条 |
 | v0.19 | 2026-08-13 | **M0 实现验收进入 `review`。** 五工具密封能力探测、独立 MCP helper/UDS、进程收束、分级日志与真实 Claude Code 链路通过；live 验收发现并补上口述显式合计的代码侧完成闸门 |
