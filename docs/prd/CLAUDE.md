@@ -77,6 +77,8 @@ review → done          收尾三件事做完（回流 + INDEX.md 同步 + feat
 
 理由和整个产品的哲学同源：**把「你信不信 agent 说完成了」换成「跑一下就知道」**——正如产品里把「信任 AI 的解析」换成「扫一眼原文 + 总额对账」（[ADR-0002](../adr/0002-ai-never-writes-directly.md)）。
 
+**但「命令写进规格」不等于 `ready` 阶段测试已经实现。** 状态顺序是规格先 `ready`，随后 plan 审批并开始开发才进 `in-progress`；因此 `scripts/verify-m0.mjs` 的选择器实存检查只对 `in-progress` / `review` / `done` 强制执行，`draft` / `ready` / `blocked` / `archived` 跳过。一旦进入 `in-progress`，当前里程碑的选择器必须随首个实现提交落地——不得靠继续标 `ready` 绕过门禁。该规则的产品级出处与 fail-closed 要求见 [`docs/PRD.md` §9.3](../PRD.md)。
+
 **写不成命令的（如「UI 手感」「40 笔 30 秒审完」），标注为人工验收并写清操作步骤与判定阈值**，不要含糊成一句形容词。
 
 ## 回流义务
