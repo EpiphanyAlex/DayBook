@@ -13,9 +13,11 @@
 | | 测什么 | 怎么跑 | 成本 | 进 CI | 现状 |
 |---|---|---|---|---|---|
 | **回归** | 代码改了会不会挂 | 重放夹具 | 零额度、确定性 | ✅ | **已落地** |
-| **eval** | 模型读得准不准 | 真调 agent CLI | 烧额度 | ❌ | **待建** |
+| **eval** | 模型读得准不准 | 真调 agent CLI | 烧额度 | ❌ | **已落地** |
 
 **夹具导出器已落地**（2026-08-17）：`node scripts/export-fixture.mjs <agent_session_id>` 把一次真实解析打包成可重放的夹具目录。它不调 agent，读的是已经落盘的日志与库。
+
+**`node scripts/eval.mjs`（不带参数）会烧订阅额度**——它真起用户自己的 agent CLI，一条用例 ≈ 一次真实导入。零额度的是 `--dry-run` 与 `--replay`。
 
 `node scripts/eval.mjs`（不带参数）会**非零退出并明说真实轮次没做**，不静默返回成功。
 
@@ -38,6 +40,13 @@ node scripts/export-fixture.mjs <agent_session_id>
       ├ copy evidence → input.png | input.txt
       ├ load_drafted → expected.json（annotated: false）    ← **只是预填，不是真值**
       └ env.json（版本三元组取自那次尝试自己的记录）
+
+node scripts/eval.mjs                 ← **烧额度**：真起 agent CLI
+  → daybook-eval run
+  → src-tauri/src/eval/live.rs::ensure_backend_ready   ← 跑任何用例之前，探测不出就非零退出
+  → src-tauri/src/eval/live.rs::run_trial × (flaky ? --trials : 1)
+      └ 与 --replay 之后完全同一条打分路径
+  → 第 1 轮出正式数；其余进 TrialDiagnostics（全过 / 部分过 / 全不过，不取平均）
 
 node scripts/eval.mjs --replay
   → daybook-eval replay-score
@@ -63,10 +72,11 @@ node scripts/eval.mjs --replay
 | `src-tauri/src/eval/join.rs` | ordinal full outer join；`HARD_FIELDS`；降级集合匹配（诊断用） |
 | `src-tauri/src/eval/metrics.rs` | 十项阈值常量、`Ratio{num,den}`、`compute_pool`、`overall_verdict` |
 | `src-tauri/src/eval/replay.rs` | `FixtureEnv`、`replay_fixture`、`predictions_from_drafted_json`、口述子串检查 |
+| `src-tauri/src/eval/live.rs` | 真跑轮次；后端探测 fail-closed；多轮汇总（不取平均） |
 | `src-tauri/src/eval/export.rs` | 夹具导出器；CI 集拒写；`annotated: false` 预填；debug 日志缺失时的解释 |
 | `src-tauri/src/eval/report.rs` | 报告结构；分池成栏；归因（backend / model / prompt_hash） |
 | `src-tauri/src/eval/mod.rs` | `EvalError`；两条结构断言（`eval_guards`） |
-| `src-tauri/src/bin/daybook-eval.rs` | `version` / `validate` / `replay-score` / `export-fixture` 四个子命令，手搓参数解析 |
+| `src-tauri/src/bin/daybook-eval.rs` | `version` / `validate` / `replay-score` / `export-fixture` / `run` 五个子命令，手搓参数解析 |
 | `scripts/export-fixture.mjs` | 导出器薄壳；默认输出 `fixtures/local/<date>-<slug>/` |
 | `src-tauri/tests/eval_export_cli.rs` | 子命令级验收（只有集成测试拿得到 `CARGO_BIN_EXE_*`） |
 | `scripts/eval.mjs` | 薄壳：起进程 + 渲染 diff 表；比率格式化只在这里 |
@@ -100,6 +110,9 @@ node scripts/eval.mjs --replay
 - **指标 5（假警报率）的分子要人工裁定**，报告里是 `null` + `pending_manual`，不会显示成 0。
 - **指标 9 / 10（耗时、额度）在重放路径上没有意义**，要等真实轮次。
 - **`verify-m0.mjs` 现在会扫 `docs/prd/07-eval.md` §6 的 `cargo test` 选择器**，改测试名而不改文档就会红。
+- **`--trials N` 只对标 `flaky` 的用例生效**，且第 1 轮出正式数、其余只进诊断栏。多跑几轮挑一个好看的写进报告，与看完答卷再改阈值是同一种作弊。
+- **`tool-calls.json` 不是必需的。** 有就可重放（零额度回归），没有就只能真跑——一条还没跑过的用例本来就没有工具调用可录。按文件在不在推断，不另设开关。
+- **`--keep-runs <dir>` 是闭环的那一步。** 不给它，eval 每轮的数据目录跑完即删，一次跑砸的轮次就没法用 `export-fixture --data-dir <那一轮>` 变成回归夹具。默认仍是删——那里面是真实解析产物。
 - **导出器与日志保留期赛跑。** `tool-calls.json` 的原料是 `<数据目录>/logs/<agent_session_id>.debug.jsonl` 里的 `kind: "tool_call"` 记录，而 `cleanup_expired_logs` 每次应用启动会删 14 天前的 `*.jsonl`；`.debug.jsonl` 还只在 debug 开关打开时才写（发布构建默认关）。想留证据就趁早导。
 
 ## 相关

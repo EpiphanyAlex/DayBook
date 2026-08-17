@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-17
-version: v0.30
+version: v0.31
 ---
 
 # sub-PRD 索引
@@ -23,7 +23,7 @@ version: v0.30
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.11 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.12 |
 
 **M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪，重写为 v0.21 后最终回到 `ready`，等待修正实现。**当前状态：[00 地基](./00-foundation.md) v0.16、[02 导入](./02-ingest.md) v0.14、[03 审核与草稿区](./03-review.md) v0.13 为 `review`；01 v0.21 为 `ready`。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据，但**不覆盖**新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready。
 
@@ -43,7 +43,7 @@ version: v0.30
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（2026-08-17 更新）：① agent 读取当前 `status: ready` 的 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21，产出实施计划并交维护者审批；批准且真正开始开发时转 `in-progress`，跑新增验收后回到 `review`；② 补齐 [07 评测](./07-eval.md) 烧额度的那一半（真跑 agent 的 eval 轮次，**待建**）；③ 按 [07 §3.4](./07-eval.md) 的构成采样、标注、跑分、逐条 diff；④ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；⑤ M0 四份收尾三件事。07 的**零额度那一半已落地**（评分器 · `fixtures/manifest.json` · 一条合成夹具 · 11 条 `eval::*` 回归 · `node scripts/eval.mjs --dry-run` 已进 `verify-m0.mjs` · **夹具导出器**），当前 `status` 为 `in-progress`。**00–02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有，00–02 没有），维护者 review 时一并补；01 的新人工验收并入这一轮。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
+**下一步**（2026-08-17 更新）：① agent 读取当前 `status: ready` 的 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21，产出实施计划并交维护者审批；批准且真正开始开发时转 `in-progress`，跑新增验收后回到 `review`；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；④ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；⑤ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00–02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有，00–02 没有），维护者 review 时一并补；01 的新人工验收并入这一轮。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -116,6 +116,7 @@ version: v0.30
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.31 | 2026-08-17 | **[07 评测](./07-eval.md) → v0.12——真跑 agent 的 eval 轮次落地，工具链可用。** `node scripts/eval.mjs`（不带参数）真起用户自己的 CLI 跑一轮并出 diff 表；`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数（[`docs/PRD.md` §9.4](../PRD.md) 口径③），`--keep-runs` 让一次跑砸的轮次能直接变成回归夹具。同批**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录。**烧额度那一路不进 CI**；07 仍为 `in-progress`（`--no-memory` 属 M3）。M0 四份状态与版本未变 |
 | v0.30 | 2026-08-17 | **[07 评测](./07-eval.md) → v0.11——夹具导出器落地。** `node scripts/export-fixture.mjs <agent_session_id>` 把一次真实解析打包成自包含、可重放的夹具目录，默认写不进 git 的 `fixtures/local/`。同批新增一道闸门：导出的 `expected.json` 带 `annotated: false`，人工逐条核对前评分器拒绝它——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧（[07 §3.2](./07-eval.md)）。**真跑 agent 的 eval 轮次仍未做，07 保持 `in-progress`；M0 四份状态与版本未变。** |
 | v0.29 | 2026-08-17 | **安装资格 / 解析就绪度决定回流。** [01 Agent 运行时](./01-agent-runtime.md) → v0.21，原规格把静态发现与完整 probe 混成一个状态，当前实现会接受不可执行普通文件并在 probe 完成前短暂显示 ready；规格经 `review → draft → ready` 重写，等待从 ready 规格产出实施计划并经人批准后实现。[00 地基](./00-foundation.md) → v0.16，收窄 `agent.backend_unavailable` 的权威语义；[02 导入](./02-ingest.md) → v0.14，同步降级矩阵；两份 `status` 都仍为 `review`。共享决定出处表新增该契约。M0 当前为 01 `ready`、00/02/03 `review`，07 仍为 `in-progress` |
 | v0.28 | 2026-08-17 | **[07 评测](./07-eval.md) → v0.10，`status` 由 `ready` 转 `in-progress`——评测工具链零额度的那一半落地。** 新增 `src-tauri/src/eval/` 评分器、`daybook-eval` 第三个 bin、`scripts/eval.mjs`（`--dry-run` / `--replay`）、`fixtures/manifest.json` 与一条合成夹具；11 条 `eval::*` 回归全绿，`scripts/verify-m0.mjs` 的验收选择器扫描范围扩到含 07，非 live 段加一步 `--dry-run`。**烧额度的那一半（真跑 agent 的轮次、夹具导出器）未做，所以不是 `review`。** M0 四份状态与版本未变，仍全在 `review`；[`docs/PRD.md` §9.4](../PRD.md) 的真实样本 go / no-go 仍未开始 |

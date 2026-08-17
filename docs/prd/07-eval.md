@@ -3,7 +3,7 @@ title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与
 status: in-progress
 owner: "@maintainer"
 date: 2026-08-17
-version: v0.11
+version: v0.12
 ---
 
 # 07 · 评测 Eval
@@ -320,10 +320,10 @@ fixtures/local/<date>-<slug>/
 
 ## 6. 验收标准
 
-**分两块，因为它们的成本不同**（§3.6 的成本表）：零额度、确定性、进 CI 的那一半已经落地；
-真跑 agent 的轮次与夹具导出器烧订阅额度、不进 CI，仍待建。
+**分两块，因为它们的成本不同**（§3.6 的成本表）：零额度、确定性、进 CI 的那一批已全部落地；
+真跑 agent 的轮次也已落地，但它**烧订阅额度、不进 CI**，只能在本机手动跑。
 
-### 零额度那一半（2026-08-17 落地）
+### 零额度（2026-08-17 落地，全部进 `verify-m0.mjs`）
 
 - [x] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [x] `node scripts/eval.mjs --dry-run` 退出码 0——在不调用 agent 的情况下校验 eval 集完整性：`fixtures/manifest.json` 里每个启用的 case 都有输入、期望集合与 `env.json`，且路径都存在（§3.4）
@@ -358,11 +358,20 @@ fixtures/local/<date>-<slug>/
 - [x] `rg -n 'fixtures/' .gitignore` 有命中——本机夹具不进 git
 - [x] `rg -n 'f32|f64' src-tauri/src/eval` 无命中——比率一律是整数对，阈值判定用交叉相乘（`verify-m0.mjs` 的既有门禁覆盖本目录）
 
-### 真实轮次与导出器（待建）
+- [x] `cargo test eval::live_run_refuses_to_start_without_a_backend` 通过——探测不出可用后端时，`node scripts/eval.mjs` **在跑任何一条用例之前**非零退出并明确报原因，**不静默降级为通过**。探测放在最前面还省得烧了一半额度才发现没登录
+- [x] `cargo test eval::live_trial_scores_against_expected` 通过——真跑轮次走生产同一条路径（导入 → `parse_source` → 按 ordinal join 打分）。用脚本化后端注入，因此**整条流水线零额度可测**，剩下的不确定性只有模型本身
+- [x] `cargo test eval::flaky_case_reports_mixed_not_an_average` 通过——同一条用例三轮里对两次错一次，报「部分过」而**不是 0.667**（§3.4）
+- [x] `cargo test eval::trial_summary_has_three_outcomes_and_no_average` 通过——多轮汇总只有「全过 / 部分过 / 全不过」三个取值，结构上没有「比例」这种东西
+- [x] `cargo test eval::case_without_tool_calls_is_valid_but_not_replayable` 通过——一条还没跑过的用例没有工具调用可录，`--dry-run` 不该因此拒绝它（§6 那条只点名输入、期望集合与 `env.json`）
 
-- [ ] `node scripts/eval.mjs`（不带参数，**待建**）真跑 agent 一轮，产出与 `--replay` 同形的 diff 表
-- [ ] `node scripts/eval.mjs --trials 3`（**待建**）对标记为 `flaky` 的用例报「3 轮全过 / 部分过 / 全不过」，**不取平均**（§3.4）
-- [ ] `node scripts/eval.mjs`（**待建**）在检测不到可用 agent CLI 时**非零退出**并明确报原因，**不静默降级为通过**
+### 烧额度（2026-08-17 落地，**不进 CI**）
+
+- [x] `node scripts/eval.mjs`（不带参数）真跑 agent 一轮，产出与 `--replay` 同形的 diff 表
+- [x] `node scripts/eval.mjs --trials 3` 对标记为 `flaky` 的用例报「3 轮全过 / 部分过 / 全不过」，**不取平均**；**第 1 轮出正式数**，之后的只进各用例的诊断栏（§9.4 口径③）
+- [x] `node scripts/eval.mjs --keep-runs <dir>` 留下每一轮的数据目录，供 `export-fixture --data-dir <那一轮>` 把一次跑砸的 eval 直接变成回归夹具（§3.6）
+
+### 待建
+
 - [ ] `node scripts/eval.mjs --no-memory`（**M3**）跑完同一批用例，与常规轮次的纠正率并排输出（§3.4「记忆开关对照」）
 - [ ] `git ls-files fixtures/ | xargs -r rg -l '[0-9]{4,}'` 人工过一遍——仓库内 CI 夹具不含真实金额
 
@@ -373,6 +382,15 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-08-17（第三批）· 真跑 agent 的 eval 轮次落地**（§3.1、§3.4、§6）。
+  `node scripts/eval.mjs`（不带参数）现在真起用户自己的 agent CLI 跑一轮，产出与 `--replay` 同形的 diff 表。至此 §3.6 成本表的两列都有了实现。
+  **一处规格与实现对不上，改的是规格**：§6 原来要求 `--dry-run` 校验「每个启用的 case 都有输入、期望集合与 `env.json`」，而实现（2026-08-17 第一批）把 `tool-calls.json` 也列成必需。**那会逼人先跑一轮真实 agent 才能把一条用例加进清单**——一条还没跑过的用例本来就没有工具调用可录。现改为：`tool-calls.json` **有就可重放（零额度回归），没有就只能真跑**，按文件在不在推断，不另设开关（分池那种判定口径才需要显式声明，见 §3.4 口径①）。
+  三处实现决定：
+  ① **探测放在跑任何一条用例之前**。§6 只要求「检测不到可用 agent CLI 时非零退出」，没说什么时候检测；放最前面既是 fail closed，也省得烧了一半额度才发现没登录。
+  ② **`--trials N` 只对标 `flaky` 的用例生效**（§3.4 原文就是「标记为 `flaky` 或曾经出过错的用例跑 3 轮」），且**第 1 轮出正式数**、之后的只进该用例的诊断栏——多跑几轮挑一个好看的写进报告，与看完答卷再改阈值是同一种作弊，只是换了个位置（§9.4 口径③）。
+  ③ **新增 `--keep-runs <dir>`**，规格里没有。理由是不加它就闭不上环：§6 的人工验收写着「随便挑一条历史 bug，用导出器导出夹具」，而 eval 每轮的数据目录跑完即删，一次跑砸的轮次没法变成回归夹具。给了这个参数就能 `export-fixture --data-dir <那一轮>`。默认仍是跑完即删——那里面是真实解析产物。
+  **整条真跑流水线在零额度下可测**：`run_trial` 接受一个 `&AgentRuntime`，生产入口传 `claude_default()`，测试传脚本化后端。因此「导入 → `parse_source` → 打分 → 多轮汇总」四步都有 `cargo test` 覆盖，剩下的不确定性只有模型本身——而那正是这轮 eval 要量的东西。
 
 - **2026-08-17（第二批）· 夹具导出器落地**（§3.6、§6）。
   `node scripts/export-fixture.mjs <agent_session_id>` 把散落三处的数据（`evidence/` 下的原件、`debug` 级日志里的工具调用、SQLite 里的条目与归因）打包成一个自包含目录。**打包逻辑在 `src-tauri/src/eval/export.rs`**，node 仍只是薄壳。
@@ -429,6 +447,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.12 | 2026-08-17 | **真跑 agent 的 eval 轮次落地——§3.6 成本表的两列现在都有实现。** 新增 `src-tauri/src/eval/live.rs` 与 `daybook-eval run`；`node scripts/eval.mjs` 不带参数即真跑一轮，`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数、其余进诊断栏，`--keep-runs <dir>`（规格外新增）让一次跑砸的轮次能直接变成回归夹具。**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录，要求它有等于逼人先烧一轮额度才能加用例。§6 重排为「零额度」「烧额度」「待建」三块，待建只剩 `--no-memory`（M3）与一条人工核对。**烧额度那一路不进 CI。** |
 | v0.11 | 2026-08-17 | **夹具导出器落地。** 新增 `src-tauri/src/eval/export.rs`、`daybook-eval export-fixture` 子命令、`scripts/export-fixture.mjs` 与 `src-tauri/tests/eval_export_cli.rs`。§6 把导出器那条从「待建」挪进「已落地」并拆成 6 条带真实选择器的验收。**新增一道规格里没有、但不设就是缺陷的闸门**：导出的 `expected.json` 带 `annotated: false`，评分器在人工核对前拒绝——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧，直接跑分等于模型给自己判卷（§3.2）。**真跑 agent 的 eval 轮次仍未做，`status` 保持 `in-progress`。** |
 | v0.10 | 2026-08-17 | **零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`。** 新增 `src-tauri/src/eval/`（manifest 校验 · 真值解析 · ordinal full outer join · 指标计数 · 夹具重放 · 报告）、`src-tauri/src/bin/daybook-eval.rs`、`scripts/eval.mjs`（`--dry-run` / `--replay`）、`fixtures/manifest.json` 与一条合成夹具 `fixtures/ci/2026-08-17-misread-amount/`（「把 16.80 读成 168.00」）。§6 重排为「零额度那一半（已落地）」与「真实轮次与导出器（待建）」两块，26 条已达成、6 条待建；两条此前写成散文的口径回归补上真实 `cargo test` 选择器。§7 记四处偏离：评分器落 Rust（`f32\|f64` 门禁倒逼，且正合「比率必带原始计数」）、`replay_does_not_invoke_agent` 判据改写（后端 trait 上没有 `spawn`）、结构断言独立成条、口径回归的「反向必须变红」做进用例本身。**阈值数字与十项指标口径一个未动。** |
 | v0.9 | 2026-08-16 | **`status` 由 `draft` 转 `ready`——评测工具链可以开工。** §3.4 新增两节，均为[`docs/PRD.md` §9.4](../PRD.md) 四步流程第 1 步的产物、**在拿到任何样本之前写定**：① **M0 go / no-go 的样本构成**——beachhead 定为交易列表类截图（关闭 §5 R8），非 beachhead 来源进不参与判定的对照栏，口述定长度分布；② **四条阈值口径对评分器意味着什么**——规则本身写在 [`docs/PRD.md` §9.4](../PRD.md)（阈值与口径的权威出处），本文只记实现后果，不复述。**阈值数字一个未动。** §5 R8 关闭、R2 补长度分布已定；§6 自动验收由 21 条增至 27 条（人工验收 3 条未变） |

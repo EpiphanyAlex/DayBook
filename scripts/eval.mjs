@@ -7,9 +7,11 @@
 // 最常动；放在一个文件里迟早会一起改。
 //
 // 用法：
-//   node scripts/eval.mjs --dry-run   不调用 agent，只校验 eval 集完整性（零额度、进 CI）
-//   node scripts/eval.mjs --replay    重放 fixtures/ 里的夹具并出 diff 表（零额度、确定性）
-//   node scripts/eval.mjs             真实 eval 轮次 —— **尚未实现**，非零退出
+//   node scripts/eval.mjs --dry-run              不调用 agent，只校验 eval 集完整性（零额度）
+//   node scripts/eval.mjs --replay               重放 fixtures/ 里的夹具并出 diff 表（零额度）
+//   node scripts/eval.mjs                        **真实 eval 轮次 —— 烧订阅额度**
+//   node scripts/eval.mjs --trials 3             flaky 用例跑 3 轮，报「全过 / 部分过 / 全不过」
+//   node scripts/eval.mjs --keep-runs <dir>      留下每轮的数据目录，供 export-fixture 取用
 //
 // **本脚本不进 ci.yml。** CI 只经 verify-m0.mjs 跑到 --dry-run 那一步；真跑 agent 的轮次
 // 烧订阅额度，且 CI 环境没有已登录的 agent CLI（07 §3.1 与 §4）。
@@ -29,22 +31,9 @@ const mode = process.argv.includes('--dry-run')
     ? 'replay'
     : 'live'
 
-if (mode === 'live') {
-  // **不静默返回成功。** 真实轮次（起 MCP server、spawn agent CLI、跑完再打分）与夹具
-  // 导出器是 07 §3.1 / §3.6 的另一半，尚未落地；在它落地之前，这条命令唯一诚实的行为
-  // 是明说自己没做，而不是跑一遍确定性重放冒充一轮 eval。
-  console.error(
-    [
-      '[eval] 真实 eval 轮次尚未实现。',
-      '',
-      '  现在可用的是零额度的那一半：',
-      '    node scripts/eval.mjs --dry-run   校验 eval 集完整性',
-      '    node scripts/eval.mjs --replay    重放夹具并出逐条 diff 表',
-      '',
-      '  真跑 agent 的轮次会烧订阅额度、不进 CI，见 docs/prd/07-eval.md §3.1。',
-    ].join('\n'),
-  )
-  process.exit(1)
+function optionalArgument(name) {
+  const index = process.argv.indexOf(`--${name}`)
+  return index === -1 ? undefined : process.argv[index + 1]
 }
 
 // 优先用已经构建好的二进制（verify-m0.mjs 在 `cargo build --bins` 之后调用本脚本，
@@ -79,9 +68,20 @@ if (mode === 'dry-run') {
   process.exit(0)
 }
 
-// ── 重放并渲染 ────────────────────────────────────────────────────────────
+// ── 跑一轮（重放或真跑）并渲染 ────────────────────────────────────────────
 const reportPath = join(rust, 'target', 'eval-report.json')
-runEval(['replay-score', '--manifest', manifest, '--root', root, '--out', reportPath])
+if (mode === 'replay') {
+  runEval(['replay-score', '--manifest', manifest, '--root', root, '--out', reportPath])
+} else {
+  // **这条会烧订阅额度**：它真起用户自己的 agent CLI，一条用例 ≈ 一次真实导入（07 §3.1）。
+  // 检测不到可用 CLI 时 daybook-eval 会在跑任何一条用例之前非零退出（§6）。
+  const passthrough = ['run', '--manifest', manifest, '--root', root, '--out', reportPath]
+  for (const name of ['trials', 'keep-runs']) {
+    const value = optionalArgument(name)
+    if (value !== undefined) passthrough.push(`--${name}`, value)
+  }
+  runEval(passthrough)
+}
 const report = JSON.parse(readFileSync(reportPath, 'utf8'))
 rmSync(reportPath, { force: true })
 
@@ -116,7 +116,11 @@ const POOL_TITLE = {
   control: '对照栏（只记录，不参与 go / no-go）',
 }
 
-console.log(`\n模式：${report.mode}（零额度重放）· 每条 ${report.trials} 轮出正式数`)
+const MODE_TEXT = { replay: '零额度重放', live: '真跑 agent，**烧订阅额度**' }
+console.log(`\n模式：${report.mode}（${MODE_TEXT[report.mode] ?? report.mode}）· 每条 1 轮出正式数`)
+if (report.trials > 1) {
+  console.log(`--trials ${report.trials}：仅对标 flaky 的用例多跑，结果只进诊断栏，不覆盖正式数`)
+}
 console.log(`阈值与口径出处：${report.thresholds_source ?? report.thresholdsSource}\n`)
 
 // ── 逐条 diff 表 ──────────────────────────────────────────────────────────
@@ -140,6 +144,17 @@ for (const item of report.cases) {
   for (const ordinal of item.join.missed) console.log(`      ↳ 漏读 第 ${ordinal} 条`)
   for (const ordinal of item.join.extra) console.log(`      ↳ 多读 第 ${ordinal} 条`)
   if (item.unparsedNote) console.log(`      ↳ agent 自述未解析：${item.unparsedNote}`)
+  if (item.trialDiagnostics) {
+    // 07 §3.4：报「全过 / 部分过 / 全不过」，**不取平均**。
+    const TRIAL_TEXT = { all_passed: '全过', mixed: '部分过', none_passed: '全不过' }
+    const rounds = item.trialDiagnostics.passedPerTrial
+      .map((passed, index) => `第${index + 1}轮${passed ? '过' : '不过'}`)
+      .join(' · ')
+    console.log(
+      `      ↳ [${item.trialDiagnostics.label}] ${item.trialDiagnostics.trials} 轮` +
+        `${TRIAL_TEXT[item.trialDiagnostics.verdict]}：${rounds}`,
+    )
+  }
   for (const id of item.substringViolations) {
     console.log(`      ↳ 抽取声明不是转写文本的子串：${id}`)
   }
@@ -173,7 +188,14 @@ const VERDICT_TEXT = {
   no_go: 'no-go —— 指标 1–3 有一条不达标，那是产品可信性的地板',
 }
 console.log(`\n判定：${VERDICT_TEXT[report.verdict] ?? report.verdict}`)
-console.log(
-  '注：这是夹具重放的结果，**不是** docs/PRD.md §9.4 的真实样本 go / no-go——' +
-    '重放测的是「agent 读错时闸门有没有拦住」，不是模型读得准不准。\n',
-)
+if (report.mode === 'replay') {
+  console.log(
+    '注：这是夹具重放的结果，**不是** docs/PRD.md §9.4 的真实样本 go / no-go——' +
+      '重放测的是「agent 读错时闸门有没有拦住」，不是模型读得准不准。\n',
+  )
+} else {
+  console.log(
+    '注：按 docs/PRD.md §9.4 的四步流程，这个结果**无论好坏都要记进 07 评测的回流**，' +
+      '不因为「阈值定高了」而作废；要改阈值先写清为什么，并用第二批独立样本验证。\n',
+  )
+}
