@@ -24,6 +24,7 @@
 //! - **人的修改** = `audit_log` 里 `actor = "human"` 的行，不参与准确率计算
 
 pub mod expected;
+pub mod export;
 pub mod join;
 pub mod manifest;
 pub mod metrics;
@@ -52,6 +53,9 @@ pub enum EvalError {
     },
     /// manifest 自身不合法：缺字段、路径不存在、分池标记缺失。
     Manifest(String),
+    /// 命令行用法错误。**和 manifest 错误分开**——「缺子命令」被冠上「manifest 不合法」
+    /// 会把使用者引到一个根本没问题的文件上。
+    Usage(String),
     /// 夹具目录内容不合法。
     Fixture(String),
     /// 被测系统返回的错误，原样透传。
@@ -72,6 +76,7 @@ impl fmt::Display for EvalError {
                 "夹具已过期：{field} 期望 {expected}，夹具里是 {found}。重新导出夹具，不要改这个字段"
             ),
             Self::Manifest(message) => write!(formatter, "manifest 不合法：{message}"),
+            Self::Usage(message) => write!(formatter, "{message}"),
             Self::Fixture(message) => write!(formatter, "夹具不合法：{message}"),
             Self::App(error) => write!(formatter, "{}（{}）", error.message, error.code),
             Self::Io(error) => write!(formatter, "读写失败：{error}"),

@@ -3,7 +3,7 @@ title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与
 status: in-progress
 owner: "@maintainer"
 date: 2026-08-17
-version: v0.10
+version: v0.11
 ---
 
 # 07 · 评测 Eval
@@ -347,6 +347,14 @@ fixtures/local/<date>-<slug>/
 - [x] `cargo test eval::degraded_match_never_enters_official_metrics` 通过——构造一个「ordinal 全错但内容全对」的用例，**正式 precision / recall 仍按 ordinal join 报（即 0）**，集合匹配的结果只出现在诊断栏（§3.2）
 - [x] `cargo test eval::alignment_is_order_preserving` 通过——中间漏掉一条时，其后各条仍与正确的期望条目对齐，不整体错位
 - [x] `cargo test eval::degraded_match_is_labelled` 通过——诊断用的集合匹配结果在 diff 表上单独成栏并标注「诊断用」，不与正式指标同栏（§3.2）
+- [x] `cargo test eval::exported_fixture_is_self_contained` 通过——`node scripts/export-fixture.mjs <session_id>` 产出的目录自包含：含 `env.json`（初始 DB 状态、ID 映射、版本三元组、期望中间状态），不引用当前数据库、不引用 `evidence/`。**判据是把它拿到一个全新的数据目录里真的重放一遍**，不是「四个文件都在」（§3.6）
+- [x] `cargo test eval::exported_expected_set_needs_human_annotation` 通过——导出的 `expected.json` 带 `annotated: false`，评分器在人工核对前**拒绝**它。导出器手上只有 agent 那次的输出，直接拿去评分等于让模型给自己判卷（§3.2）
+- [x] `cargo test eval::export_refuses_to_write_into_the_committed_set` 通过——导出的是真实账目，写进 `fixtures/ci/` 会进 git（§3.7）
+- [x] `cargo test eval::export_explains_why_the_debug_log_is_required` 通过——缺 `debug` 级日志时说清是「开关关着」或「过了保留期」，而不是丢一个「文件不存在」（`trace` 级只记参数形状，重放不出来，[ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）
+- [x] `cargo test eval::exported_env_carries_the_recorded_version_triple` 通过——版本三元组取自那次尝试**自己的记录**，不是导出当时的代码；否则旧夹具会被盖上今天的版本号，§5 R4 的过期检测永远不触发
+- [x] `cargo test export_fixture_subcommand_writes_a_replayable_directory` 通过——`export-fixture` 子命令真的接上了：默认落 `fixtures/local/<date>-<slug>/`，产物含四个文件且 `annotated: false` 的提示出现在 stdout 上（**使用者看不见的警告等于没有**）
+- [x] `cargo test export_fixture_subcommand_refuses_the_committed_set` 通过——命令行这一层同样拒绝写进 `fixtures/ci/`
+- [x] `cargo test export_fixture_subcommand_requires_a_session` 通过——缺 `--session` 时非零退出，且**不冠以「manifest 不合法」**（那会把人引到一个没问题的文件上）
 - [x] `rg -n 'fixtures/' .gitignore` 有命中——本机夹具不进 git
 - [x] `rg -n 'f32|f64' src-tauri/src/eval` 无命中——比率一律是整数对，阈值判定用交叉相乘（`verify-m0.mjs` 的既有门禁覆盖本目录）
 
@@ -355,7 +363,6 @@ fixtures/local/<date>-<slug>/
 - [ ] `node scripts/eval.mjs`（不带参数，**待建**）真跑 agent 一轮，产出与 `--replay` 同形的 diff 表
 - [ ] `node scripts/eval.mjs --trials 3`（**待建**）对标记为 `flaky` 的用例报「3 轮全过 / 部分过 / 全不过」，**不取平均**（§3.4）
 - [ ] `node scripts/eval.mjs`（**待建**）在检测不到可用 agent CLI 时**非零退出**并明确报原因，**不静默降级为通过**
-- [ ] `node scripts/export-fixture.mjs <session_id>`（**待建**）产出的目录自包含：含 `env.json`（初始 DB 状态、ID 映射、版本三元组、期望中间状态），不引用当前数据库、不引用 `evidence/`，**换一台机器解压即可重放**（§3.6）
 - [ ] `node scripts/eval.mjs --no-memory`（**M3**）跑完同一批用例，与常规轮次的纠正率并排输出（§3.4「记忆开关对照」）
 - [ ] `git ls-files fixtures/ | xargs -r rg -l '[0-9]{4,}'` 人工过一遍——仓库内 CI 夹具不含真实金额
 
@@ -366,6 +373,12 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-08-17（第二批）· 夹具导出器落地**（§3.6、§6）。
+  `node scripts/export-fixture.mjs <agent_session_id>` 把散落三处的数据（`evidence/` 下的原件、`debug` 级日志里的工具调用、SQLite 里的条目与归因）打包成一个自包含目录。**打包逻辑在 `src-tauri/src/eval/export.rs`**，node 仍只是薄壳。
+  一处规格没写、但不写就是缺陷的东西：**导出的 `expected.json` 只能是预填，不能当真值**。导出器手上唯一的条目来源是 `drafted_json`，而 §3.2 已经说死那是**被评分的那一侧**。因此写出去的那份带 `annotated: false`，`ExpectedSet::load` 见到就拒绝，人工逐条核对改成 `true` 之后才可跑分。**不设这道闸门的后果不是「少一道流程」，是导出一条夹具直接跑分、每项满分，而那个满分什么也没测。** 手写夹具缺省 `annotated: true`（按构造就是标注过的），所以既有的 `fixtures/ci/` 那条不受影响。
+  另外三处实现边界：① `refuse_committed_set` 拒绝写进 `fixtures/ci/`——§3.7 说「分离靠目录，不靠自觉」，那就得真有人拦；② 版本三元组取自那次 `parse_attempts` 行自己的记录而非导出当时的代码，否则旧夹具会被盖上今天的版本号、§5 R4 的过期检测永远不触发；③ 缺 `debug` 日志时明说是「开关关着」或「过了保留期」两种可能——`trace` 级只记参数形状（[ADR-0007](../adr/0007-local-observability-and-log-tiers.md)），那是刻意的隐私分级，不是遗漏。
+  同批把命令行用法错误从 `EvalError::Manifest` 拆成 `EvalError::Usage`：「缺子命令」被冠上「manifest 不合法」会把人引到一个根本没问题的文件上。**烧额度的那一半（真跑 agent 的 eval 轮次）仍未做**，`status` 保持 `in-progress`。
 
 - **2026-08-17 · 零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`**（§6、§3.2、§3.4、§3.6）。
   实现范围是 §3.6 成本表里「回归」那一列：评分器、`fixtures/manifest.json`、一条合成夹具与 11 条 `eval::*` 重放/对齐回归。**烧额度的那一列（真跑 agent 的 eval 轮次、`scripts/export-fixture.mjs`）没做**，所以进的是 `in-progress` 而不是 `review`。
@@ -416,6 +429,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.11 | 2026-08-17 | **夹具导出器落地。** 新增 `src-tauri/src/eval/export.rs`、`daybook-eval export-fixture` 子命令、`scripts/export-fixture.mjs` 与 `src-tauri/tests/eval_export_cli.rs`。§6 把导出器那条从「待建」挪进「已落地」并拆成 6 条带真实选择器的验收。**新增一道规格里没有、但不设就是缺陷的闸门**：导出的 `expected.json` 带 `annotated: false`，评分器在人工核对前拒绝——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧，直接跑分等于模型给自己判卷（§3.2）。**真跑 agent 的 eval 轮次仍未做，`status` 保持 `in-progress`。** |
 | v0.10 | 2026-08-17 | **零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`。** 新增 `src-tauri/src/eval/`（manifest 校验 · 真值解析 · ordinal full outer join · 指标计数 · 夹具重放 · 报告）、`src-tauri/src/bin/daybook-eval.rs`、`scripts/eval.mjs`（`--dry-run` / `--replay`）、`fixtures/manifest.json` 与一条合成夹具 `fixtures/ci/2026-08-17-misread-amount/`（「把 16.80 读成 168.00」）。§6 重排为「零额度那一半（已落地）」与「真实轮次与导出器（待建）」两块，26 条已达成、6 条待建；两条此前写成散文的口径回归补上真实 `cargo test` 选择器。§7 记四处偏离：评分器落 Rust（`f32\|f64` 门禁倒逼，且正合「比率必带原始计数」）、`replay_does_not_invoke_agent` 判据改写（后端 trait 上没有 `spawn`）、结构断言独立成条、口径回归的「反向必须变红」做进用例本身。**阈值数字与十项指标口径一个未动。** |
 | v0.9 | 2026-08-16 | **`status` 由 `draft` 转 `ready`——评测工具链可以开工。** §3.4 新增两节，均为[`docs/PRD.md` §9.4](../PRD.md) 四步流程第 1 步的产物、**在拿到任何样本之前写定**：① **M0 go / no-go 的样本构成**——beachhead 定为交易列表类截图（关闭 §5 R8），非 beachhead 来源进不参与判定的对照栏，口述定长度分布；② **四条阈值口径对评分器意味着什么**——规则本身写在 [`docs/PRD.md` §9.4](../PRD.md)（阈值与口径的权威出处），本文只记实现后果，不复述。**阈值数字一个未动。** §5 R8 关闭、R2 补长度分布已定；§6 自动验收由 21 条增至 27 条（人工验收 3 条未变） |
 | v0.1 | 2026-08-08 | 初版，出自 2026-08-08 设计评审。此前七份 sub-PRD 里**没有任何一份负责「agent 读得准不准」**，而 [`docs/PRD.md` §9.1](../PRD.md) 认定它是生死线。确立：eval 走生产同一条路径（不直接调 API）· eval 集是现有三表 join 的视图（不新建数据）· outcome + transcript 两个维度、几乎全代码型评分器 · 20 用例起步 · 逐条 diff 而非百分比门槛 · 夹具重放把 eval（烧额度、不进 CI）与回归（零额度、进 CI）拆开 · 本机真实数据与 CI 脱敏数据严格分离。否决方案九条，待决 R1–R6 |

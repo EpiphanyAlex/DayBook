@@ -5,22 +5,28 @@
 //! `daybook_lib::eval::report` 的说明）。
 //!
 //! ```text
-//! daybook-eval validate     --manifest fixtures/manifest.json [--root <repo>]
-//! daybook-eval replay-score --manifest fixtures/manifest.json [--root <repo>] [--out <file>]
+//! daybook-eval version
+//! daybook-eval validate       --manifest fixtures/manifest.json [--root <repo>]
+//! daybook-eval replay-score   --manifest fixtures/manifest.json [--root <repo>] [--out <file>]
+//! daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--slug <name>]
 //! ```
 //!
-//! 参数是手搓的：仓库现在没有 CLI 解析依赖，为两个子命令引一个会连带动
+//! 参数是手搓的：仓库现在没有 CLI 解析依赖，为几个子命令引一个会连带动
 //! `Cargo.lock`，而 CI 的每一步 cargo 都带 `--offline`。
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::ExitCode,
 };
+
+use time::{macros::format_description, OffsetDateTime};
 
 use daybook_lib::{
     domain::confirm,
     eval::{
         expected::ExpectedSet,
+        export,
         join::{degraded_set_match, ordinal_full_outer_join},
         manifest::{Manifest, ValidatedCase},
         metrics::CaseOutcome,
@@ -43,6 +49,9 @@ fn main() -> ExitCode {
     }
 }
 
+/// 手搓的参数表：`--flag value` 收进一个 map，各子命令自己取需要的那几个。
+type Flags = BTreeMap<String, String>;
+
 struct Options {
     manifest: PathBuf,
     root: PathBuf,
@@ -54,25 +63,25 @@ fn run() -> EvalResult<()> {
     let Some(command) = arguments.first() else {
         return Err(usage());
     };
-    let options = parse_options(&arguments[1..]);
     if command == "version" {
         return print_version();
     }
-    let options = options?;
+    let flags = parse_flags(&arguments[1..])?;
     match command.as_str() {
-        "validate" => validate(&options),
-        "replay-score" => replay_score(&options),
-        other => Err(EvalError::Manifest(format!(
-            "不认识的子命令 `{other}`。\n{}",
-            USAGE
+        "validate" => validate(&manifest_options(&flags)?),
+        "replay-score" => replay_score(&manifest_options(&flags)?),
+        "export-fixture" => export(&flags),
+        other => Err(EvalError::Usage(format!(
+            "不认识的子命令 `{other}`。\n{USAGE}"
         ))),
     }
 }
 
 const USAGE: &str = "用法：\n  \
     daybook-eval version\n  \
-    daybook-eval validate     --manifest <path> [--root <path>]\n  \
-    daybook-eval replay-score --manifest <path> [--root <path>] [--out <path>]";
+    daybook-eval validate       --manifest <path> [--root <path>]\n  \
+    daybook-eval replay-score   --manifest <path> [--root <path>] [--out <path>]\n  \
+    daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--root <path>] [--slug <name>] [--out <path>]";
 
 /// 打印当前的版本三元组。
 ///
@@ -94,38 +103,35 @@ fn print_version() -> EvalResult<()> {
 }
 
 fn usage() -> EvalError {
-    EvalError::Manifest(format!("缺子命令。\n{USAGE}"))
+    EvalError::Usage(format!("缺子命令。\n{USAGE}"))
 }
 
-fn parse_options(arguments: &[String]) -> EvalResult<Options> {
-    let mut manifest = None;
-    let mut root = None;
-    let mut out = None;
+fn parse_flags(arguments: &[String]) -> EvalResult<Flags> {
+    let mut flags = Flags::new();
     let mut index = 0;
     while index < arguments.len() {
         let flag = arguments[index].as_str();
-        let value = || -> EvalResult<PathBuf> {
-            arguments
-                .get(index + 1)
-                .map(PathBuf::from)
-                .ok_or_else(|| EvalError::Manifest(format!("{flag} 缺参数值")))
+        let Some(name) = flag.strip_prefix("--") else {
+            return Err(EvalError::Usage(format!(
+                "不认识的参数 `{flag}`。\n{USAGE}"
+            )));
         };
-        match flag {
-            "--manifest" => manifest = Some(value()?),
-            "--root" => root = Some(value()?),
-            "--out" => out = Some(value()?),
-            other => {
-                return Err(EvalError::Manifest(format!(
-                    "不认识的参数 `{other}`。\n{USAGE}"
-                )))
-            }
-        }
+        let value = arguments
+            .get(index + 1)
+            .ok_or_else(|| EvalError::Usage(format!("{flag} 缺参数值")))?;
+        flags.insert(name.to_owned(), value.clone());
         index += 2;
     }
-    let manifest =
-        manifest.ok_or_else(|| EvalError::Manifest(format!("缺 --manifest。\n{USAGE}")))?;
+    Ok(flags)
+}
+
+fn manifest_options(flags: &Flags) -> EvalResult<Options> {
+    let manifest = flags
+        .get("manifest")
+        .map(PathBuf::from)
+        .ok_or_else(|| EvalError::Usage(format!("缺 --manifest。\n{USAGE}")))?;
     // 用例里的 `dir` 是相对仓库根的，而 manifest 住在 `<repo>/fixtures/manifest.json`。
-    let root = root.unwrap_or_else(|| {
+    let root = flags.get("root").map(PathBuf::from).unwrap_or_else(|| {
         manifest
             .parent()
             .and_then(Path::parent)
@@ -135,8 +141,54 @@ fn parse_options(arguments: &[String]) -> EvalResult<Options> {
     Ok(Options {
         manifest,
         root,
-        out,
+        out: flags.get("out").map(PathBuf::from),
     })
+}
+
+/// 07 §3.6 的夹具导出器。
+///
+/// **默认写 `fixtures/local/<date>-<slug>/`**——导出的是真实截图与真实金额，而
+/// `fixtures/ci/` 那一支要进 git（§3.7）。`export_fixture` 自己也会拒绝写进 CI 集，
+/// 不靠这里的默认值兜底。
+fn export(flags: &Flags) -> EvalResult<()> {
+    let session = flags
+        .get("session")
+        .ok_or_else(|| EvalError::Usage(format!("缺 --session。\n{USAGE}")))?;
+    let data_root = match flags.get("data-dir") {
+        Some(value) => PathBuf::from(value),
+        None => export::default_data_root()?,
+    };
+    let out_dir = match flags.get("out") {
+        Some(value) => PathBuf::from(value),
+        None => export::default_out_dir(
+            &flags
+                .get("root")
+                .map_or_else(|| PathBuf::from("."), PathBuf::from),
+            &today()?,
+            flags.get("slug").map_or("session", String::as_str),
+        ),
+    };
+    let summary = export::export_fixture(&data_root, session, &out_dir)?;
+    println!(
+        "✓ 夹具已导出：{}\n  尝试 {} · 来源 {} · {} 次工具调用 · 预填 {} 条",
+        summary.out_dir.display(),
+        summary.attempt_id,
+        summary.source_id,
+        summary.tool_call_count,
+        summary.prefilled_item_count,
+    );
+    println!(
+        "\n⚠️  expected.json 里的条目是**用 agent 那次的输出预填的**，`annotated` 现在是 false。\n   \
+         逐条对着 input.* 核对、改对之后把它改成 true，评分器才会接受这条用例——\n   \
+         直接拿预填的跑分等于让模型给自己判卷（07 §3.2）。"
+    );
+    Ok(())
+}
+
+fn today() -> EvalResult<String> {
+    OffsetDateTime::now_utc()
+        .format(&format_description!("[year]-[month]-[day]"))
+        .map_err(|error| EvalError::Usage(format!("时间格式化失败：{error}")))
 }
 
 /// `--dry-run` 的落点：**不调用 agent 的情况下校验 eval 集完整性**（07 §6）。
