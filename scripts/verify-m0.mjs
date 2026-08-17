@@ -48,8 +48,29 @@ function noMatches(label, pattern, paths) {
   }
 }
 
+const knownPrdStatuses = new Set([
+  'draft',
+  'ready',
+  'in-progress',
+  'review',
+  'done',
+  'blocked',
+  'archived',
+])
+const implementedPrdStatuses = new Set(['in-progress', 'review', 'done'])
+
+function prdStatus(markdown, path) {
+  const frontmatter = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]
+  const status = frontmatter?.match(/^status:\s*([^\s#]+)\s*$/m)?.[1]
+  if (!status || !knownPrdStatuses.has(status)) {
+    console.error(`[M0] ${path} 缺少合法的 frontmatter status，无法判断是否应核对验收选择器`)
+    process.exit(1)
+  }
+  return status
+}
+
 function verifyAcceptanceSelectors() {
-  process.stdout.write('\n[M0] sub-PRD 验收选择器都命中真实测试\n')
+  process.stdout.write('\n[M0] 已进入实施的 sub-PRD 验收选择器都命中真实测试\n')
   const listed = spawnSync('cargo', ['test', '--offline', '--', '--list'], {
     cwd: rust,
     encoding: 'utf8',
@@ -70,8 +91,16 @@ function verifyAcceptanceSelectors() {
     'docs/prd/07-eval.md',
   ]
   const missing = []
+  const enforced = []
+  const skipped = []
   for (const path of docs) {
     const full = readFileSync(join(root, path), 'utf8')
+    const status = prdStatus(full, path)
+    if (!implementedPrdStatuses.has(status)) {
+      skipped.push(`${path} (${status})`)
+      continue
+    }
+    enforced.push(`${path} (${status})`)
     let section = full.match(/\n## 6\.[\s\S]*?(?=\n## 7\.)/)?.[0] ?? ''
     section = section.split('\n#### M1 必过')[0]
     for (const line of section.split('\n')) {
@@ -92,10 +121,18 @@ function verifyAcceptanceSelectors() {
       }
     }
   }
+  if (!enforced.length) {
+    console.error('[M0] 没有任何已进入实施的 sub-PRD；拒绝静默跳过全部验收选择器')
+    process.exit(1)
+  }
+  if (skipped.length) {
+    console.log(`[M0] 跳过尚未承诺已有实现的 sub-PRD：${skipped.join('、')}`)
+  }
   if (missing.length) {
     console.error(`[M0] 以下验收选择器会匹配 0 个测试：\n${missing.join('\n')}`)
     process.exit(1)
   }
+  console.log(`[M0] 已核对：${enforced.join('、')}`)
 }
 
 run('sub-PRD 格式与状态', 'node', ['docs/prd/check-docs.mjs'])

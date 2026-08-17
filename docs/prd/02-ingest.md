@@ -2,8 +2,8 @@
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
 status: review
 owner: "@maintainer"
-date: 2026-08-13
-version: v0.13
+date: 2026-08-17
+version: v0.14
 ---
 
 # 02 · 导入 Ingest
@@ -151,11 +151,13 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 用户遇到的情况 | 判定处 | 错误码 / 状态 | 应用行为 |
 |---|---|---|---|
-| agent CLI 没装 | `probe()`（[01 §3.5](./01-agent-runtime.md)） | `agent.backend_unavailable` | **应用照常启动**，UI 给安装指引；手工录入可用（[04 §3.5](./04-transactions.md)） |
-| CLI 装了但没登录 | `probe()` | `agent.not_authenticated` | 同上，但指引是**去登录**不是去安装 |
-| 有效工具集不合预期 | 任务下发前探测（[01 §3.7](./01-agent-runtime.md)） | `agent.tool_surface_unsealed` | **拒绝下发任务**，不降级运行 |
-| 额度耗尽 | 后端报告（[01 §3.4](./01-agent-runtime.md)） | `agent.quota_exhausted` | 来源转 `failed`，**不自动重试** |
-| 解析超时 | 硬超时（[01 §5](./01-agent-runtime.md) R1） | `agent.timeout` | 来源转 `failed`，草稿作废，UI 可一键重试 |
+| 未发现合格 agent CLI（未找到候选、不可执行或版本不可读取） | 安装资格检查（[01 §3.5](./01-agent-runtime.md)） | `agent.backend_unavailable` + 稳定的 `availability_reason` | **应用照常启动**，`ready = false`；按原因给安装或修复指引，手工录入可用（[04 §3.5](./04-transactions.md)） |
+| CLI 合格但 readiness probe 尚未完成 | 主动就绪探测（[01 §3.5](./01-agent-runtime.md)） | 非错误；`ready = false` | 显示「正在检查」，**不创建尝试、不下发解析** |
+| CLI 装了但没登录 | readiness probe | `agent.not_authenticated` | 应用照常启动，但指引是**去登录**而不是去安装；不下发解析 |
+| capability manifest 无法证明与预期严格相等 | readiness probe 的密封比较（[01 §3.7](./01-agent-runtime.md)） | `agent.tool_surface_unsealed` | `ready = false`，**拒绝下发任务**，不降级运行 |
+| readiness probe 的其他失败（helper 无法启动、探测超时、额度或网络暂不可用） | readiness probe（[01 §3.5](./01-agent-runtime.md)） | 对应 `agent.spawn_failed` / `agent.timeout` / `agent.quota_exhausted` 等 | 保留安装事实，`ready = false`；**不创建尝试、不改变来源状态、不下发解析**，UI 给对应动作并允许用户显式重探测 |
+| 解析任务下发后额度耗尽 | 后端报告（[01 §3.4](./01-agent-runtime.md)） | `agent.quota_exhausted` | 来源转 `failed`，**不自动重试** |
+| 解析任务超时 | 硬超时（[01 §5](./01-agent-runtime.md) R1） | `agent.timeout` | 来源转 `failed`，草稿作废，UI 可一键重试 |
 | 用户点停止 | `cancel`（[01 §3.4](./01-agent-runtime.md)） | `agent.cancelled` | 同步 kill，草稿作废 |
 | 应用崩溃 / 强杀 | 启动扫描（§3.4） | `agent.interrupted` | 下次启动时清理，第一屏就是干净的 |
 | **读了一半就收工** | 未调 `complete_source`（[01 §3.2](./01-agent-runtime.md)） | `agent.protocol_violation` | 来源转 `failed`，**不判为 `parsed`** |
@@ -243,6 +245,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-17（跨文档同步） | §3.5.1 原把 `agent.backend_unavailable` 缩写成「CLI 没装」，漏掉不可执行与版本不可读取，也没有 probe 进行中的 fail-closed 状态。矩阵按 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 拆为安装资格、探测中、未认证、密封失败与其他 probe 失败五类，并区分 probe 期与解析任务期复用同一错误码时的不同状态行为；应用仍可启动的既有降级原则不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13（实现验收） | **§3.4 的状态机在实现里存在两份，且互相矛盾。** 本节对应的 `SourceState::can_transition_to` 有穷举 25 种转移的测试却无生产调用点；真正生效的是 `agent/runtime.rs` 内联的 `matches!`，两份对 `parsed → parsing` 的答案相反——**测试全绿，因为它测的是没人用的那份**。改定：转移表补 `parsed → parsing`（重新解析，[03 §6](./03-review.md) 本来就要求它）与 `failed → failed`（作废是会被触发两次的补偿动作），并把「只有一处代码写 `sources.state`」写成可执行验收。§6 新增 2 条 | M0 实施验收（2026-08-13）：`rg 'transition_source\|can_transition_to'` 在生产代码里零命中 |
 | 2026-08-13 | 完整 live 验收复现 Claude 对「总共」口述起草成功却漏调 `report_source_total`，使对账静默落成 `not_applicable`。口述明显合计词因此增加代码侧完成前闸门；图片不做假 OCR，仍由模型识别 | [01 Agent 运行时 §3.2](./01-agent-runtime.md) `report_source_total` 可信性要求第 6 条；`verify-m0.mjs` 真实 CLI happy path |
 | 2026-08-13 | **批量继续的验收从 Rust 测试移到前端队列测试。** M0 的 Rust command 一次只处理一个来源，批量顺序与“单项失败后继续”由 React 编排；在 Rust 另造一个 UI 不调用的批量函数不能约束真实控制流。前端按来源隔离错误并在队列结束后汇总提示 | M0 验收审计；[`CLAUDE.md`](../../CLAUDE.md) 约束 15「控制流由代码决定」 |
@@ -261,6 +264,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.14 | 2026-08-17 | **安装资格 / 解析就绪度跨文档同步，`status` 仍为 `review`。** §3.5.1 不再把 `agent.backend_unavailable` 一律称为「没装」，补稳定 `availability_reason`，并把 readiness probe 完成前及 probe 期其他失败与任务期失败拆开：前者 `ready = false` 且不创建尝试、不改变来源；行为权威出处仍为 [01 §3.5](./01-agent-runtime.md) |
 | v0.13 | 2026-08-13 | **实现回流：**§3.4 转移表补 `parsed → parsing` 与 `failed → failed`，并要求 `sources.state` 只有一处写入点——此前规格里的状态机没有生产调用点，生效的是 `agent/runtime.rs` 里与它矛盾的内联判断。§6 新增 2 条验收；`status` 仍为 `review` |
 | v0.12 | 2026-08-13 | **M0 实现验收进入 `review`。** PNG/JPEG 与口述导入、幂等、串行编排、批量容错、崩溃恢复及真实截图/口述 happy path 已通过统一门禁 |
 | v0.11 | 2026-08-13 | **实现回流：**批量容错验收改到真实的前端队列控制点；单项失败不再中断后续来源，结束后汇总提示。口述合计与完成协议的验收选择器同步对齐实际 `review` / `agent` 测试，消除 0-test 假绿 |

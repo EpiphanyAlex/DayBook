@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: review
+status: ready
 owner: "@maintainer"
-date: 2026-08-13
-version: v0.20
+date: 2026-08-17
+version: v0.21
 ---
 
 # 01 · Agent 运行时
@@ -238,23 +238,54 @@ version: v0.20
 
 `debug` 必须包含**完整**工具调用参数，因为 agent 是非确定性的：复现一个 bug 不能靠「重跑一次 agent」，只能靠**重放录下来的调用序列**。
 
-### 3.5 可插拔后端接口
+### 3.5 可插拔后端接口：Daybook 安装资格与解析就绪度分开（2026-08-17 定案）
+
+依据 [`docs/PRD.md` 开放问题 P5](../PRD.md) 的部分关闭结论与 [ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md) 的外部进程边界。
+
+**先把三个概念拆开，后文不得再用一个 `available` 或一句「probe 成功」混称：**
+
+1. **Daybook 安装与启动资格**：不以 agent CLI 已安装、已登录或当前可解析为前提。后端不可用时应用仍须启动，账本浏览与手工路径照常可用；CLI 只是解析能力的运行时依赖。
+2. **agent CLI 安装资格**：静态发现只得到候选路径。候选只有在**跟随符号链接后是普通文件、具有执行权限，并且 `--version` 在限定时间内以 0 退出且返回非空版本**时，才算 `available = true`。仅 `is_file()` 为真不构成合格安装；M0 不另设 semver 白名单，真实 capability probe 承担兼容性闸门。找不到合格候选时返回 `agent.backend_unavailable`，并以稳定的 `availability_reason = not_found | not_executable | version_unreadable` 区分三种用户动作；前端按该枚举给安装或修复指引，**不得解析错误文案，也不得把三者一律断言为「未安装」**。
+3. **解析就绪度**：是一次独立的主动运行时探测。只有合格 CLI、CLI 自身认证、MCP helper 启动、结构化 capability manifest 读取，以及 §3.7 的密封集合相等比较**全部通过**，`ready` 才能为真。探测尚未开始、正在进行或任一条件失败时一律 fail closed：**不创建 `parse_attempts`、不下发解析任务、界面不得显示「已就绪」**。
+
+#### `BackendStatus` 的 IPC 不变式
+
+跨 Rust / TypeScript 的状态必须能独立表达安装资格与解析就绪度；内部可用枚举或结构体组织，但 IPC 至少兑现下列语义：
+
+| 状态 | `available` | `availability_reason` | `authenticated` | `ready` | `error_code` | UI / 控制流 |
+|---|---:|---|---:|---:|---|---|
+| 无合格 CLI | `false` | `not_found` / `not_executable` / `version_unreadable` | `null` | `false` | `agent.backend_unavailable` | 应用照常启动，按原因给安装/修复指引；不解析 |
+| 已发现，尚未探测或探测中 | `true` | `null` | `null` | `false` | 空 | 显示「正在检查」，不解析 |
+| 已安装但未登录 | `true` | `null` | `false` | `false` | `agent.not_authenticated` | 指引用户在 CLI 自身完成登录；不解析 |
+| 密封能力面无法证明严格相等 | `true` | `null` | 已知值或 `null` | `false` | `agent.tool_surface_unsealed` | 说明安全检查未通过；不解析、不降级 |
+| 其他探测失败 | 保留安装事实 | `null` | 保留已知认证事实 | `false` | 对应 `agent.*` 错误 | 给对应动作；不得伪装成未安装 |
+| 全部探测通过 | `true` | `null` | `true` | `true` | 空 | 才允许下发解析 |
+
+三条实现边界：
+
+- **`ready = true` 当且仅当本次应用生命周期内完整 readiness probe 成功。** 前端不得从 `available && error_code == null` 反推 ready，也不得在本地临时覆写错误后把自己变成状态事实源；最近一次探测结论由 Rust 运行时持有并经统一 IPC 返回。
+- **本位币不属于后端 readiness。** 它是具体解析任务在 spawn 前的业务前置条件（§3.6）：后端可 ready，而该任务仍因 `data.base_currency_required` 不启动。
+- **额度、网络或任务期失败不改写安装事实。** 它们可以让当前解析不可执行或失败，但不得把已合格安装改称「未安装」。
+
+#### 发现与接口边界
+
+从 Finder 启动的 `.app` 不能依赖终端 `PATH`。M0 继续采用「`PATH` + 已知静态安装位置」发现候选，**不 spawn 登录 shell**；当前静态位置与版本管理器枚举属于易变实现实况，登记在 [`.claude/features/agent-runtime.md`](../../.claude/features/agent-runtime.md)，不复制进规格。安装或切换 CLI 后，M0 允许要求重启应用以重新发现；M4 打包验收仍须在干净机器上覆盖真实安装方式（[`docs/PRD.md` P5](../PRD.md) 未关闭的发布清单）。
 
 ```rust
 // 形状示意，非最终签名——内部实现自由度不在本文规格化
 trait AgentBackend {
-    fn id(&self) -> &'static str;              // "claude-code" / "codex" / ...
-    fn probe(&self) -> Result<BackendStatus>;  // CLI 是否已安装/已登录
+    fn id(&self) -> &'static str;                   // "claude-code" / "codex" / ...
+    fn status(&self) -> BackendStatus;              // 最近一次安装资格 / readiness 事实
+    fn probe(&self) -> Result<ProbeResult>;          // 主动完整就绪探测
     fn spawn(&self, task: &AgentTask) -> Result<AgentHandle>;
 }
 ```
 
-**约束**：
+**其余约束**：
 
 - **后端只能是「用户已配置好的外部进程」**（`claude -p` / `codex exec` / 本地模型进程）。`spawn()` 的语义就是起一个进程——**接口里没有、也不得增加「应用自己调 HTTP API」这条实现路径**（[ADR-0003 §4](../adr/0003-agent-runtime-and-pluggable-backend.md)，2026-08-09 删除「用户自备 API key」）
 - v1 的 Claude Code 实现**不得成为其他代码的直接依赖**——上层只见 `dyn AgentBackend`
-- `probe()` 只做「CLI 存在且可执行」的检测，**不代用户登录、不读取用户的凭证文件**
-- 后端不可用时应用**仍可启动**，UI 如实显示「未检测到可用的 agent CLI」并给出安装指引
+- discovery / probe **不代用户登录、不读取用户的凭证文件**；认证只由 CLI 自身的运行结果判断
 
 ### 3.6 任务下达
 
@@ -496,15 +527,22 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::timeout_voids_only_own_attempt` 通过——两个来源各自解析，其一超时后，**只有该 `attempt_id` 的草稿被置 `voided_at`**，另一来源的草稿不受影响（§5 R5 的会话粒度结论）
 - [ ] `cargo test agent::void_marks_not_deletes` 通过——作废后草稿行仍在且 `drafted_json` 完好（§3.4「作废是置标志，不是删行」）
 - [ ] `cargo test agent::void_is_audited_as_system` 通过——作废写一条 `actor = "system"` / `action = "void"` 的审计，且 agent 此前的 `actor = "agent"` 记录**仍在**（append-only，§3.4）
-- [ ] `cargo test agent::backend_absent_app_still_starts` 通过——`probe()` 失败时应用初始化仍成功，状态如实为不可用
+- [ ] `cargo test agent::backend_absent_app_still_starts` 通过——找不到合格 CLI 时应用初始化仍成功，状态为 `available = false` / `ready = false` / `agent.backend_unavailable`
+- [ ] `cargo test agent::installation_qualification_requires_executable_version` 通过——候选路径分别为普通但不可执行的文件、`--version` 非零、超时、空输出时均不算合格安装，并分别返回稳定的 `availability_reason`；可执行且版本读取成功才 `available = true`
+- [ ] `cargo test agent::installation_qualification_follows_symlinks` 通过——指向合格可执行文件的符号链接被接受；断链、指向目录或指向不可执行文件的链接按对应原因拒绝
+- [ ] `cargo test agent::readiness_is_false_until_probe_succeeds` 通过——已发现 CLI 但 probe 尚未开始/正在运行时 `ready == false`；认证、helper、manifest 或密封比较任一失败仍为 false；只有完整 probe 成功才为 true
+- [ ] `cargo test agent::readiness_blocks_attempt_and_task` 通过——对「probe 未开始 / 进行中 / 未认证 / helper 启动失败 / manifest 缺失或不可读 / capability 集合不相等」逐一发起解析，均不新增 `parse_attempts`、不 spawn 解析任务；完整 probe 成功才各新增一次
+- [ ] `cargo test agent::readiness_status_is_runtime_owned` 通过——probe 成功或失败后再次读取统一状态 IPC，得到的仍是最近一次结论；不依赖前端临时覆写 `authenticated` / `error_code`
+- [ ] `npm test -- agent/backend-guidance` 通过——覆盖「三种安装资格失败原因 / 正在检查 / 未登录 / 密封失败 / 其他探测失败 / ready」；`available = true` 且 probe 未完成时不得显示「考古员已就绪」
 - [ ] `cargo test agent::single_concurrent_process` 通过——连续下达两个任务时第二个排队，同时存活的子进程数恒为 1
 - [ ] `rg -n 'sk-|api[_-]?key|Authorization' src-tauri/src` 无命中（不打包厂商凭证）
 - [ ] `node scripts/verify-m0.mjs`（M0 端到端脚本）退出码 0
 
 **人工验收**：
 
-- [ ] 未安装 Claude Code 的干净机器上启动应用，不崩溃，UI 给出可操作的安装指引
-- [ ] **已安装但未登录**的机器上启动，报的是 `agent.not_authenticated` 对应的「去登录」而不是「去安装」——两种状态给同一句指引等于没指引
+- [ ] 没有合格 Claude Code CLI 的干净机器上启动应用，不崩溃；未找到时给安装指引，不可执行或版本不可读取时给修复指引，**不得都断言为「未安装」**
+- [ ] **已安装但未登录**的机器上启动，报的是 `agent.not_authenticated` 对应的「去登录」而不是 `agent.backend_unavailable`——两种状态给同一句指引等于没指引
+- [ ] 人为延迟 readiness probe，观察 probe 完成前界面始终显示「正在检查」且解析入口不启动任务；完整 probe 成功后才显示 ready
 - [ ] 一次真实解析中，UI 能看到子进程日志（用于排障）
 - [ ] **手工把密封配置里的某一项关掉**（例如放开内置工具），启动解析 → 应用拒绝下发任务并显示 `agent.tool_surface_unsealed` 对应的说明（§3.7 探测的人工确认）
 
@@ -512,6 +550,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-17（规格证伪与计划审批） | **§3.5 把「CLI 存在且可执行」写成 `probe()` 的全部职责，但 §3.7 与真实实现又让同一个 probe 负责认证、helper 与密封 capability manifest；安装资格和解析就绪度因此没有一个自洽契约。**实现还暴露两处后果：静态发现只检查 `is_file()`，普通但不可执行的文件也会被当成 available；前端在 `available = true`、`authenticated = null` 且无错误时会在异步 probe 完成前显示 ready。按 [`docs/PRD.md` P5](../PRD.md) 的产品决定拆成 Daybook 安装/启动资格、CLI 安装资格、解析 readiness 三层，新增显式 `ready` 语义与 fail-closed 矩阵。由于原规格被证伪，本文由 `review → draft`；产品决定与规格回流方案获批后，人 + agent 把本节写到可开工标准，再由 `draft → ready`。**后续实现仍须从当前 `ready` 规格重新进入 plan mode，由人审实施计划；批准并真正开始开发时才转 `in-progress`。**当前实现尚未修正，不得回到 `review` | [`docs/PRD.md` P5](../PRD.md)（2026-08-17 部分关闭）；现有实现核对：`src-tauri/src/agent/claude.rs` 的 discovery / probe、`src-tauri/src/lib.rs` 的状态拼装、`src/agent/presentation.ts` 的 ready 推导 |
 | 2026-08-13（实现验收） | **§3.2 可信性要求第 6 条的合计词闸门此前无出口也无边界。** ① 词表只认字面量，认不出「一共去了三个地方」这类非金额用法，而唯一的补救路径是「回报合计」——这种口述**无法完成解析**，agent 只能编一个合计（成为闸门 3 的假基准）或被拒到硬超时后整次作废。补第二条路：在 `unparsed_note` 里说明即可完成，产出 `completed_with_gaps`；闸门挡的是**静默**漏报，写了说明就不静默。② 该拒绝**不计次**，是 M0 唯一一处可无限重试的工具拒绝；改为第二次仍未满足即 `agent.protocol_violation`。**「可补救」必须同时意味着「补救不成会结束」**，否则是挂起不是闸门。§6 新增 2 条验收 | M0 实施验收（2026-08-13）代码审查：`complete_source` 的该分支在 `completion_rejections` 计数之前返回 |
 | 2026-08-13（实现验收） | **`ClaudeCodeBackend` 的 CLI 发现路径覆盖不到 nvm / fnm / volta / pnpm 装的 `claude`。** 从 Finder 启动的 `.app` 只继承 `/usr/bin:/bin:/usr/sbin:/sbin`，`PATH` 那一路在打包后基本必然落空，只剩四个硬编码位置兜底——用户终端里 `claude` 能跑、应用却报 `agent.backend_unavailable`。补常见安装位置与带版本号目录的枚举（较新版本优先）。**不去 spawn 登录 shell 问 `PATH`**：唯一允许 spawn 的子进程是 agent CLI 本身（[`rust-tauri.md` §2](../../.claude/rules/rust-tauri.md)）。本条只在打包后暴露，`cargo test` 环境里 `PATH` 是全的 | M0 实施验收（2026-08-13）代码审查 `discover_claude` |
 | 2026-08-13 | `read_source` 的口述正文必须放进 `structuredContent.text`，不能只作为第二个 text content block；图片仍走 image content block | Claude Code 2.1.229 真实口述路径：存在 `structuredContent` 时 CLI 只把第一个 text block交给模型，第二个正文块被丢弃，agent 因无原文正确地以 0 条完成 |
@@ -548,6 +587,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.21 | 2026-08-17 | **安装资格 / 解析就绪度规格重写，`status` 由 `review → draft → ready`。** §3.5 拆开 Daybook 安装启动、CLI 合格安装与完整 readiness probe：可执行文件 + 可读版本只说明 CLI 可用候选，认证 + helper + 密封 capability manifest 全过才 `ready = true`；探测完成前 fail closed，后端失败不阻止应用启动，本位币仍是任务级前置。补 IPC 状态矩阵、7 条自动验收与 1 条人工验收。当前实现存在 `is_file()` 假阳性与 probe 前短暂假 ready；下一步须从当前 ready 规格产出实施计划、经人批准并真正开始开发时转 `in-progress`，验收通过后才回到 `review` |
 | v0.20 | 2026-08-13 | **实现验收回流两处，`status` 仍为 `review`。** ① §3.2 可信性要求第 6 条的合计词闸门补出口（`unparsed_note` 说明即可完成）与边界（第二次仍未满足即 `agent.protocol_violation`）——此前这条既无出口也不计次，非金额的「一共」会让整次解析挂到硬超时。② CLI 发现路径补 nvm / fnm / volta / pnpm 等位置，修 Finder 启动的 `.app` 上「装了却说没装」。§6 验收新增 2 条 |
 | v0.19 | 2026-08-13 | **M0 实现验收进入 `review`。** 五工具密封能力探测、独立 MCP helper/UDS、进程收束、分级日志与真实 Claude Code 链路通过；live 验收发现并补上口述显式合计的代码侧完成闸门 |
 | v0.18 | 2026-08-13 | **真实 CLI 回流：**口述正文加入 `read_source.structuredContent.text`，绕开 CLI 丢弃第二个 text block 的行为 |
