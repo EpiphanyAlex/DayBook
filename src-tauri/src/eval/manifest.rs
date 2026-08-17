@@ -74,7 +74,16 @@ pub struct ValidatedCase {
     pub dir: PathBuf,
     pub expected_path: PathBuf,
     pub env_path: PathBuf,
-    pub tool_calls_path: PathBuf,
+    /// 只有录过工具调用的用例才能重放。**按文件在不在推断，不另设字段**——它不是判定
+    /// 口径的一部分（那才需要显式声明，见 `pool`），而多一个可以和现实不一致的开关，
+    /// 迟早会出现「标了 replayable 却没有 tool-calls.json」。
+    pub tool_calls_path: Option<PathBuf>,
+}
+
+impl ValidatedCase {
+    pub fn is_replayable(&self) -> bool {
+        self.tool_calls_path.is_some()
+    }
 }
 
 impl Manifest {
@@ -94,6 +103,10 @@ impl Manifest {
     ///
     /// 07 §6 的两条验收都落在这里：`--dry-run` 在「用例缺输入 / 期望集合 / `env.json`
     /// 或路径不存在」时非零退出；在「有用例缺分池标记」时同样非零退出。
+    ///
+    /// **`tool-calls.json` 不是必需的。** §6 那条只点名「输入、期望集合与 `env.json`」，
+    /// 而一条**还没跑过**的用例本来就没有工具调用可录——要求它有，等于逼人先跑一轮
+    /// 真实 agent 才能把用例加进清单。有就可重放（零额度回归），没有就只能真跑。
     pub fn validate(&self, repository_root: &Path) -> EvalResult<Vec<ValidatedCase>> {
         let mut problems = Vec::new();
         let mut validated = Vec::new();
@@ -126,7 +139,6 @@ impl Manifest {
                 ("目录", &dir),
                 ("期望集合", &expected_path),
                 ("env.json", &env_path),
-                ("tool-calls.json", &tool_calls_path),
             ] {
                 if !path.exists() {
                     problems.push(format!(
@@ -144,7 +156,7 @@ impl Manifest {
                 dir,
                 expected_path,
                 env_path,
-                tool_calls_path,
+                tool_calls_path: tool_calls_path.exists().then_some(tool_calls_path),
             });
         }
 
@@ -199,7 +211,29 @@ mod eval {
         else {
             panic!("应当是 manifest 错误");
         };
-        assert!(message.contains("tool-calls.json"), "{message}");
+        assert!(message.contains("env.json"), "{message}");
+        assert!(message.contains("期望集合"), "{message}");
+    }
+
+    /// 一条**还没跑过**的用例没有工具调用可录。要求它有，等于逼人先跑一轮真实 agent
+    /// 才能把用例加进清单（07 §6 那条只点名输入、期望集合与 `env.json`）。
+    #[test]
+    fn case_without_tool_calls_is_valid_but_not_replayable() {
+        let directory = tempfile::tempdir().unwrap();
+        let case_dir = directory.path().join("fixtures/ci/x");
+        std::fs::create_dir_all(&case_dir).unwrap();
+        std::fs::write(case_dir.join("expected.json"), "{}").unwrap();
+        std::fs::write(case_dir.join("env.json"), "{}").unwrap();
+
+        let manifest: Manifest =
+            serde_json::from_str(&manifest_json(r#""pool":"screenshot","#)).unwrap();
+        let cases = manifest.validate(directory.path()).unwrap();
+        assert_eq!(cases.len(), 1);
+        assert!(!cases[0].is_replayable(), "没有 tool-calls.json 就不可重放");
+
+        std::fs::write(case_dir.join("tool-calls.json"), r#"{"calls":[]}"#).unwrap();
+        let cases = manifest.validate(directory.path()).unwrap();
+        assert!(cases[0].is_replayable(), "有了就可重放");
     }
 
     #[test]

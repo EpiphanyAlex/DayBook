@@ -26,6 +26,7 @@
 pub mod expected;
 pub mod export;
 pub mod join;
+pub mod live;
 pub mod manifest;
 pub mod metrics;
 pub mod replay;

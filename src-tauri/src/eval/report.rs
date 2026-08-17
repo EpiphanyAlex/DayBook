@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use super::{
     join::{DegradedMatch, OrdinalJoin},
+    live::TrialDiagnostics,
     manifest::Pool,
     metrics::{compute_pool, overall_verdict, CaseOutcome, PoolReport},
     replay::CallResult,
@@ -47,7 +48,12 @@ pub struct CaseReport {
     pub join: OrdinalJoin,
     /// 诊断栏，永远带着「诊断用」的标签。
     pub degraded: DegradedMatch,
+    /// 重放路径上是那次录像的回放结果；真跑轮次为空（那一路没有「录下来的调用」）。
     pub calls: Vec<CallResult>,
+    /// **诊断栏**：`--trials N` 第 2 轮起的产物。`None` = 只跑了 1 轮。
+    /// **永远不覆盖正式数**（§9.4 口径③）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trial_diagnostics: Option<TrialDiagnostics>,
     /// `evidence_text` 不是转写文本真子串的草稿 id（只对 `kind = utterance` 有意义）。
     pub substring_violations: Vec<String>,
 }
@@ -55,9 +61,10 @@ pub struct CaseReport {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
-    /// `replay` = 重放夹具（零额度）；真跑 agent 的轮次是另一条路径。
+    /// `replay` = 重放夹具（零额度）；`live` = 真跑 agent（烧额度）。
     pub mode: &'static str,
     /// 07 §3.4 口径③：`--trials` 默认 1，**每条 1 轮出正式数**。
+    /// 大于 1 时多出来的轮次只进各用例的诊断栏。
     pub trials: u32,
     pub thresholds_source: &'static str,
     pub cases: Vec<CaseReport>,
@@ -68,6 +75,15 @@ pub struct Report {
 
 impl Report {
     pub fn build(mode: &'static str, cases: Vec<CaseReport>, outcomes: &[CaseOutcome]) -> Self {
+        Self::with_trials(mode, 1, cases, outcomes)
+    }
+
+    pub fn with_trials(
+        mode: &'static str,
+        trials: u32,
+        cases: Vec<CaseReport>,
+        outcomes: &[CaseOutcome],
+    ) -> Self {
         let mut pools = Vec::new();
         for pool in [Pool::Screenshot, Pool::Utterance, Pool::Control] {
             let subset: Vec<&CaseOutcome> = outcomes
@@ -82,7 +98,7 @@ impl Report {
         let verdict = overall_verdict(&pools);
         Self {
             mode,
-            trials: 1,
+            trials,
             thresholds_source: "docs/PRD.md §9.4",
             cases,
             pools,

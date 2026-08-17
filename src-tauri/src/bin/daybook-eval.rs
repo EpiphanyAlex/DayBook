@@ -9,7 +9,10 @@
 //! daybook-eval validate       --manifest fixtures/manifest.json [--root <repo>]
 //! daybook-eval replay-score   --manifest fixtures/manifest.json [--root <repo>] [--out <file>]
 //! daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--slug <name>]
+//! daybook-eval run            --manifest fixtures/manifest.json [--trials N] [--keep-runs <dir>]
 //! ```
+//!
+//! **`run` 是唯一烧订阅额度的子命令**——它真起用户自己的 agent CLI。其余三个是零额度的。
 //!
 //! 参数是手搓的：仓库现在没有 CLI 解析依赖，为几个子命令引一个会连带动
 //! `Cargo.lock`，而 CI 的每一步 cargo 都带 `--offline`。
@@ -23,16 +26,18 @@ use std::{
 use time::{macros::format_description, OffsetDateTime};
 
 use daybook_lib::{
+    agent::runtime::AgentRuntime,
     domain::confirm,
     eval::{
         expected::ExpectedSet,
         export,
         join::{degraded_set_match, ordinal_full_outer_join},
+        live,
         manifest::{Manifest, ValidatedCase},
         metrics::CaseOutcome,
         replay::{
             predictions_from_drafted_json, replay_fixture, scratch_root,
-            utterance_substring_violations,
+            utterance_substring_violations, FixtureEnv,
         },
         report::{Attribution, CaseReport, Report},
         EvalError, EvalResult,
@@ -71,6 +76,7 @@ fn run() -> EvalResult<()> {
         "validate" => validate(&manifest_options(&flags)?),
         "replay-score" => replay_score(&manifest_options(&flags)?),
         "export-fixture" => export(&flags),
+        "run" => live_run(&flags),
         other => Err(EvalError::Usage(format!(
             "不认识的子命令 `{other}`。\n{USAGE}"
         ))),
@@ -81,7 +87,10 @@ const USAGE: &str = "用法：\n  \
     daybook-eval version\n  \
     daybook-eval validate       --manifest <path> [--root <path>]\n  \
     daybook-eval replay-score   --manifest <path> [--root <path>] [--out <path>]\n  \
-    daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--root <path>] [--slug <name>] [--out <path>]";
+    daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--root <path>] [--slug <name>] [--out <path>]\n  \
+    daybook-eval run            --manifest <path> [--root <path>] [--trials <n>] [--keep-runs <dir>] [--out <path>]\n\
+\n  \
+    只有 `run` 会烧订阅额度（它真起 agent CLI）。";
 
 /// 打印当前的版本三元组。
 ///
@@ -189,6 +198,163 @@ fn today() -> EvalResult<String> {
     OffsetDateTime::now_utc()
         .format(&format_description!("[year]-[month]-[day]"))
         .map_err(|error| EvalError::Usage(format!("时间格式化失败：{error}")))
+}
+
+/// **真跑 agent 的 eval 轮次**（07 §3.1）。走生产同一条路径：起 MCP server、spawn 用户
+/// 自己的 CLI、落进临时数据目录、然后查表打分。
+///
+/// **每跑一轮就烧一轮订阅额度**，所以它不进 CI，也不在 `verify-m0.mjs` 里。
+///
+/// - `--trials N`：只对标记 `flaky` 的用例生效，且**第 2 轮起只进诊断栏**（§9.4 口径③）
+/// - `--keep-runs <dir>`：把每一轮的数据目录留下来。**留着是为了让一次跑砸的 eval 能直接
+///   变成回归夹具**——`daybook-eval export-fixture --data-dir <那一轮的目录> --session <id>`。
+///   不给这个参数就跑完即删，因为那里面是真实解析产物。
+fn live_run(flags: &Flags) -> EvalResult<()> {
+    let options = manifest_options(flags)?;
+    let trials: usize = match flags.get("trials") {
+        Some(value) => value
+            .parse()
+            .map_err(|_| EvalError::Usage(format!("--trials 必须是正整数，收到 `{value}`")))?,
+        None => 1,
+    };
+    if trials == 0 {
+        return Err(EvalError::Usage("--trials 至少是 1".to_owned()));
+    }
+    let keep_runs = flags.get("keep-runs").map(PathBuf::from);
+
+    let manifest = Manifest::load(&options.manifest)?;
+    let cases = manifest.validate(&options.root)?;
+    let async_runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
+
+    async_runtime.block_on(async {
+        let agent = AgentRuntime::claude_default();
+
+        // **先探测，再跑任何一条用例**：检测不到可用 CLI 就非零退出（§6），
+        // 顺带省得烧了一半额度才发现没登录。
+        let probe_root = scratch_root()?;
+        let probed = live::ensure_backend_ready(&agent, &probe_root).await;
+        let _ = std::fs::remove_dir_all(&probe_root);
+        probed?;
+
+        let mut reports = Vec::new();
+        let mut outcomes = Vec::new();
+        for case in &cases {
+            eprintln!("[eval] 跑 {} …", case.id);
+            let (report, outcome) = run_case(&agent, case, trials, keep_runs.as_deref()).await?;
+            reports.push(report);
+            outcomes.push(outcome);
+        }
+
+        let report = Report::with_trials("live", trials as u32, reports, &outcomes);
+        let json = serde_json::to_string_pretty(&report)?;
+        match &options.out {
+            Some(path) => std::fs::write(path, json)?,
+            None => println!("{json}"),
+        }
+        Ok(())
+    })
+}
+
+async fn run_case(
+    agent: &AgentRuntime,
+    case: &ValidatedCase,
+    trials: usize,
+    keep_runs: Option<&Path>,
+) -> EvalResult<(CaseReport, CaseOutcome)> {
+    let expected = ExpectedSet::load(&case.expected_path)?;
+    let env = FixtureEnv::load(&case.env_path)?;
+    // **只有标 `flaky` 的用例跑多轮**——额度是真实约束（§3.1），而 §3.4 那条说的就是
+    // 「标记为 flaky 或曾经出过错的用例跑 3 轮」。
+    let rounds = if case.flaky { trials } else { 1 };
+
+    let mut official = None;
+    let mut passes = Vec::new();
+    for round in 0..rounds {
+        let scratch = match keep_runs {
+            Some(root) => {
+                let path = root.join(format!("{}-trial{}", case.id, round + 1));
+                std::fs::create_dir_all(&path)?;
+                path
+            }
+            None => scratch_root()?,
+        };
+        let outcome = live::run_trial(agent, &case.dir, &env, &expected, &scratch).await;
+        if keep_runs.is_none() {
+            // 真实解析产物，跑完即删。
+            let _ = std::fs::remove_dir_all(&scratch);
+        }
+        let outcome = outcome?;
+        passes.push(outcome.passed());
+        // **第 1 轮出正式数**，之后的只进诊断栏（§9.4 口径③）。
+        if official.is_none() {
+            official = Some((outcome, expected.clone()));
+        }
+    }
+
+    let (outcome, expected) = official.expect("rounds ≥ 1");
+    let degraded = live::degraded_for(&expected, &outcome)?;
+    let attribution = attribution_of(&outcome.database, &outcome.attempt_id)?;
+    let unparsed_note = outcome.check.unparsed_note.clone().unwrap_or_default();
+    let join = outcome.join.clone();
+
+    let case_outcome = CaseOutcome {
+        id: case.id.clone(),
+        pool: case.pool,
+        source_kind: expected.source_kind.clone(),
+        join: join.clone(),
+        degraded: degraded.clone(),
+        reconciliation_status: outcome.check.reconciliation_status.clone(),
+        confirmation_policy: outcome.check.confirmation_policy.clone(),
+        unparsed_note: unparsed_note.clone(),
+        stated_item_count: expected.stated_item_count(),
+    };
+    let report = CaseReport {
+        id: case.id.clone(),
+        pool: case.pool.as_str(),
+        judged: case.pool.is_judged(),
+        flaky: case.flaky,
+        source_kind: expected.source_kind.clone(),
+        attribution,
+        reconciliation_status: outcome.check.reconciliation_status.clone(),
+        confirmation_policy: outcome.check.confirmation_policy.clone(),
+        unparsed_note,
+        matched: join.matched_count(),
+        missed: join.missed_count(),
+        extra: join.extra_count(),
+        join,
+        degraded,
+        calls: Vec::new(),
+        substring_violations: outcome.substring_violations.clone(),
+        trial_diagnostics: (passes.len() > 1)
+            .then(|| live::TrialDiagnostics::new(passes))
+            .flatten(),
+    };
+    Ok((report, case_outcome))
+}
+
+fn attribution_of(
+    database: &daybook_lib::db::Database,
+    attempt_id: &str,
+) -> EvalResult<Attribution> {
+    Ok(database.read(|connection| {
+        connection.query_row(
+            "SELECT backend_id, backend_version, model_id, prompt_hash,
+                    tool_surface_version, app_version
+             FROM parse_attempts WHERE id = ?1",
+            [attempt_id],
+            |row| {
+                Ok(Attribution {
+                    backend_id: row.get(0)?,
+                    backend_version: row.get(1)?,
+                    model_id: row.get(2)?,
+                    prompt_hash: row.get(3)?,
+                    tool_surface_version: row.get(4)?,
+                    app_version: row.get(5)?,
+                })
+            },
+        )
+    })?)
 }
 
 /// `--dry-run` 的落点：**不调用 agent 的情况下校验 eval 集完整性**（07 §6）。
@@ -313,6 +479,7 @@ fn score_in_scratch(
         degraded,
         calls: replayed.calls.clone(),
         substring_violations,
+        trial_diagnostics: None,
     };
     Ok((report, outcome))
 }
