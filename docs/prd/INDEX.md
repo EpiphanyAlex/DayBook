@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-13
-version: v0.26
+date: 2026-08-16
+version: v0.27
 ---
 
 # sub-PRD 索引
@@ -23,7 +23,7 @@ version: v0.26
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | `draft` | v0.8 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`ready`** | v0.9 |
 
 **M0 四份已于 2026-08-13 完成实现，且全部处在 `review`**：[00 地基](./00-foundation.md) v0.15、[01 Agent 运行时](./01-agent-runtime.md) v0.20、[02 导入](./02-ingest.md) v0.13、[03 审核与草稿区](./03-review.md) v0.13。确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 均通过。
 
@@ -43,7 +43,7 @@ version: v0.26
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**：维护者 review M0 实现；随后按 [`docs/PRD.md` §9.4](../PRD.md) 完成真实样本度量并给出 go / no-go。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
+**下一步**（2026-08-16 更新）：[07 评测](./07-eval.md) 已转 `ready`，[`docs/PRD.md` §9.4](../PRD.md) 的采样前冻结（beachhead、样本构成、四条口径）已完成。接着是 ① 建评测工具链（`scripts/eval.mjs` · `scripts/export-fixture.mjs` · `fixtures/manifest.json` · 重放测试，**均待建**）；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注、跑分、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。**00–02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有，00–02 没有），维护者 review 时一并补。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -95,7 +95,8 @@ version: v0.26
 | **失败与降级都有哪些情况** | [02 导入 §3.5.1](./02-ingest.md)「降级与失败态矩阵」 |
 | **账户与渠道的区别** | [04 交易 §3.4](./04-transactions.md) |
 | **eval 的真值从哪来 / 条目怎么对齐** | [07 评测 §3.2](./07-eval.md) |
-| **M0 端到端脚本验什么 / M0 的 go-no-go 阈值** | [`docs/PRD.md` §9.3](../PRD.md) · [`docs/PRD.md` §9.4](../PRD.md) |
+| **M0 端到端脚本验什么 / M0 的 go-no-go 阈值与口径** | [`docs/PRD.md` §9.3](../PRD.md) · [`docs/PRD.md` §9.4](../PRD.md) |
+| **go / no-go 的样本构成**（beachhead、对照栏、口述长度分布） | [07 评测 §3.4](./07-eval.md)「M0 go / no-go 的样本构成」 |
 | **工具的智能边界**（什么归 agent、什么归工具） | [ADR-0006](../adr/0006-smart-agent-dumb-tools.md) |
 | **日志落什么、不落什么** | [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) + [01 §3.4](./01-agent-runtime.md) |
 | **口述来源（`kind = utterance`）的语义** | [00 地基 §3.6](./00-foundation.md)「来源不等于文件」+ [02 §3.1](./02-ingest.md) |
@@ -114,6 +115,7 @@ version: v0.26
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.27 | 2026-08-16 | **[07 评测](./07-eval.md) → v0.9，`status` 由 `draft` 转 `ready`——评测工具链可以开工。** 转 `ready` 的依据是 [`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 1 步做完：**beachhead = 交易列表类截图**（§5 R8 关闭），非 beachhead 来源进不参与判定的对照栏，口述定长度分布（分母是采样时决定的，20 段全是单笔则口述池只有 20 条、且指标 6 恒等于 0）。同批把四条阈值口径冻进 [`docs/PRD.md` §9.4](../PRD.md) v0.19（分池、指标 7 分母、每条 1 轮、指标 4 分母），**十项阈值的数字一个未动**。共享决定出处表新增「go / no-go 的样本构成」一行。**M0 四份状态与版本未变，仍全在 `review`** |
 | v0.26 | 2026-08-13 | **[03 审核与草稿区](./03-review.md) → v0.13，`status` 由 `in-progress` 回到 `review`——M0 四份现在全部在 `review`。** 依据是 [03 §6](./03-review.md) 的 M0 人工验收六条由真实 CLI 逐条实测通过，含 v0.12 新增的「缺三元组当场补齐并确认」。同批修掉两个让桌面应用起不来的缺陷（缺 `default-run`、图标 16 位/通道），并记下根因：**M0 门禁没有一条会启动桌面壳**。**00 / 01 / 02 状态与版本未变** |
 | v0.25 | 2026-08-13 | **实现验收第二批回流：**[01 Agent 运行时](./01-agent-runtime.md) → v0.20（合计词闸门补出口与边界；CLI 发现路径补 nvm / fnm / volta / pnpm）、[02 导入](./02-ingest.md) → v0.13（状态机在实现里有两份且互相矛盾，转移表补 `parsed → parsing` 与 `failed → failed`，并要求 `sources.state` 只有一处写入点）。同批修好前端第二张币种 exponent 表与 Rust 那张的分叉（新增逐条比对测试）。**两份 status 均未变** |
 | v0.24 | 2026-08-13 | **[03 审核与草稿区](./03-review.md) → v0.12，`status` 由 `review` 退回 `in-progress`。** 实现验收发现「行内改金额」主路径必然返回 `data.money_inconsistent`，而对应验收测试改的是 `merchant`，门禁看不见——进入 `review` 的判据当时不成立。同批改定：本位币金额改为导出值；根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（解开它与 [03 §3.3](./03-review.md) 的正面冲突）；口述报了合计时的背书提示补成硬要求；`review.incomplete_triple` 补上界面入口。**00 / 01 / 02 状态与版本未变** |
