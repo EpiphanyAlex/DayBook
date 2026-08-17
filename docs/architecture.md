@@ -2,15 +2,15 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-12
-version: v0.7
+date: 2026-08-17
+version: v0.8
 ---
 
 # 系统架构基线
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：M0 实现已进入 review。** `src/` 与 `src-tauri/` 已按本文边界落地；维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
+> **当前状态：M0 实现处于 review / 修正阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 因安装资格 / 解析就绪度规格被证伪，v0.21 当前为 `ready`，其余三份 M0 sub-PRD 为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
 
 ---
 
@@ -79,34 +79,37 @@ version: v0.7
       ↓
 2. store：文件落进证据目录 + 写 sources 表（原件、哈希、导入时间）
       ↓
-3. agent launcher：写一行 parse_attempts → 以密封配置 spawn agent CLI
-      → 探测有效工具集，与注册表不相等则拒绝下发（agent.tool_surface_unsealed）
+3. agent launcher：先做安装资格与 readiness probe（不写 parse_attempts）
+      → 合格可执行文件、认证、MCP helper、结构化 capability manifest 全部通过
+      → 与注册表不相等或无法证明相等则拒绝下发；UI 仍可使用非解析路径
+      ↓
+4. readiness 通过后：写一行 parse_attempts → 以密封配置 spawn 解析任务
       → 告知「有一个新 source 待解析」
       ↓
-4. agent：经 MCP 工具读取该 source →（视觉解析）→ 逐条调用起草工具
+5. agent：经 MCP 工具读取该 source →（视觉解析）→ 逐条调用起草工具
       ↓
-5. MCP 工具 → domain::draft → draft_transactions
+6. MCP 工具 → domain::draft → draft_transactions
       每条强制带 source_id + evidence_text，否则工具直接拒绝
       同时由 Rust 侧写下 drafted_json（不可变起草快照）
       ↓
-6. agent 调 complete_source 声明读完了（条目数 + 未解析区域）
+7. agent 调 complete_source 声明读完了（条目数 + 未解析区域）
       没调 ⇒ 协议失败，source 转 failed，本次草稿作废，不判为 parsed
       ↓
-7. domain：对该 attempt 做总额交叉校验
+8. domain：对该 attempt 做总额交叉校验
       求和范围 = 该次尝试全部未作废草稿，与「要确认哪些」无关
       返回 reconciliation_status + confirmation_policy 两个字段
       ↓
-8. UI：审核界面拉取草稿 + 来源原件并排显示，异常项前置
+9. UI：审核界面拉取草稿 + 来源原件并排显示，异常项前置
       ↓
-9. 用户逐条/批量确认 → Tauri command → domain::confirm
+10. 用户逐条/批量确认 → Tauri command → domain::confirm
       校验不过 ⇒ 拒绝批量入库
       ↓
-10. store：写 transactions + audit_log；草稿标记已消费（drafted_json 不动）
+11. store：写 transactions + audit_log；草稿标记已消费（drafted_json 不动）
       ↓
-11. 用户的每次修改 → 记忆规则（商户→分类映射等）
+12. 用户的每次修改 → 记忆规则（商户→分类映射等）
 ```
 
-**控制流由代码决定**：第 3、6、7、9、10 步的判断全是确定性代码。**LLM 只在第 4 步出现**，做抽取、解析、分类与起草，不做最终业务决策（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §5）。第 6 步是 agent 的**声明**，不是它的决定——判不判 `parsed` 仍归代码。
+**控制流由代码决定**：第 3、4、7、8、10、11 步的判断全是确定性代码。**LLM 只在第 5 步出现**，做抽取、解析、分类与起草，不做最终业务决策（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §5）。第 7 步是 agent 的**声明**，不是它的决定——判不判 `parsed` 仍归代码。
 
 ## 5. 存储布局
 
@@ -151,6 +154,7 @@ version: v0.7
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.8 | 2026-08-17 | 同步 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 的安装资格 / 解析就绪度决定：§4 把 readiness probe 移到创建 `parse_attempts` 与下发解析任务之前，探测进程自身不产生 attempt；01 因规格证伪回到 `ready`，00/02/03 仍为 `review`。组件边界未变，控制流顺序改准 |
 | v0.6 | 2026-08-10 | 随[`docs/PRD.md` v0.10](./PRD.md) 第三轮同步：§3 结构性保证增第 7 条「**原件属于来源，读出来的东西属于尝试**」；§4 第 7 步的总额校验改为按 `attempt_id`、返回两个字段；§6 的 IPC 金额表示改为十进制字符串 |
 | v0.5 | 2026-08-10 | 随[`docs/PRD.md` v0.9](./PRD.md) 第二轮文档审查同步：§3 **结构性保证由四条增至六条**——新增「子进程密封启动 + 有效工具集实测」（前四条只约束我们注册的工具面，而通用编码 agent 自带的能力可直接绕过）与「agent 原始起草值不可变」；§4 数据流由 10 步扩为 11 步，补 `parse_attempts` 落行、工具集探测、`complete_source` 完成协议、`drafted_json`，并写明总额校验的求和范围与「要确认哪些」无关；§7 补密封配置与来源内容不可信两条。**组件职责与两条写入路径的形状未变** |
 | v0.7 | 2026-08-12 | **MCP server 的进程归属由「待定」改为定案**（[01 §5](./prd/01-agent-runtime.md) R6 spike，2026-08-12）：**独立 MCP helper 二进制**，由 agent CLI 自己 `fork/exec`，helper 经 **Unix domain socket** 连回 Tauri 主进程，**自己不碰数据库**——全部 SQLite 写入收敛在主进程一处。§1 结构图与 §7 同步。stdio、`rmcp`、不开端口三条仍不变。同步 [ADR-0003 §1](./adr/0003-agent-runtime-and-pluggable-backend.md)、[`docs/CONTEXT.md`](./CONTEXT.md) |

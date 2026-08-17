@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: review
 owner: "@maintainer"
-date: 2026-08-13
-version: v0.15
+date: 2026-08-17
+version: v0.16
 ---
 
 # 00 · 地基 Foundation
@@ -486,7 +486,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `ingest.unsupported_format` | [02](./02-ingest.md) | 文件格式不在支持集内 |
 | `ingest.evidence_write_failed` | [02](./02-ingest.md) | 证据落盘失败（此时不写 `sources` 行） |
 | `ingest.invalid_state_transition` | [02](./02-ingest.md) | 非法状态转移（§3.4） |
-| `agent.backend_unavailable` | [01](./01-agent-runtime.md) | `probe()` 失败或 CLI 不可执行 |
+| `agent.backend_unavailable` | [01](./01-agent-runtime.md) | 安装资格检查未发现合格 CLI：没有候选路径、候选不可执行，或版本无法在限定时间内成功读取（[01 §3.5](./01-agent-runtime.md)）。**不表示完整 readiness probe 的任意失败**——未认证与能力面不密封分别使用 `agent.not_authenticated` 与 `agent.tool_surface_unsealed` |
 | `agent.not_authenticated` | [01](./01-agent-runtime.md) | CLI 存在但未登录（2026-08-10 新增）——与「没装」是两种不同的用户动作，UI 要给不同指引 |
 | `agent.quota_exhausted` | [01](./01-agent-runtime.md) | 后端报告用量额度耗尽（2026-08-10 新增）。**不重试**（[02 导入 §3.5](./02-ingest.md)），否则在用户不知情时接着烧 |
 | `agent.timeout` | [01](./01-agent-runtime.md) | 单次任务超硬超时 |
@@ -496,7 +496,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `agent.unexplained_gap` | [01](./01-agent-runtime.md) | `source_ordinal` 跳号而 `unparsed_note` 为空（2026-08-10 新增，[01 §3.2](./01-agent-runtime.md)）——**跳号必须有说明**。同样是可补救的拒绝 |
 | `agent.completion_mismatch` | [01](./01-agent-runtime.md) | `complete_source` 自报条目数 ≠ 实际草稿数（2026-08-10 新增）。**这是可补救的工具级拒绝**，不封闭会话——agent 补齐或修正后可再调（[01 §3.2](./01-agent-runtime.md)） |
 | `agent.memory_lookup_incomplete` | [01](./01-agent-runtime.md) | `complete_source` 时发现起草出的商户有未经 `query_memory` 查过的（**M3**，[06 记忆 §3.4](./06-memory.md)）。同样可补救，返回体带缺的键 |
-| `agent.tool_surface_unsealed` | [01](./01-agent-runtime.md) | 启动前的有效工具集探测发现超出预期的工具（2026-08-10 新增，[01 §3.7](./01-agent-runtime.md)）——**拒绝下发任务**，不降级运行 |
+| `agent.tool_surface_unsealed` | [01](./01-agent-runtime.md) | 启动前的 readiness probe **无法证明完整 capability manifest 与预期严格相等**：结构化清单缺失/不可读、缺项、多项，或出现非预期 hook / 插件 / 权限模式（[01 §3.7](./01-agent-runtime.md)）——**拒绝下发任务**，不降级运行 |
 | `agent.spawn_failed` | [01](./01-agent-runtime.md) | 子进程起不来 |
 | `agent.tool_rejected` | [01](./01-agent-runtime.md) | 工具参数不合法（如缺 `evidence_text`） |
 | `review.total_mismatch` | [03](./03-review.md) | 总额校验 `failed` 时批量确认被拒 |
@@ -600,6 +600,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-17（跨文档同步） | 权威错误码表把 `agent.backend_unavailable` 从含糊的「`probe()` 失败」收窄为安装资格失败（未找到、不可执行、版本不可读取）；完整 readiness probe 的认证、密封与其他失败继续使用各自错误码。`agent.tool_surface_unsealed` 同步改准为「无法证明完整 manifest 与预期严格相等」，不再只写“多出工具”；错误码集合不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13 | **验收选择器按真实职责对齐。** 口述落盘/幂等归 `ingest`，span 工具边界与 attempt 生命周期归 `agent`，确认完整性/溯源归 `review`；原来的 `foundation::*` 名称会让 `cargo test <filter>` 在 0 个测试时仍 exit 0，制造假绿。行为判据不变，只把选择器改到实际执行它的测试 | M0 验收清单逐条与 `cargo test -- --list` 对照 |
 | 2026-08-13 | **实现发现“全局本位币决定新交易”没有任何存储与首选路径。** M0 定为本地 `preferences.json` + 首次解析前人工选择；不从地区或来源静默猜，切换不改历史行 | §3.4 已有的逐笔冻结语义；M0 真实确认链路需要完整三元组 |
 | 2026-08-13 | **M0 实施开工前补齐四处数据硬约束。** ① 未知币种验收与正文统一为拒绝写入；② `draft_transactions` 新增 `discarded_at`，不再让人工丢弃复用协议失败的 `voided_at`；③ 明确草稿与尝试、来源与最新尝试的跨行归属不变式，并要求触发器或等强度的数据层检查；④ IPC 往返验收由与范围不变式冲突的 `i64::MAX` 改为允许上界 `10^15`，前者应被拒绝。实施落点另明确为 Tauri `data_dir()/Daybook`，首次告知显示路径并可在访达中揭示 | M0 实施计划与首轮 Foundation 测试；否则可产生跨来源证据链与无法区分的作废原因 |
@@ -624,6 +625,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.16 | 2026-08-17 | **安装资格 / 解析就绪度错误语义同步，`status` 仍为 `review`。** `agent.backend_unavailable` 只表示未发现合格 CLI（未找到、不可执行、版本不可读取），不再用「任意 `probe()` 失败」把认证与密封失败混进安装状态；`agent.tool_surface_unsealed` 同步扩准为「无法证明完整 capability manifest 与预期严格相等」，覆盖清单缺失/不可读、缺项、多项及非工具副作用能力；错误码集合未变 |
 | v0.15 | 2026-08-13 | **M0 实现验收进入 `review`。** 六表迁移、整数金额/IPC、证据目录、本位币偏好与访达揭示入口已落地，统一 M0 门禁通过 |
 | v0.14 | 2026-08-13 | **验收审计回流：**把 10 条已漂移的 `foundation::*` 测试选择器对齐到真实的 `ingest` / `agent` / `review` 测试，消除 0-test 假绿；验收行为不变 |
 | v0.13 | 2026-08-13 | **实现回流：补齐当前本位币设置。** 本地 `preferences.json` 持久化、首次解析前人工选择、未选明确拒绝；切换只影响后续解析 |
