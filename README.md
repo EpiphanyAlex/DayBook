@@ -14,9 +14,9 @@
 
 ## 当前状态
 
-**M0 实现 review 阶段（2026-08-13）。** Tauri / React / Rust 已落地：六表地基、五工具密封 agent 链路、截图与口述导入、审核确认与总额交叉校验能端到端跑通，`src/` 与 `src-tauri/` 均已创建。M0 的定义是**端到端点亮**——拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
+**M0 实现处于 review / 修正阶段（2026-08-17）。** Tauri / React / Rust 已落地：六表地基、五工具密封 agent 链路、截图与口述导入、审核确认与总额交叉校验能端到端跑通，`src/` 与 `src-tauri/` 均已创建。M0 的定义是**端到端点亮**——拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
 
-**但还不能称 M0 已完成。** 四份 sub-PRD——[00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[02 导入](./docs/prd/02-ingest.md)、[03 审核与草稿区](./docs/prd/03-review.md)——现在都是 `review`（03 于 2026-08-13 当天先退回 `in-progress`，人工验收六条实测通过后回到 `review`）；维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go / no-go 都尚未完成。**当前界面是功能基线，不是设计定稿**——M1 开工前先确定设计稿与 token design system。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
+**但还不能称 M0 已完成。** [00 地基](./docs/prd/00-foundation.md)、[02 导入](./docs/prd/02-ingest.md)、[03 审核与草稿区](./docs/prd/03-review.md) 当前为 `review`；[01 Agent 运行时](./docs/prd/01-agent-runtime.md) 因安装资格 / 解析就绪度规格被证伪，已重写并回到 `ready`，等待修正实现。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go / no-go 都尚未完成。**当前界面是功能基线，不是设计定稿**——M1 开工前先确定设计稿与 token design system。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
 
 **阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。
 

@@ -10,7 +10,7 @@ version: v0.8
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：M0 实现处于 review / 修正阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 因安装资格 / 解析就绪度规格被证伪，v0.21 当前为 `ready`，其余三份 M0 sub-PRD 为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
+> **当前状态：M0 实现处于 review / 修正阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 因安装资格 / 解析就绪度规格被证伪，当前 v0.22 为 `ready`（本轮新增的是 M3 事项 update 工具边界，M0 修正目标不变），其余三份 M0 sub-PRD 为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
 
 ---
 
@@ -59,7 +59,7 @@ version: v0.8
 路径 B：人工确认（AI 不可达）
   React UI ──Tauri command──▶ domain::confirm ──▶ store ──▶ 事实表
                                   │                          + audit_log
-                                  └─ 总额交叉校验不过 ⇒ 拒绝，不提供旁路
+                                  └─ confirmation_policy = single_only ⇒ 拒绝批量，不提供旁路
 ```
 
 **结构性保证**（违反即缺陷）：
@@ -102,7 +102,7 @@ version: v0.8
 9. UI：审核界面拉取草稿 + 来源原件并排显示，异常项前置
       ↓
 10. 用户逐条/批量确认 → Tauri command → domain::confirm
-      校验不过 ⇒ 拒绝批量入库
+      confirmation_policy = single_only ⇒ 拒绝批量；utterance 的 user_attested_batch 走整段原文人工背书
       ↓
 11. store：写 transactions + audit_log；草稿标记已消费（drafted_json 不动）
       ↓

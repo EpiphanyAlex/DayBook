@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-**仓库处于 M0 实现 review / 修正阶段（2026-08-17）**：Tauri/React/Rust、六表地基、五工具密封 agent 链路、截图/口述导入与审核确认已经落地，`src/` 与 `src-tauri/` 均已创建。[00 地基](./docs/prd/00-foundation.md)、[02 导入](./docs/prd/02-ingest.md)、[03 审核](./docs/prd/03-review.md) 当前为 `review`；[01 Agent 运行时](./docs/prd/01-agent-runtime.md) 因「安装资格 / 解析就绪度」规格被证伪，已重写为 v0.21、当前为 `ready`，等待修正实现。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go/no-go 尚未完成，所以**不得称 M0 已 done**。当前前端是功能基线，不是设计定稿；M1 开工前确定设计稿与 token design system。设计文档仍是产品与架构的事实源——版本号以各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 为准。
+**仓库处于 M0 实现 review / 修正阶段（2026-08-17）**：Tauri/React/Rust、六表地基、五工具密封 agent 链路、截图/口述导入与审核确认已经落地，`src/` 与 `src-tauri/` 均已创建。[00 地基](./docs/prd/00-foundation.md)、[02 导入](./docs/prd/02-ingest.md)、[03 审核](./docs/prd/03-review.md) 当前为 `review`；[01 Agent 运行时](./docs/prd/01-agent-runtime.md) 因「安装资格 / 解析就绪度」规格被证伪，已重写；本轮又补齐 M3 的事项 create/update 草稿契约，当前为 v0.22、`ready`，等待修正 M0 实现。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go/no-go 尚未完成，所以**不得称 M0 已 done**。当前前端是功能基线，不是设计定稿；M1 开工前确定设计稿与 token design system。设计文档仍是产品与架构的事实源——版本号以各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 为准。
 
 > ✅ **阻塞 M0 的 R6 spike 已于 2026-08-12 做完并关闭，其结论已在 M0 实现中验证。** **MCP server 跑在独立 helper 二进制里**，由 agent CLI 自己 `fork/exec`，helper 经 Unix domain socket 连回 Tauri 主进程、**自己不碰数据库**（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)）。密封启动配置的具体 flag 组合与已验证的 CLI 版本号在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](./docs/spikes/2026-08-12-r6-agent-runtime.md)——**动 agent 运行时之前先读那一份**，里面三个反直觉的坑会直接决定实现对不对。
 
@@ -41,7 +41,7 @@
 - **多币种 / 多渠道 / 任意版式是能力，不是定位。** 它们来自「用户自带额度 → 可对任意来源重解析」这一条，天然与银行、币种、国家无关（解析不认识具体格式）。多账户 + 多渠道 + 双币种的组合是 **压力测试场景，不是市场边界**——不要把产品叙事窄化到任何特定国家或币种。
 - **AI 在此处的角色是考古学家，不是输入框**：从截图等痕迹里把过去还原成待确认草稿，人审核后才入库。核心动作是「重建」，不是「录入」。
 - **无 Daybook 账号、无远程服务端、不托管用户数据**：账本、证据与日志全部存在本机，无云同步、无遥测。AI 能力由**用户自己已安装并登录的 agent CLI** 提供（Claude Code / Codex），解析内容由该 CLI 发往其模型服务商，应用不代理、不转发、不记录、不打包任何厂商凭证。**对外别写裸的「无服务器/无后端/无账号」**——本产品自己有本机 MCP server 和「agent 后端」两个同名概念，措辞纪律见 [`docs/PRD.md` §3.3](./docs/PRD.md)。
-- 两个实体、一条时间轴：**「交易」**（金额/币种/汇率/商户/证据截图）与**「事项」**（一条记录走完 `backlog → 排到某天 → 完成并带实际时长` 的生命周期）。UI 分两个视图，底层共用时间轴与记忆。
+- 两个实体、一条时间轴：**「交易」**（金额/币种/汇率/商户/证据截图）与**「事项」**（同一条记录的**计划与结果**两端，状态为 `backlog / scheduled / done / archived`；计划与结果可按用户原话记录日期、时间点、时间块或粗粒度日期范围，截止约束与计划独立）。UI 分两个视图，底层共用时间轴与记忆。
 
 ## 实施方法
 
@@ -73,7 +73,7 @@
 14. **记忆系统存规则，不存对话**：商户→分类映射、用户的每次纠正、个人语境词表、语音专有名词表。不得把原始对话历史当作记忆持久化。
 15. **控制流由代码决定**：状态机、确认点、重试策略是确定性的；LLM 只做抽取、解析、分类与起草，不做最终业务决策。
 16. **测试门禁**：前端 `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 与 Rust `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` **并列**，任一失败即红。**Rust 三条的参数照抄，不用简写**——`cargo clippy` 不带 `--all-targets` 查不到测试与 example，等于门禁开了个口子。
-17. **v1 范围纪律**：「交易」做深、「事项」做薄。明确不做——提醒、重复任务、子任务、优先级算法、番茄钟、弱信号采集、意图↔事实闭环、历史数据导入、手机端、任何形式的同步 / Daybook 账号 / **Daybook 自建的远程服务端** / 变现。范围变更需先改 [docs/PRD.md](./docs/PRD.md)。（**这里说的不是「agent 后端」**——那是本机的可插拔推理进程，见约束 11。）
+17. **v1 范围纪律**：「交易」做深、「事项」做薄。明确不做——提醒、重复任务、子任务、优先级算法、番茄钟 / `in_progress` / 计时器、日/月视图、完整日历集成、多个不连续精确时间片段、每周实际用时汇总、弱信号采集、意图↔交易事实闭环、历史数据导入、手机端、任何形式的数据同步 / Daybook 账号 / **Daybook 自建的远程服务端** / 变现。范围变更需先改 [docs/PRD.md](./docs/PRD.md)。（**这里说的不是「agent 后端」**——那是本机的可插拔推理进程，见约束 11。）
 
 ## 文档层级
 

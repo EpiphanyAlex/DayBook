@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-17
-version: v0.31
+version: v0.32
 ---
 
 # sub-PRD 索引
@@ -17,21 +17,21 @@ version: v0.31
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.16 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`ready`** | v0.21 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`ready`** | v0.22 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.14 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.13 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.14 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.7 |
-| 05 | [事项 Items](./05-items.md) | 事项实体（backlog → 排期 → 完成时长） | `draft` | v0.7 |
+| 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.8 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.6 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.12 |
 
-**M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪，重写为 v0.21 后最终回到 `ready`，等待修正实现。**当前状态：[00 地基](./00-foundation.md) v0.16、[02 导入](./02-ingest.md) v0.14、[03 审核与草稿区](./03-review.md) v0.13 为 `review`；01 v0.21 为 `ready`。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据，但**不覆盖**新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready。
+**M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪，重写后最终回到 `ready`，等待修正实现；本轮又补齐 M3 的事项 create/update 工具边界。**当前状态：[00 地基](./00-foundation.md) v0.16、[02 导入](./02-ingest.md) v0.14、[03 审核与草稿区](./03-review.md) v0.14 为 `review`；01 v0.22 为 `ready`。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据，但**不覆盖**新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready；03 v0.14 新增的 M3 事项 update 审核契约也不改变既有 M0/M1 结论。
 
 > **03 当天先退回 `in-progress`、再回到 `review`**（2026-08-13）。**退回的原因**：「行内改一条草稿的金额」这条主路径必然失败（`edit_draft` 把本位币金额当独立输入，只改金额时三元组校验必然拒绝），而 §6 对应的验收测试改的是 `merchant` 而非金额，所以门禁全绿；进入 `review` 的判据「验收标准全部跑过」当时并不成立。同批改定：根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定（它与 [03 §3.3](./03-review.md) 的口述确认策略正面冲突）；`review.incomplete_triple` 在界面上此前是死路，M0 补本位币与汇率输入。**回到 `review` 的依据**：[03 §6](./03-review.md) 的 M0 人工验收六条当天由真实 CLI 逐条实测通过（含「缺三元组当场补齐并确认」），逐条结论见 [03 §7](./03-review.md) v0.13。
 >
 > **同一次人工验收暴露了一个门禁盲区，值得单独记一笔**：桌面应用当天**根本起不来**（`src-tauri` 两个 bin 缺 `default-run`；`icons/icon.png` 是 16 位/通道，tauri 判定图标无效后 abort），而 `node scripts/verify-m0.mjs` 不带 `--skip-live` 全绿。**M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有一条会启动桌面壳。** 两条已修复并各补一条 `cargo test` 断言（[03 §6](./03-review.md)）。
 
-**`review` 不等于 M0 产品 go，`ready` 更不等于。** 01 v0.21 尚待实现，维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测也未完成；在 01 修正并重新进入 `review`、正式给出 go / no-go、完成收尾之前，M0 四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
+**`review` 不等于 M0 产品 go，`ready` 更不等于。** 01 v0.22 的 M0 修正尚待实现，维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测也未完成；在 01 修正并重新进入 `review`、正式给出 go / no-go、完成收尾之前，M0 四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
 
 > ✅ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-12 回到 `ready`——M0 不再被阻塞。** 它曾于 2026-08-09 退回 `draft`：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。R6 的四项检查已全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
@@ -43,7 +43,7 @@ version: v0.31
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（2026-08-17 更新）：① agent 读取当前 `status: ready` 的 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21，产出实施计划并交维护者审批；批准且真正开始开发时转 `in-progress`，跑新增验收后回到 `review`；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；④ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；⑤ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00–02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有，00–02 没有），维护者 review 时一并补；01 的新人工验收并入这一轮。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
+**下一步**（2026-08-17 更新）：① agent 读取当前 `status: ready` 的 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.22，产出 M0 修正实施计划并交维护者审批；批准且真正开始开发时转 `in-progress`，跑新增验收后回到 `review`；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00–02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有，00–02 没有），维护者 review 时一并补；01 的新人工验收并入这一轮。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -102,6 +102,7 @@ version: v0.31
 | **日志落什么、不落什么** | [ADR-0007](../adr/0007-local-observability-and-log-tiers.md) + [01 §3.4](./01-agent-runtime.md) |
 | **口述来源（`kind = utterance`）的语义** | [00 地基 §3.6](./00-foundation.md)「来源不等于文件」+ [02 §3.1](./02-ingest.md) |
 | **交易与事项的边界** | [05 事项 §3.1](./05-items.md)「钱是否已经流动」 |
+| **事项的计划/结果时间、截止、状态与周视图语义** | [05 事项 §3.1–§3.7](./05-items.md) + [ADR-0004 §4](../adr/0004-data-model-sqlite-integer-money.md) |
 | **记忆规则怎么应用** | [06 记忆 §3.4](./06-memory.md) |
 | **什么算「读对」、回归怎么判** | [07 评测 §3.3/§3.5](./07-eval.md) |
 | 草稿与事实表怎么隔离、证据怎么挂 | [ADR-0002](../adr/0002-ai-never-writes-directly.md) + [03 审核与草稿区](./03-review.md) |
@@ -116,6 +117,7 @@ version: v0.31
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.32 | 2026-08-17 | **事项计划/结果规格同步。** [05 事项](./05-items.md) → v0.8，`status` 保持 `draft`：从旧的按日 + 用时模型重写为计划/结果双轨、时间点/时间块/日期范围、独立截止、单清单、周视图、自然语言 create/update 草稿与直接操作审计；删除 `in_progress` 与每周实际用时汇总。[03 审核](./03-review.md) → v0.14（保持 `review`），新增仅属于 M3 的 update 目标消歧与 mixed batch；[01 Agent 运行时](./01-agent-runtime.md) → v0.22（保持 `ready`），补有界 `find_item_candidates` 与 `draft_item` ready/needs_target update 权限边界，M0 五工具与 readiness 修正计划不变。共享决定出处表新增事项时间语义 |
 | v0.31 | 2026-08-17 | **[07 评测](./07-eval.md) → v0.12——真跑 agent 的 eval 轮次落地，工具链可用。** `node scripts/eval.mjs`（不带参数）真起用户自己的 CLI 跑一轮并出 diff 表；`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数（[`docs/PRD.md` §9.4](../PRD.md) 口径③），`--keep-runs` 让一次跑砸的轮次能直接变成回归夹具。同批**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录。**烧额度那一路不进 CI**；07 仍为 `in-progress`（`--no-memory` 属 M3）。M0 四份状态与版本未变 |
 | v0.30 | 2026-08-17 | **[07 评测](./07-eval.md) → v0.11——夹具导出器落地。** `node scripts/export-fixture.mjs <agent_session_id>` 把一次真实解析打包成自包含、可重放的夹具目录，默认写不进 git 的 `fixtures/local/`。同批新增一道闸门：导出的 `expected.json` 带 `annotated: false`，人工逐条核对前评分器拒绝它——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧（[07 §3.2](./07-eval.md)）。**真跑 agent 的 eval 轮次仍未做，07 保持 `in-progress`；M0 四份状态与版本未变。** |
 | v0.29 | 2026-08-17 | **安装资格 / 解析就绪度决定回流。** [01 Agent 运行时](./01-agent-runtime.md) → v0.21，原规格把静态发现与完整 probe 混成一个状态，当前实现会接受不可执行普通文件并在 probe 完成前短暂显示 ready；规格经 `review → draft → ready` 重写，等待从 ready 规格产出实施计划并经人批准后实现。[00 地基](./00-foundation.md) → v0.16，收窄 `agent.backend_unavailable` 的权威语义；[02 导入](./02-ingest.md) → v0.14，同步降级矩阵；两份 `status` 都仍为 `review`。共享决定出处表新增该契约。M0 当前为 01 `ready`、00/02/03 `review`，07 仍为 `in-progress` |

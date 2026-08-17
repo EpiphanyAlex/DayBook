@@ -52,7 +52,7 @@ AgentRuntime::parse_source
 
 ## 已知边界与坑
 
-- **当前实现尚未兑现 [01 §3.5](../../docs/prd/01-agent-runtime.md) v0.21 的安装资格 / 解析就绪度契约**：CLI discovery 只检查 `is_file()`，未检查执行权限；`BackendStatus` 没有显式 `ready`，前端会在 `available = true`、`authenticated = null` 且无错误时把 probe 尚未完成误显示为「考古员已就绪」；probe 失败结论也由前端临时拼装而非 Rust runtime 持有。01 已回到 `ready`，修正并通过新增验收前不得把这段现状当作目标契约。
+- **当前实现尚未兑现 [01 §3.5](../../docs/prd/01-agent-runtime.md) v0.22 的安装资格 / 解析就绪度契约（该契约自 v0.21 引入）**：CLI discovery 只检查 `is_file()`，未检查执行权限；`BackendStatus` 没有显式 `ready`，前端会在 `available = true`、`authenticated = null` 且无错误时把 probe 尚未完成误显示为「考古员已就绪」；probe 失败结论也由前端临时拼装而非 Rust runtime 持有。01 已回到 `ready`，修正并通过新增验收前不得把这段现状当作目标契约。
 - `--safe-mode` 会把显式 `--mcp-config` 一起屏蔽，不能用于生产密封启动。
 - Claude Code 2.1.229 在有 `structuredContent` 时不把第二个 text content block 交给模型；口述正文因此同时放在 `structuredContent.text`。
 - 探测会真实调用一次无副作用工具来逼出 hook 事件，会消耗少量 CLI 额度。

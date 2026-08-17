@@ -2,8 +2,8 @@
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
 status: review
 owner: "@maintainer"
-date: 2026-08-13
-version: v0.13
+date: 2026-08-17
+version: v0.14
 ---
 
 # 03 · 审核与草稿区
@@ -33,7 +33,7 @@ version: v0.13
 - **草稿的产生**——属 [01 Agent 运行时](./01-agent-runtime.md)（工具）与 [02 导入](./02-ingest.md)（编排）
 - **交易的字段语义与回顾视图**——属 [04 交易](./04-transactions.md)
 - **记忆规则的存储与匹配**——属 [06 记忆](./06-memory.md)；本模块只负责**投递纠正事件**
-- **语音审核**——[ADR-0005 §3](../adr/0005-voice-and-system-integration.md) 永久排除：没法用嘴说「第 7 条金额改成 168」
+- **让语音执行最终确认**——[ADR-0005 §3](../adr/0005-voice-and-system-integration.md) 永久排除：系统听写可以形成事项修改指令，但目标匹配、字段 diff 与「第 7 条金额改成 168」这类精确审核仍须视觉界面确认
 
 ## 3. 决定与依据
 
@@ -275,15 +275,26 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 **三元组补全（M0 即需要）**（2026-08-13 新增）。缺三元组的草稿确认时返回 `review.incomplete_triple`（§3.1），界面必须**同时**给出本位币与汇率两个输入框，让用户当场补齐。**只提示不给入口是死路**：M0 曾出现「确认前需要补全本位币与汇率」的提示，而界面上没有任何地方能补，用户只能丢弃草稿重新解析整个来源。**一条点不动的警告比没有警告更伤信任**，而这一屏的全部意义就是信任（§1）。
 
-### 3.6 每次纠正都留痕并投递记忆
+### 3.6 每次纠正都留痕；M3 支持事项 update 草稿
 
 - 用户对草稿的任何修改 → 写 `audit_log`（`actor = "human"`，含 before/after，[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 4）
 - **必须支持「改实体类型」**（2026-08-08 新增，M3 起）：把一条交易草稿转成事项草稿，或反之。
   理由：一句口述里的交易与事项由 agent 判断归属（[05 事项 §3.1](./05-items.md) 的「钱是否已流动」规则），**分类错是高可见、低损害的错误**——用户一眼就看出「这条不该在这」。但草稿分两张表，改类型物理上是「删一条 + 建一条」。若 UI 不提供一键转换，用户只能丢弃后重说一遍，**批处理省下的时间会在这一下被吃掉**。
   转换写两条审计（原表 `discard` + 新表 `create`），并保留 `source_id` / `evidence_text` / `attempt_id` 不变——证据链不因用户改分类而断。
   **`draft_items` 是 M3 的表**（[00 地基 §3.6](./00-foundation.md)），所以本项 **M0 与 M1 都无从实现，验收在 M3**（2026-08-10 修正：§6 此前把 `review/entity-type-switch` 放在「M1 必过」，而 M1 时目标表还不存在——那条验收在 M1 必然挂）
-- 同时投递一个**纠正事件**给 [06 记忆](./06-memory.md)：`(来源商户文本, 原分类, 改后分类)` 等
-- **记忆的写入不阻塞确认**——记忆失败不能挡住入库
+
+#### 事项的新建与更新共用审核闸门（M3）
+
+依据 [05 事项 §3.4](./05-items.md)：`draft_items` 通过 `operation = create | update` 同时承载新建和对已有事项的修改。
+
+- `resolution_state = ready` 的 update 必须有 `target_item_id`，并把目标事项的 before 与 agent 起草的 tri-state patch（未提及 / 清空 / 新值）并排显示；解析规则是 set 覆盖、clear 清空且抑制计划回退、unspecified 才回退计划。
+- `resolution_state = needs_target` 的 update 目标为空，持久化 0–8 个由 [01 `find_item_candidates`](./01-agent-runtime.md) 返回的候选 id；它计入该次完成条数但不可确认。界面只提供「选择候选 / 改为新建 / 忽略」，不得把匹配失败静默转成 create。
+- 用户选择候选或改为新建时，domain 修改草稿的当前 operation/target/resolution_state 并写人工审计；`drafted_json` 仍保留 agent 原始 operation、候选与 patch，不再次请求 agent。
+- 一段 `utterance` 可以混合交易草稿、事项 create、ready update 与 needs_target update；批量确认只提交可确认且被选中的行，仍要求整段原文、全部结果、条数与每条 `evidence_text` 的对应关系同屏。
+- 确认 update 后才写 `items`，并写一条 `actor = human` 的 before/after 审计；agent 的原始草稿与来源证据原样保留。
+- 用户在周视图直接拖拽/拉伸不是 agent 草稿：它是确定性人工修改，可直接写事实 + 审计并提供撤销；撤销再写反向审计。
+
+同时投递一个**纠正事件**给 [06 记忆](./06-memory.md)：`(来源商户文本, 原分类, 改后分类)` 等。**记忆写入不阻塞确认**——记忆失败不能挡住事实更新。
 
 ### 3.7 性能
 
@@ -300,7 +311,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 | 总额校验带容差（如 ±1 分） | 容差会掩盖真实的解析错误；整数存储的全部意义就是让精确相等成立（[00 地基 §3.4](./00-foundation.md)） |
 | 默认不选，让用户逐条勾 | 多数条目是对的，逐条勾是把 O(正确项) 的成本强加给用户；默认全选让成本只落在 O(错误项) |
 | 用聊天框审核（「把第 7 条改成 168」） | 交互形态明确是「对话下指令 + 界面做审核」（[`docs/PRD.md` §5.3](../PRD.md)）；自然语言定位行号比直接点它慢一个量级 |
-| 语音审核 | [ADR-0005 §3](../adr/0005-voice-and-system-integration.md) 永久排除 |
+| 让语音直接执行审核确认 | 系统听写可形成事项修改指令，但目标匹配与字段差异仍须视觉审核；语音不能确认或绕过草稿（[ADR-0005 §3](../adr/0005-voice-and-system-integration.md)） |
 | 确认后删除草稿 | 审计无法回答「入库的这条当初 AI 起草成什么样」 |
 
 ## 5. 待决与风险
@@ -318,7 +329,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 ## 6. 验收标准
 
-本模块横跨 M0（最朴素的确认列表）与 M1（审核界面做深），验收**按里程碑分层**——M0 只需闸门与确认逻辑成立，键盘流与排序属 M1。
+本模块横跨 M0（最朴素的确认列表）、M1（交易审核界面做深）与 M3（事项 create/update 草稿），验收**按里程碑分层**——M0 只需闸门与确认逻辑成立，键盘流与排序属 M1，事项目标消歧与 update diff 属 M3。
 
 #### M0 必过
 
@@ -369,7 +380,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] **来源原件本身在审核屏上可见**——截图能看到图、`utterance` 能看到整段转写文本，不是只有 `evidence_text` 那一列（§3.2，2026-08-10 新增）
 - [ ] 每条草稿的 `evidence_text` 与解析结果在同一屏可见，无需额外点击
 - [ ] 声明合计与它的原文片段显示在批量确认按钮附近（§3.3「基准值本身必须可核对」）
-- [ ] 总额不符或无法校验时，提示可见且批量确认按钮不可点
+- [ ] `kind = file` 总额不符或无法校验时，提示可见、`confirmation_policy = single_only` 且批量确认按钮不可点；`utterance` 的 `user_attested_batch` 另按 §3.4 显示背书提示与差额
 - [ ] 一段口述拆出的多条草稿，**能一次批量确认**，且确认前整段原文与全部条目同屏（§3.3 `not_applicable`）
 - [ ] **缺本位币三元组的草稿，能在审核界面当场补齐并确认**——本位币与汇率两个输入框可见可填，不需要丢弃后重新解析整个来源（§3.5「三元组补全」，2026-08-13 新增）
 
@@ -383,11 +394,18 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 #### M3 必过
 
 - [ ] `npm test -- review/entity-type-switch` 通过——一条交易草稿转成事项草稿后，`source_id` / `evidence_text` / `attempt_id` 不变，且写了两条审计（§3.6）。**2026-08-10 由「M1 必过」移到此处**：目标表 `draft_items` 在 M3 才建（[00 地基 §3.6](./00-foundation.md)），放在 M1 那条验收必然挂
+- [ ] `cargo test review::item_update_requires_confirmed_target` 通过——needs_target update 持久化并计入完成条数但不可确认，且 `items` 不变
+- [ ] `cargo test review::item_target_resolution_preserves_drafted_json` 通过——人选候选或改为新建后当前草稿可确认，而 agent 原始 operation、候选与 patch 逐字节不变
+- [ ] `cargo test review::item_update_preserves_drafted_patch` 通过——确认后事实表按 patch 更新，而 `drafted_json` 不变
+- [ ] `npm test -- review/item-update-diff` 通过——before / patch / after 与对应原文同屏，set、clear、unspecified 三态可区分，clear 不回显计划值
+- [ ] `npm test -- review/item-mixed-create-update-batch` 通过——同一口述可混合 create/update，取消其中一条不影响其余所选变更
+- [ ] `npm test -- review/item-target-resolution` 通过——目标缺失/歧义时只有选候选、改为新建、忽略三条路，不存在静默 create
 
 ## 7. 回流记录
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-17（跨文档同步） | **[05 事项](./05-items.md) v0.8 将自然语言回溯从「只新建事项」扩为「可修改已有事项」**，因此本文 §3.6 增加 M3 create/update 共用审核闸门、目标消歧、mixed batch 与字段差异契约。该扩展只影响尚未实现的 M3；M0/M1 已验收的交易闸门、状态与 `status: review` 均未被证伪 | [`docs/PRD.md` §5.2](../PRD.md) v0.21；[05 事项 §3.4](./05-items.md) |
 | 2026-08-13（人工验收） | **§6 的 M0 人工验收六条全部实测通过**，`status` 由 `in-progress` 回到 `review`。做法：本机真实 Claude Code CLI，两张截图 + 一段口述。① 原件同屏——截图渲染成图、口述显示整段转写；② `evidence_text` 与解析结果同屏无需点击；③ 声明合计与原文片段（「TOTAL SPENT 147.65」）与批量确认按钮**始终同屏**——`.reconciliation` 在 `.draft-stack` 这个滚动容器之外，条目再多也不会把它滚走；④ 一张无声明合计的截图落在 `unavailable` + `single_only`，提示可见、批量按钮禁用；⑤ 一段口述拆出 4 条、一次批量确认入库，整段原文与全部条目及条数同屏；⑥ **缺三元组的草稿当场补齐并确认**——补 `AUD` + `0.21` 后 `base_amount_minor` 由 3800 CNY 导出为 798 AUD（§3.5「本位币金额是导出值」），随即单条确认入库，`drafted_json` 里 `baseAmountMinor` 仍为 `null` | 人工验收实测（2026-08-13）：`transactions` 9 行、`audit_log` 28 行，含 `human/update` 与 `human/confirm` 各自的 before/after |
 | 2026-08-13（人工验收） | **桌面应用当天根本起不来，而 `node scripts/verify-m0.mjs`（不带 `--skip-live`）全绿。** 两个独立缺陷：① `src-tauri` 自 MCP helper 拆出第二个 bin 后一直缺 `default-run`，`npm run tauri dev` / `tauri build` 停在「could not determine which binary to run」；② `icons/icon.png` 是 **16 位/通道** RGBA，`tauri-build` 按 8 字节/像素编进二进制，运行时 tauri 按 4 字节/像素反推像素数，判定图标无效后在 `did_finish_launching` 里 abort。**根因是同一条：M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有任何一条会启动桌面壳。** 两条都已修复并各加一条 `cargo test` 断言（见 §6）。**本节记它是因为 §6 的人工验收是全仓库唯一需要启动应用的验收，被它挡住的是这一节** | 人工验收实测（2026-08-13）：`npm run tauri dev` 两次 abort 的真实输出 |
 | 2026-08-13（人工验收） | **`parse_attempts` 的中断补偿在真机上按规格生效**（顺带实测，非本次目标）：解析进行中应用被重启 → `outcome = interrupted`、来源 `failed` + `agent.interrupted`、该次尝试的三条草稿 `voided_at` 置非空且**行与 `drafted_json` 均保留**；界面显示「解析失败」与重试入口，重试后走新的 `attempt_id` | 人工验收实测（2026-08-13）；[01 §3.4](./01-agent-runtime.md) |
@@ -415,6 +433,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.14 | 2026-08-17 | **新增 M3 事项 update 审核契约，`status` 仍为 `review`。** `draft_items` 以 operation 与 resolution_state 区分 create、ready update、needs_target update；非确认态持久化有界候选并计入完成条数，目标由人选择后才可确认。tri-state patch 明确 set/clear/unspecified，确认界面显示 before/patch/after；同一口述可 mixed batch。直接拖拽属于人的确定性事实修改，写审计并可撤销。M0/M1 交易审核契约与已通过验收不变 |
 | v0.13 | 2026-08-13 | **M0 人工验收六条全部实测通过，`status` 由 `in-progress` 回到 `review`。** 真实 CLI 跑两张截图 + 一段口述，逐条走完原件同屏、合计与按钮同屏、`unavailable` 禁用批量、口述一次批量确认、**缺三元组当场补齐并确认**（v0.12 新增的那条）。同批修掉两个让桌面应用**根本起不来**的缺陷——缺 `default-run`、图标 16 位/通道；**根因是十一条 M0 门禁没有一条会启动桌面壳**，两条各补一条 `cargo test` 断言进 §6。**§3 决定与依据一字未改**——本次没有证伪任何规格 |
 | v0.12 | 2026-08-13 | **M0 实现验收回流四处，`status` 由 `review` 退回 `in-progress`。** ① §3.5 **本位币金额改为导出值**，修好「只改金额必失败」；②§3.4 第 2 档口述报了合计时的背书提示补成硬要求（`failed` 时差额须与按钮同屏）；③ 根 [`CLAUDE.md`](../../CLAUDE.md) 约束 5 补 `kind` 限定，解开它与 §3.3 的正面冲突（本文 §3.3 不变）；④ §3.5 新增「三元组补全」——`review.incomplete_triple` 此前在界面上是死路。§6 行内编辑验收由 1 条拆成 4 条、新增 1 条前端验收与 1 条人工验收，堵掉「测试内容与验收原文不符仍能过门禁」的口子 |
 | v0.11 | 2026-08-13 | **M0 实现验收进入 `review`。** 功能基线完成并通过确定性、外部 MCP 与真实 CLI 链路；明确当前界面非设计定稿，M1 开工前确定设计稿与 token design system |
