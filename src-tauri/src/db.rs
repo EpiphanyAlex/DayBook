@@ -12,7 +12,9 @@ use crate::{
     money::currency_exponent,
 };
 
-const LATEST_SCHEMA_VERSION: i64 = 1;
+/// 迁移号（`PRAGMA user_version`）。`pub` 是因为夹具的版本三元组要拿它比对——
+/// 夹具过期必须报得明白，而不是重放到一半报个别的错（`docs/prd/07-eval.md` §5 R4）。
+pub const LATEST_SCHEMA_VERSION: i64 = 1;
 const M0_MIGRATION: &str = include_str!("../migrations/0001_m0.sql");
 
 #[derive(Debug, Clone, Serialize)]

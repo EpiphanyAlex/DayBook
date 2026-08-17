@@ -1,9 +1,9 @@
 ---
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
-status: ready
+status: in-progress
 owner: "@maintainer"
-date: 2026-08-16
-version: v0.9
+date: 2026-08-17
+version: v0.10
 ---
 
 # 07 · 评测 Eval
@@ -169,7 +169,7 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 
 **决定：20 个起步。** 增长方式是被动的：dogfooding 期间每次在审核界面改一条，就多一条候选样本。定期挑进 eval 集，**优先挑改动幅度大的和被改过两次以上的**。
 
-**用例清单是一份显式的 manifest，不是每次临时从库里挑**（2026-08-10 补）：`fixtures/manifest.json`（**待建**）逐条列出 case id、来源目录、期望集合路径、启用状态与加入日期。**每次跑动态从数据库挑 20 条，跑出来的两轮数字就不可比**——而 §3.5 的整套判定方式建立在「逐条对比上一轮」上。改 manifest 是一次显式的、进 git 的动作。
+**用例清单是一份显式的 manifest，不是每次临时从库里挑**（2026-08-10 补）：`fixtures/manifest.json` 逐条列出 case id、来源目录、期望集合路径、启用状态与加入日期。**每次跑动态从数据库挑 20 条，跑出来的两轮数字就不可比**——而 §3.5 的整套判定方式建立在「逐条对比上一轮」上。改 manifest 是一次显式的、进 git 的动作。
 
 **不追求覆盖率指标。** 20 个用例覆盖不了长尾，也不该假装能。它的作用是**回归探针**，不是质量证书。
 
@@ -200,11 +200,11 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 
 #### 四条口径对评分器意味着什么
 
-**十项阈值与其口径的权威出处是 [`docs/PRD.md` §9.4](../PRD.md)**，本节不复述规则，只写它们对 `scripts/eval.mjs`（**待建**）的实现意味着什么——四条都不是报告排版，是**算出来的数不一样**：
+**十项阈值与其口径的权威出处是 [`docs/PRD.md` §9.4](../PRD.md)**，本节不复述规则，只写它们对评分器的实现意味着什么——四条都不是报告排版，是**算出来的数不一样**：
 
 | §9.4 的口径 | 评分器要做的事 |
 |---|---|
-| 指标 1–3 按截图池与口述池分开算 | diff 表两栏并列、各自判定；`fixtures/manifest.json`（**待建**）每条用例带分池标记，**缺标记即拒绝跑**——分池是判定口径的一部分，不是展示选项 |
+| 指标 1–3 按截图池与口述池分开算 | diff 表两栏并列、各自判定；`fixtures/manifest.json` 每条用例带分池标记，**缺标记即拒绝跑**——分池是判定口径的一部分，不是展示选项 |
 | 指标 7 的「需要改」与第 8 项同口径 | 纠正判定只比四个硬字段（`amount_minor` / `currency` / `occurred_on` / `direction`）与漏读多读；`category` / `channel` / `merchant` 文案的差异不进分子 |
 | 每条 1 轮出正式数 | `--trials` 的默认值是 1；`--trials 3` 的产物进诊断栏，**不覆盖正式数**（与 §3.4「关键用例跑多轮」同一套输出，用途不同） |
 | 指标 4 的分母只含 `kind = file` | 求可获得率的那条查询按 `sources.kind = 'file'` 过滤；口述来源不走机器对账（[03 审核 §3.3](./03-review.md)） |
@@ -320,32 +320,43 @@ fixtures/local/<date>-<slug>/
 
 ## 6. 验收标准
 
-- [ ] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
-- [ ] `node scripts/eval.mjs --dry-run`（**待建**）退出码 0——在不调用 agent 的情况下校验 eval 集完整性：`fixtures/manifest.json` 里每个启用的 case 都有输入、期望集合与 `env.json`，且路径都存在（§3.4）
-- [ ] `node scripts/eval.mjs`（**待建**）跑完 manifest 里的用例并输出逐条 diff 表，表内含**每条的模型标识、后端标识与 `prompt_hash`**（[00 地基 §3.6](./00-foundation.md) `parse_attempts`）
-- [ ] `node scripts/eval.mjs` 的 diff 表按条目 **precision / recall** 报，**漏读与多读分列**（§3.2 的 N 对 M 匹配），不是只报一个「条数对不对」
-- [ ] `node scripts/eval.mjs --trials 3` 对标记为 `flaky` 的用例报「3 轮全过 / 部分过 / 全不过」，**不取平均**（§3.4）
-- [ ] `node scripts/eval.mjs` 的 diff 表把**截图池与口述池分开**报指标 1–3，两池各自带阈值判定（§3.4 口径①）
-- [ ] `node scripts/eval.mjs` 输出的**每个比率都带原始计数**，形如 `0.967 (58/60)`；只有比率没有计数即视为未实现（§3.4）
-- [ ] `node scripts/eval.mjs` 把 `fixtures/manifest.json` 里标为对照栏的用例**单独成栏，且不计入判定池的任何指标**（§3.4 样本构成）
-- [ ] `node scripts/eval.mjs --dry-run` 在 manifest 有用例缺分池标记时**非零退出**——分池是判定口径的一部分，缺了不该跑（§3.4 口径①）
-- [ ] 指标 7（人工纠正率）的分子**只含四个硬字段与漏读多读**的回归用例通过：只改 `category` / `merchant` 文案的条目不计入分子，**把文案差异也计入时该用例必须变红**（§3.4 口径②）
-- [ ] 指标 4（声明合计可获得率）的分母**只含 `kind = file`** 的回归用例通过：混入 `utterance` 来源时该用例必须变红（§3.4 口径④）
-- [ ] `node scripts/eval.mjs --no-memory`（**M3**）跑完同一批用例，与常规轮次的纠正率并排输出（§3.4「记忆开关对照」）
-- [ ] `node scripts/eval.mjs` 在检测不到可用 agent CLI 时**非零退出**并明确报原因，**不静默降级为通过**
+**分两块，因为它们的成本不同**（§3.6 的成本表）：零额度、确定性、进 CI 的那一半已经落地；
+真跑 agent 的轮次与夹具导出器烧订阅额度、不进 CI，仍待建。
+
+### 零额度那一半（2026-08-17 落地）
+
+- [x] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
+- [x] `node scripts/eval.mjs --dry-run` 退出码 0——在不调用 agent 的情况下校验 eval 集完整性：`fixtures/manifest.json` 里每个启用的 case 都有输入、期望集合与 `env.json`，且路径都存在（§3.4）
+- [x] `node scripts/eval.mjs --dry-run` 在 manifest 有用例缺分池标记时**非零退出**——分池是判定口径的一部分，缺了不该跑（§3.4 口径①）
+- [x] `node scripts/eval.mjs --replay` 重放 manifest 里的用例并输出逐条 diff 表，表内含**每条的模型标识、后端标识与 `prompt_hash`**（[00 地基 §3.6](./00-foundation.md) `parse_attempts`）
+- [x] `node scripts/eval.mjs --replay` 的 diff 表按条目 **precision / recall** 报，**漏读与多读分列**（§3.2 的 N 对 M 匹配），不是只报一个「条数对不对」
+- [x] `node scripts/eval.mjs --replay` 的 diff 表把**截图池与口述池分开**报指标 1–3，两池各自带阈值判定（§3.4 口径①）
+- [x] `node scripts/eval.mjs --replay` 输出的**每个比率都带原始计数**，形如 `0.967 (58/60)`；只有比率没有计数即视为未实现（§3.4）
+- [x] `node scripts/eval.mjs --replay` 把 `fixtures/manifest.json` 里标为对照栏的用例**单独成栏，且不计入判定池的任何指标**（§3.4 样本构成）
+- [x] `node scripts/eval.mjs`（不带参数）在真实 eval 轮次尚未实现时**非零退出并明说**，不静默返回成功
+- [x] `cargo test eval::correction_rate_numerator_excludes_free_text` 通过——指标 7 的分子**只含四个硬字段与漏读多读**：只改 `category` / `merchant` 文案的条目不计入分子，用例内同时断言**把文案差异也计入时判定翻面**（§3.4 口径②）
+- [x] `cargo test eval::total_availability_denominator_is_file_only` 通过——指标 4 的分母**只含 `kind = file`**，用例内同时断言**混入 `utterance` 时判定翻面**（§3.4 口径④）
+- [x] `cargo test eval::replay_fixture_catches_total_mismatch` 通过——重放一条「金额读错」夹具，总额校验报 `review.total_mismatch` 且 `transactions` 保持为空
+- [x] `cargo test eval::replay_does_not_invoke_agent` 通过——重放后库里只有夹具那一行 `parse_attempts`（`backend_id = fixture`），没有任何一次探测或后端调用的痕迹；配套的结构断言 `eval::eval_guards::replay_path_cannot_reach_the_agent` 保证重放模块**根本引用不到**启动器、后端 trait 与进程 API
+- [x] `cargo test eval::replay_rejects_stale_fixture` 通过——`env.json` 里的 `tool_surface_version` 与当前不符时，重放**明确报夹具过期**，不是跑到一半报个别的错（§5 R4）
+- [x] `cargo test eval::utterance_evidence_text_is_substring` 通过——`kind = utterance` 的草稿，`evidence_text` 是转写文本的真实子串（**取代原先的 `evidence_text_is_substring_of_input`**：系统里没有 OCR，该判据对图像来源无法实现，§3.3）
+- [x] `cargo test eval::prediction_uses_drafted_json_not_current_row` 通过——把一条草稿行内改过之后跑评分，错误**仍被计出**（§3.2；改回读当前行时该用例必须变红）
+- [x] `cargo test eval::missed_and_extra_items_are_counted` 通过——期望 5 条实得 4 条且其中一条是多读时，报 1 漏读 + 1 多读，**不是「条数差 1」**
+- [x] `cargo test eval::field_accuracy_is_not_vacuous` 通过（**§3.2 对齐修正的回归**）——构造一条「位置对得上但金额读错」的用例，断言它**记为 1 条匹配 + 1 个金额错误**，而不是 1 漏读 + 1 多读。**把匹配键改回 `(日期, 金额, 币种)` 时该用例必须变红**
+- [x] `cargo test eval::alignment_uses_reported_ordinal` 通过——两侧都按 `source_ordinal` 做 full outer join；配套的结构断言 `eval::eval_guards::alignment_never_locates_by_evidence_text` 保证**实现里出现「按 `evidence_text` 在原件上定位」的路径即红**（做不到，§3.2）
+- [x] `cargo test eval::degraded_match_never_enters_official_metrics` 通过——构造一个「ordinal 全错但内容全对」的用例，**正式 precision / recall 仍按 ordinal join 报（即 0）**，集合匹配的结果只出现在诊断栏（§3.2）
+- [x] `cargo test eval::alignment_is_order_preserving` 通过——中间漏掉一条时，其后各条仍与正确的期望条目对齐，不整体错位
+- [x] `cargo test eval::degraded_match_is_labelled` 通过——诊断用的集合匹配结果在 diff 表上单独成栏并标注「诊断用」，不与正式指标同栏（§3.2）
+- [x] `rg -n 'fixtures/' .gitignore` 有命中——本机夹具不进 git
+- [x] `rg -n 'f32|f64' src-tauri/src/eval` 无命中——比率一律是整数对，阈值判定用交叉相乘（`verify-m0.mjs` 的既有门禁覆盖本目录）
+
+### 真实轮次与导出器（待建）
+
+- [ ] `node scripts/eval.mjs`（不带参数，**待建**）真跑 agent 一轮，产出与 `--replay` 同形的 diff 表
+- [ ] `node scripts/eval.mjs --trials 3`（**待建**）对标记为 `flaky` 的用例报「3 轮全过 / 部分过 / 全不过」，**不取平均**（§3.4）
+- [ ] `node scripts/eval.mjs`（**待建**）在检测不到可用 agent CLI 时**非零退出**并明确报原因，**不静默降级为通过**
 - [ ] `node scripts/export-fixture.mjs <session_id>`（**待建**）产出的目录自包含：含 `env.json`（初始 DB 状态、ID 映射、版本三元组、期望中间状态），不引用当前数据库、不引用 `evidence/`，**换一台机器解压即可重放**（§3.6）
-- [ ] `cargo test eval::replay_fixture_catches_total_mismatch` 通过——重放一条「金额读错」夹具，总额校验报 `review.total_mismatch` 且 `transactions` 保持为空
-- [ ] `cargo test eval::replay_does_not_invoke_agent` 通过——重放路径上没有 spawn 子进程（`AgentBackend::spawn` 调用次数为 0）
-- [ ] `cargo test eval::replay_rejects_stale_fixture` 通过——`env.json` 里的 `tool_surface_version` 与当前不符时，重放**明确报夹具过期**，不是跑到一半报个别的错（§5 R4）
-- [ ] `cargo test eval::utterance_evidence_text_is_substring` 通过——`kind = utterance` 的草稿，`evidence_text` 是转写文本的真实子串（**取代原先的 `evidence_text_is_substring_of_input`**：系统里没有 OCR，该判据对图像来源无法实现，§3.3）
-- [ ] `cargo test eval::prediction_uses_drafted_json_not_current_row` 通过——把一条草稿行内改过之后跑评分，错误**仍被计出**（§3.2；改回读当前行时该用例必须变红）
-- [ ] `cargo test eval::missed_and_extra_items_are_counted` 通过——期望 5 条实得 4 条且其中一条是多读时，报 1 漏读 + 1 多读，**不是「条数差 1」**
-- [ ] `cargo test eval::field_accuracy_is_not_vacuous` 通过（**§3.2 对齐修正的回归**）——构造一条「位置对得上但金额读错」的用例，断言它**记为 1 条匹配 + 1 个金额错误**，而不是 1 漏读 + 1 多读。**把匹配键改回 `(日期, 金额, 币种)` 时该用例必须变红**
-- [ ] `cargo test eval::alignment_uses_reported_ordinal` 通过——两侧都按 `source_ordinal` 做 full outer join；**实现里出现「按 `evidence_text` 在原件上定位」的路径即红**（做不到，§3.2）
-- [ ] `cargo test eval::degraded_match_never_enters_official_metrics` 通过——构造一个「ordinal 全错但内容全对」的用例，**正式 precision / recall 仍按 ordinal join 报（即 0）**，集合匹配的结果只出现在诊断栏（§3.2）
-- [ ] `cargo test eval::alignment_is_order_preserving` 通过——中间漏掉一条时，其后各条仍与正确的期望条目对齐，不整体错位
-- [ ] `cargo test eval::degraded_match_is_labelled` 通过——诊断用的集合匹配结果在 diff 表上单独成栏并标注「诊断用」，不与正式指标同栏（§3.2）
-- [ ] `rg -n 'fixtures/' .gitignore` 有命中——本机夹具不进 git
+- [ ] `node scripts/eval.mjs --no-memory`（**M3**）跑完同一批用例，与常规轮次的纠正率并排输出（§3.4「记忆开关对照」）
 - [ ] `git ls-files fixtures/ | xargs -r rg -l '[0-9]{4,}'` 人工过一遍——仓库内 CI 夹具不含真实金额
 
 **人工验收**：
@@ -355,6 +366,16 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-08-17 · 零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`**（§6、§3.2、§3.4、§3.6）。
+  实现范围是 §3.6 成本表里「回归」那一列：评分器、`fixtures/manifest.json`、一条合成夹具与 11 条 `eval::*` 重放/对齐回归。**烧额度的那一列（真跑 agent 的 eval 轮次、`scripts/export-fixture.mjs`）没做**，所以进的是 `in-progress` 而不是 `review`。
+  四处相对规格的偏离，逐条记下：
+  ① **评分器落在 Rust（`src-tauri/src/eval/`）而不是 `scripts/eval.mjs` 里**，node 只剩起进程与渲染。触发点是 `scripts/verify-m0.mjs` 的既有门禁 `noMatches('金额代码无浮点类型', 'f32|f64', ['src-tauri/src'])` ——它覆盖新目录，于是比率只能是 `{num, den}` 整数对、阈值判定只能用交叉相乘。**这反而正合 §3.4「每个比率一律连原始计数一起报」**：`f64` 会把 `(58, 60)` 这一对丢掉，而那是事后说得清那个数怎么来的唯一依据。另外两条好处是本文 §6 点名的 `cargo test eval::*` 才有落脚点，以及读 `drafted_json` / `parse_attempts` 复用现成 rusqlite 层。
+  ② **`replay_does_not_invoke_agent` 的判据改写**。原文写「`AgentBackend::spawn` 调用次数为 0」，而 [01 §3.3](./01-agent-runtime.md) 的后端 trait 上**没有 `spawn` 这个方法**（是 `probe` / `run_task`），照字面写会得到一个永远为真的断言。改为两条合起来：可观测量（重放后 `parse_attempts` 恰好一行且 `backend_id = fixture`，没有任何探测痕迹）+ 结构断言（`include_str!` 守住重放模块引用不到启动器、后端 trait 与进程 API）。**「这一次没起」和「根本没有那条路」是两件事，缺一条另一条就是装饰。**
+  ③ **`alignment_uses_reported_ordinal` 里「实现里出现按 `evidence_text` 定位的路径即红」拆成独立的结构断言**（`eval_guards::alignment_never_locates_by_evidence_text`）——它查的是源码而不是行为，和同名用例的行为断言混在一起会让失败信息说不清是哪一半挂了。
+  ④ **§6 原有两条口径回归没写成命令**（「指标 7 的分子…的回归用例通过」），已补上真实选择器 `eval::correction_rate_numerator_excludes_free_text` 与 `eval::total_availability_denominator_is_file_only`，并把「反向必须变红」做进用例本身（同一个测试里断言另一套口径下判定翻面），**而不是留给人去手工改一遍**。两条都实测过真能变红。
+  同批把 `scripts/verify-m0.mjs` 的验收选择器扫描范围从 M0 四份扩到含本文，并在非 live 段加一步 `node scripts/eval.mjs --dry-run`（零额度、确定性，进 CI）。**`scripts/eval.mjs` 本身不进 `ci.yml`**——真实轮次烧额度且 CI 没有已登录的 CLI（§3.1、§4）。
+  夹具选 `kind = file` 是有理由的：断言要的是「总额校验报警 + 批量确认被拒」，而 `kind = utterance` 的确认策略恒为 `user_attested_batch`、批量会照常放行（[03 审核 §3.3](./03-review.md)），那条夹具就什么也断言不到。合成而非脱敏，兑现 §5 R5 的倾向。
 
 - **2026-08-16 · beachhead、样本构成与四条阈值口径在采样前冻结，`status` 由 `draft` 转 `ready`**（§3.4、§5 R2/R8、§6）。
   [`docs/PRD.md` §9.4](../PRD.md) 的四步流程第 1 步要求「先定 beachhead 来源类型与样本构成，再去采样」，而 §5 R8 自 2026-08-10 起一直挂着「M0 样本采集时决」。**M0 的 go / no-go 就在眼前，再不决就会变成「先看手上有什么样本、再定测什么」**——那恰好是那条流程要防的事。
@@ -395,6 +416,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.10 | 2026-08-17 | **零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`。** 新增 `src-tauri/src/eval/`（manifest 校验 · 真值解析 · ordinal full outer join · 指标计数 · 夹具重放 · 报告）、`src-tauri/src/bin/daybook-eval.rs`、`scripts/eval.mjs`（`--dry-run` / `--replay`）、`fixtures/manifest.json` 与一条合成夹具 `fixtures/ci/2026-08-17-misread-amount/`（「把 16.80 读成 168.00」）。§6 重排为「零额度那一半（已落地）」与「真实轮次与导出器（待建）」两块，26 条已达成、6 条待建；两条此前写成散文的口径回归补上真实 `cargo test` 选择器。§7 记四处偏离：评分器落 Rust（`f32\|f64` 门禁倒逼，且正合「比率必带原始计数」）、`replay_does_not_invoke_agent` 判据改写（后端 trait 上没有 `spawn`）、结构断言独立成条、口径回归的「反向必须变红」做进用例本身。**阈值数字与十项指标口径一个未动。** |
 | v0.9 | 2026-08-16 | **`status` 由 `draft` 转 `ready`——评测工具链可以开工。** §3.4 新增两节，均为[`docs/PRD.md` §9.4](../PRD.md) 四步流程第 1 步的产物、**在拿到任何样本之前写定**：① **M0 go / no-go 的样本构成**——beachhead 定为交易列表类截图（关闭 §5 R8），非 beachhead 来源进不参与判定的对照栏，口述定长度分布；② **四条阈值口径对评分器意味着什么**——规则本身写在 [`docs/PRD.md` §9.4](../PRD.md)（阈值与口径的权威出处），本文只记实现后果，不复述。**阈值数字一个未动。** §5 R8 关闭、R2 补长度分布已定；§6 自动验收由 21 条增至 27 条（人工验收 3 条未变） |
 | v0.1 | 2026-08-08 | 初版，出自 2026-08-08 设计评审。此前七份 sub-PRD 里**没有任何一份负责「agent 读得准不准」**，而 [`docs/PRD.md` §9.1](../PRD.md) 认定它是生死线。确立：eval 走生产同一条路径（不直接调 API）· eval 集是现有三表 join 的视图（不新建数据）· outcome + transcript 两个维度、几乎全代码型评分器 · 20 用例起步 · 逐条 diff 而非百分比门槛 · 夹具重放把 eval（烧额度、不进 CI）与回归（零额度、进 CI）拆开 · 本机真实数据与 CI 脱敏数据严格分离。否决方案九条，待决 R1–R6 |
 | v0.8 | 2026-08-10 | **公开文档降噪。** 商户示例改为虚构、中性值；现行正文中的作者视角与会话式表述改为系统职责和可验证条件。评测路径、指标与验收标准未变 |
