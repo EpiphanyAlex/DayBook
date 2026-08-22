@@ -180,13 +180,17 @@ pub fn degraded_for(
 mod eval {
     use async_trait::async_trait;
     use serde_json::json;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::watch;
 
     use super::*;
     use crate::{
         agent::{
-            backend::{AgentBackend, AgentTask, AgentTaskResult, BackendStatus, ProbeResult},
+            backend::{
+                AgentBackend, AgentTask, AgentTaskResult, AvailabilityReason, BackendStatus,
+                ProbeResult,
+            },
             registry::{effective_capability_hash, expected_capabilities},
         },
         domain::draft::{Assignment, DraftStore},
@@ -209,15 +213,8 @@ mod eval {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified(self.id(), PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -292,15 +289,8 @@ mod eval {
             "unavailable"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: None,
-                available: false,
-                authenticated: None,
-                error_code: Some("agent.backend_unavailable".to_owned()),
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::unqualified(self.id(), AvailabilityReason::NotFound)
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -377,6 +367,11 @@ mod eval {
         }));
         let scratch = directory.path().join("run");
         std::fs::create_dir_all(&scratch).unwrap();
+        // 生产入口（`daybook-eval`）跑任何一条用例之前先 `ensure_backend_ready`；
+        // 解析现在 fail closed，测试也走同一条路。
+        ensure_backend_ready(&runtime, &directory.path().join("probe"))
+            .await
+            .unwrap();
 
         let outcome = run_trial(&runtime, &case, &env, &expected, &scratch)
             .await
@@ -401,6 +396,10 @@ mod eval {
             amounts: vec!["500", "5000", "500"],
             round: AtomicUsize::new(0),
         }));
+
+        ensure_backend_ready(&runtime, &directory.path().join("probe"))
+            .await
+            .unwrap();
 
         let mut passes = Vec::new();
         for trial in 0..3 {

@@ -25,7 +25,9 @@ use crate::{
 };
 
 use super::{
-    backend::{AgentBackend, AgentTask, AgentTaskResult, BackendStatus, ProbeResult},
+    backend::{
+        AgentBackend, AgentTask, AgentTaskResult, AvailabilityReason, BackendStatus, ProbeResult,
+    },
     registry::{
         effective_capability_hash, expected_capabilities, m0_tool_registry, CapabilityEntry,
     },
@@ -34,58 +36,139 @@ use super::{
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(45);
 const TASK_TIMEOUT: Duration = Duration::from_secs(180);
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+/// 鉴定整批候选的总预算。nvm / fnm 的版本目录可以有几十个，逐个跑 `--version`
+/// 会把启动拖成几十秒；超预算就按已有的失败原因收工，不无限等下去。
+const QUALIFY_BUDGET: Duration = Duration::from_secs(10);
 
+/// 一次安装资格鉴定的结果。**只回答「有没有合格 CLI」**，不回答就绪度。
 #[derive(Debug, Clone)]
-pub struct ClaudeCodeBackend {
+struct Qualification {
     executable: Option<PathBuf>,
+    version: Option<String>,
+    reason: Option<AvailabilityReason>,
+}
+
+#[derive(Debug)]
+pub struct ClaudeCodeBackend {
+    candidates: Vec<PathBuf>,
     helper_path: PathBuf,
+    version_timeout: Duration,
+    qualification: tokio::sync::OnceCell<Qualification>,
 }
 
 impl ClaudeCodeBackend {
     pub fn discover(helper_path: PathBuf) -> Self {
-        Self {
-            executable: discover_claude(),
-            helper_path,
-        }
+        Self::with_candidates(discover_claude(), helper_path)
     }
 
     pub fn with_paths(executable: Option<PathBuf>, helper_path: PathBuf) -> Self {
+        Self::with_candidates(executable.into_iter().collect(), helper_path)
+    }
+
+    pub fn with_candidates(candidates: Vec<PathBuf>, helper_path: PathBuf) -> Self {
         Self {
-            executable,
+            candidates,
             helper_path,
+            version_timeout: VERSION_TIMEOUT,
+            qualification: tokio::sync::OnceCell::new(),
         }
     }
 
-    fn executable(&self) -> AppResult<&Path> {
-        self.executable.as_deref().ok_or_else(|| {
-            AppError::new(
-                "agent.backend_unavailable",
-                "未检测到 Claude Code CLI，请先安装后再解析",
-            )
-        })
+    #[cfg(test)]
+    fn with_version_timeout(mut self, timeout: Duration) -> Self {
+        self.version_timeout = timeout;
+        self
     }
 
-    async fn version(&self) -> AppResult<String> {
+    /// **安装资格：跟随符号链接后是普通文件、有执行权限、`--version` 限时以 0 退出且输出非空**
+    /// （[01 §3.5](../../../docs/prd/01-agent-runtime.md)）。
+    ///
+    /// 修正前这里只有一句 `is_file()`：一个没有执行位的同名残留文件就足以让界面说「已安装」，
+    /// 而三种失败原因全塌成一句「未安装」，用户按指引重装也修不好。
+    async fn qualify(&self) -> &Qualification {
+        self.qualification
+            .get_or_init(|| async {
+                let started = std::time::Instant::now();
+                let mut reason = AvailabilityReason::NotFound;
+                for candidate in &self.candidates {
+                    match self.qualify_candidate(candidate).await {
+                        Ok(version) => {
+                            return Qualification {
+                                executable: Some(candidate.clone()),
+                                version: Some(version),
+                                reason: None,
+                            };
+                        }
+                        Err(candidate_reason) => reason = reason.worse_of(candidate_reason),
+                    }
+                    if started.elapsed() >= QUALIFY_BUDGET {
+                        break;
+                    }
+                }
+                Qualification {
+                    executable: None,
+                    version: None,
+                    reason: Some(reason),
+                }
+            })
+            .await
+    }
+
+    async fn qualify_candidate(&self, candidate: &Path) -> Result<String, AvailabilityReason> {
+        // `canonicalize` 顺带把符号链接跟到底：断链在这里就失败，指向目录的链接被下一步挡住。
+        let resolved =
+            std::fs::canonicalize(candidate).map_err(|_| AvailabilityReason::NotFound)?;
+        let metadata = std::fs::metadata(&resolved).map_err(|_| AvailabilityReason::NotFound)?;
+        if !metadata.is_file() {
+            return Err(AvailabilityReason::NotExecutable);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err(AvailabilityReason::NotExecutable);
+            }
+        }
         let output = timeout(
-            Duration::from_secs(5),
-            Command::new(self.executable()?)
+            self.version_timeout,
+            Command::new(candidate)
                 .arg("--version")
                 .stdin(Stdio::null())
                 .output(),
         )
         .await
-        .map_err(|_| AppError::new("agent.backend_unavailable", "Claude Code 版本探测超时"))?
-        .map_err(|error| AppError::new("agent.backend_unavailable", error.to_string()))?;
+        .map_err(|_| AvailabilityReason::VersionUnreadable)?
+        .map_err(|_| AvailabilityReason::VersionUnreadable)?;
         if !output.status.success() {
-            return Err(AppError::new(
-                "agent.backend_unavailable",
-                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            ));
+            return Err(AvailabilityReason::VersionUnreadable);
         }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if version.is_empty() {
+            return Err(AvailabilityReason::VersionUnreadable);
+        }
+        Ok(version)
     }
 
-    fn sealed_command(
+    async fn executable(&self) -> AppResult<PathBuf> {
+        self.qualify().await.executable.clone().ok_or_else(|| {
+            AppError::new(
+                "agent.backend_unavailable",
+                "未检测到合格的 Claude Code CLI，请先安装或修复后再解析",
+            )
+        })
+    }
+
+    async fn version(&self) -> AppResult<String> {
+        self.qualify().await.version.clone().ok_or_else(|| {
+            AppError::new(
+                "agent.backend_unavailable",
+                "未检测到合格的 Claude Code CLI，请先安装或修复后再解析",
+            )
+        })
+    }
+
+    async fn sealed_command(
         &self,
         session: &AgentSession,
         prompt: &str,
@@ -110,7 +193,7 @@ impl ClaudeCodeBackend {
             }
         });
         let allowed_tools = allowed_tool_names().join(",");
-        let mut command = Command::new(self.executable()?);
+        let mut command = Command::new(self.executable().await?);
         seal(&mut command);
         command
             .arg("-p")
@@ -145,7 +228,9 @@ impl ClaudeCodeBackend {
         agent_session_id: Option<&str>,
         mut cancel: watch::Receiver<bool>,
     ) -> AppResult<std::process::Output> {
-        let mut command = self.sealed_command(session, prompt, agent_session_id)?;
+        let mut command = self
+            .sealed_command(session, prompt, agent_session_id)
+            .await?;
         let mut child = command
             .spawn()
             .map_err(|error| AppError::new("agent.spawn_failed", error.to_string()))?;
@@ -346,17 +431,16 @@ impl AgentBackend for ClaudeCodeBackend {
         "claude-code"
     }
 
-    fn status(&self) -> BackendStatus {
-        BackendStatus {
-            backend_id: self.id().to_owned(),
-            executable: self.executable.clone(),
-            version: None,
-            available: self.executable.is_some(),
-            authenticated: None,
-            error_code: self
-                .executable
-                .is_none()
-                .then(|| "agent.backend_unavailable".to_owned()),
+    async fn status(&self) -> BackendStatus {
+        let qualification = self.qualify().await;
+        match (&qualification.executable, &qualification.version) {
+            (Some(executable), Some(version)) => {
+                BackendStatus::qualified(self.id(), executable.clone(), version.clone())
+            }
+            _ => BackendStatus::unqualified(
+                self.id(),
+                qualification.reason.unwrap_or(AvailabilityReason::NotFound),
+            ),
         }
     }
 
@@ -614,7 +698,7 @@ fn classify_process_error(stderr: &str) -> AppError {
     .with_detail(json!({ "stderr": stderr.trim() }))
 }
 
-fn discover_claude() -> Option<PathBuf> {
+fn discover_claude() -> Vec<PathBuf> {
     discover_claude_in(
         std::env::var_os("PATH"),
         std::env::var_os("HOME").map(PathBuf::from),
@@ -627,7 +711,7 @@ fn discover_claude() -> Option<PathBuf> {
 ///
 /// **不去 spawn 一个登录 shell 问它的 `PATH`**：唯一允许 spawn 的子进程是 agent CLI 本身
 /// （[`rust-tauri.md` §2](../../../.claude/rules/rust-tauri.md)），所以只能穷举常见安装位置。
-fn discover_claude_in(path: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+fn discover_claude_in(path: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Vec<PathBuf> {
     let mut candidates = std::env::split_paths(&path.unwrap_or_default())
         .map(|directory| directory.join("claude"))
         .collect::<Vec<_>>();
@@ -648,7 +732,9 @@ fn discover_claude_in(path: Option<std::ffi::OsString>, home: Option<PathBuf>) -
     }
     candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
     candidates.push(PathBuf::from("/usr/local/bin/claude"));
-    candidates.into_iter().find(|candidate| candidate.is_file())
+    // **只做枚举，不做筛选**：合格与否由 `qualify_candidate` 判（跟随符号链接 + 执行位 +
+    // `--version`）。此前这里 `find(is_file)`，第一个同名残留文件就把真安装挡在了后面。
+    candidates
 }
 
 /// nvm / fnm / n 把二进制放在带版本号的目录里，路径中间有一层通配。标准库没有 glob，
@@ -735,15 +821,135 @@ mod agent {
         );
     }
 
-    #[test]
-    fn status_does_not_require_credentials() {
+    #[cfg(unix)]
+    fn write_cli(path: &Path, body: &str, executable: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, body).unwrap();
+        let mode = if executable { 0o755 } else { 0o644 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    async fn qualify_one(candidate: PathBuf) -> BackendStatus {
+        ClaudeCodeBackend::with_candidates(vec![candidate], PathBuf::from("daybook-mcp"))
+            .with_version_timeout(Duration::from_millis(1000))
+            .status()
+            .await
+    }
+
+    /// **01 §3.5**：候选跟随符号链接后是普通文件、有执行权限，且 `--version` 在限定时间内
+    /// 以 0 退出并返回非空版本，才算合格安装。
+    ///
+    /// 修正前这里只有 `is_file()`——下面第一档（普通但不可执行的文件）会被判成「已安装」，
+    /// 而三种失败给的是同一句「未安装 Claude Code」，用户照着指引重装也修不好。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn installation_qualification_requires_executable_version() {
+        let home = tempfile::tempdir().unwrap();
+
+        let missing = home.path().join("absent-claude");
+        assert_eq!(
+            qualify_one(missing).await.availability_reason.as_deref(),
+            Some("not_found")
+        );
+
+        let plain = home.path().join("plain-claude");
+        write_cli(&plain, "#!/bin/sh\necho 2.1.229\n", false);
+        let status = qualify_one(plain).await;
+        assert!(!status.available, "没有执行权限的文件不构成合格安装");
+        assert_eq!(
+            status.availability_reason.as_deref(),
+            Some("not_executable")
+        );
+
+        let failing = home.path().join("failing-claude");
+        write_cli(&failing, "#!/bin/sh\nexit 1\n", true);
+        assert_eq!(
+            qualify_one(failing).await.availability_reason.as_deref(),
+            Some("version_unreadable"),
+            "--version 非零退出"
+        );
+
+        let slow = home.path().join("slow-claude");
+        write_cli(&slow, "#!/bin/sh\nsleep 30\necho 2.1.229\n", true);
+        assert_eq!(
+            qualify_one(slow).await.availability_reason.as_deref(),
+            Some("version_unreadable"),
+            "--version 超时"
+        );
+
+        let silent = home.path().join("silent-claude");
+        write_cli(&silent, "#!/bin/sh\nexit 0\n", true);
+        assert_eq!(
+            qualify_one(silent).await.availability_reason.as_deref(),
+            Some("version_unreadable"),
+            "--version 输出为空"
+        );
+
+        let good = home.path().join("claude");
+        write_cli(&good, "#!/bin/sh\necho 2.1.229\n", true);
+        let status = qualify_one(good.clone()).await;
+        assert!(status.available, "{status:?}");
+        assert_eq!(status.availability_reason, None);
+        assert_eq!(status.version.as_deref(), Some("2.1.229"));
+        assert_eq!(status.executable, Some(good));
+        assert!(!status.ready, "合格安装只是安装资格，不是解析就绪度");
+    }
+
+    /// 版本管理器与 `~/.local/bin` 里的 `claude` 常常是符号链接——**跟到底再判**，
+    /// 但断链、指向目录、指向不可执行文件各自按对应原因拒绝。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn installation_qualification_follows_symlinks() {
+        let home = tempfile::tempdir().unwrap();
+        let real = home.path().join("real-claude");
+        write_cli(&real, "#!/bin/sh\necho 2.1.229\n", true);
+
+        let linked = home.path().join("linked-claude");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let status = qualify_one(linked.clone()).await;
+        assert!(status.available, "指向合格可执行文件的符号链接必须被接受");
+        assert_eq!(status.executable, Some(linked));
+        assert_eq!(status.version.as_deref(), Some("2.1.229"));
+
+        let dangling = home.path().join("dangling-claude");
+        std::os::unix::fs::symlink(home.path().join("gone"), &dangling).unwrap();
+        assert_eq!(
+            qualify_one(dangling).await.availability_reason.as_deref(),
+            Some("not_found")
+        );
+
+        let to_directory = home.path().join("directory-claude");
+        std::os::unix::fs::symlink(home.path(), &to_directory).unwrap();
+        assert_eq!(
+            qualify_one(to_directory)
+                .await
+                .availability_reason
+                .as_deref(),
+            Some("not_executable")
+        );
+
+        let plain = home.path().join("plain");
+        write_cli(&plain, "#!/bin/sh\necho 2.1.229\n", false);
+        let to_plain = home.path().join("plain-link-claude");
+        std::os::unix::fs::symlink(&plain, &to_plain).unwrap();
+        assert_eq!(
+            qualify_one(to_plain).await.availability_reason.as_deref(),
+            Some("not_executable")
+        );
+    }
+
+    #[tokio::test]
+    async fn status_does_not_require_credentials() {
         let backend = ClaudeCodeBackend::with_paths(None, PathBuf::from("daybook-mcp"));
-        let status = backend.status();
+        let status = backend.status().await;
         assert!(!status.available);
+        assert_eq!(status.availability_reason.as_deref(), Some("not_found"));
         assert_eq!(
             status.error_code.as_deref(),
             Some("agent.backend_unavailable")
         );
+        assert!(!status.ready, "安装资格不等于就绪度");
     }
 
     fn fingerprint_backend() -> ClaudeCodeBackend {
@@ -815,9 +1021,10 @@ mod agent {
         std::fs::write(nvm_bin.join("claude"), b"#!/bin/sh\n").unwrap();
 
         let finder_path = Some(std::ffi::OsString::from("/usr/bin:/bin:/usr/sbin:/sbin"));
-        assert_eq!(
-            discover_claude_in(finder_path, Some(home.path().to_path_buf())),
-            Some(nvm_bin.join("claude"))
+        let candidates = discover_claude_in(finder_path, Some(home.path().to_path_buf()));
+        assert!(
+            candidates.contains(&nvm_bin.join("claude")),
+            "{candidates:?}"
         );
     }
 
@@ -833,24 +1040,34 @@ mod agent {
             std::fs::create_dir_all(&bin).unwrap();
             std::fs::write(bin.join("claude"), b"#!/bin/sh\n").unwrap();
         }
-        let found = discover_claude_in(
+        let candidates = discover_claude_in(
             Some(std::ffi::OsString::new()),
             Some(home.path().to_path_buf()),
-        )
-        .unwrap();
-        assert!(found.to_string_lossy().contains("v20.11.0"), "{found:?}");
+        );
+        let first_nvm = candidates
+            .iter()
+            .find(|candidate| candidate.to_string_lossy().contains(".nvm"))
+            .expect("nvm 位置应当在候选里");
+        assert!(
+            first_nvm.to_string_lossy().contains("v20.11.0"),
+            "{first_nvm:?}"
+        );
     }
 
-    #[test]
-    fn discovery_reports_absence_instead_of_guessing() {
+    /// 枚举出候选**不等于**装了：一个都不合格时状态必须是 `not_found`，
+    /// 而不是拿第一个候选路径去冒充安装。
+    #[tokio::test]
+    async fn discovery_reports_absence_instead_of_guessing() {
         let home = tempfile::tempdir().unwrap();
-        assert_eq!(
-            discover_claude_in(
-                Some(std::ffi::OsString::new()),
-                Some(home.path().to_path_buf())
-            ),
-            None
+        let candidates = discover_claude_in(
+            Some(std::ffi::OsString::new()),
+            Some(home.path().to_path_buf()),
         );
+        let backend = ClaudeCodeBackend::with_candidates(candidates, PathBuf::from("daybook-mcp"))
+            .with_version_timeout(Duration::from_millis(200));
+        let status = backend.status().await;
+        assert!(!status.available);
+        assert_eq!(status.availability_reason.as_deref(), Some("not_found"));
     }
 
     #[test]

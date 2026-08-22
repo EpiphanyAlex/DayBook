@@ -74,17 +74,19 @@ fn reveal_data_directory(state: tauri::State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
-fn agent_status(state: tauri::State<'_, AppState>) -> BackendStatus {
-    state.agent.status()
+async fn agent_status(state: tauri::State<'_, AppState>) -> AppResult<BackendStatus> {
+    Ok(state.agent.status().await)
 }
 
+/// **探测结论由运行时持有，命令层不再拼装**（[01 §3.5](../../docs/prd/01-agent-runtime.md)）。
+///
+/// 这里此前手工把 `authenticated = true` / `error_code = None` 拍在返回值上，失败时又抛出去
+/// 让前端自己补一个码——两边各拼一半，谁也不是事实源。现在无论成败都回同一个合成状态；
+/// 失败的完整 detail 留在 trace 日志里，UI 文案本来就按 `code` 分支。
 #[tauri::command]
 async fn probe_agent(state: tauri::State<'_, AppState>) -> AppResult<BackendStatus> {
-    state.agent.probe(Arc::clone(&state.database)).await?;
-    let mut status = state.agent.status();
-    status.authenticated = Some(true);
-    status.error_code = None;
-    Ok(status)
+    let _ = state.agent.probe(Arc::clone(&state.database)).await;
+    Ok(state.agent.status().await)
 }
 
 #[tauri::command]
@@ -326,6 +328,8 @@ mod m0 {
         );
     }
 
+    use std::path::PathBuf;
+
     struct DeterministicBackend;
 
     #[async_trait]
@@ -334,15 +338,8 @@ mod m0 {
             "deterministic"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified(self.id(), PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -433,6 +430,8 @@ mod m0 {
         )
         .unwrap();
         let runtime = AgentRuntime::new(Arc::new(DeterministicBackend));
+        // 应用启动时 `probe_agent` 会跑这一次；解析 fail closed，端到端也得先过闸门。
+        runtime.probe(Arc::clone(&database)).await.unwrap();
         let summary = runtime
             .parse_source(Arc::clone(&database), imported.source_id.clone())
             .await

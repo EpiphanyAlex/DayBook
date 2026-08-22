@@ -32,9 +32,24 @@ pub struct AttemptSummary {
     pub outcome: String,
 }
 
+/// **最近一次 readiness probe 的结论，由运行时持有**（[01 §3.5](../../../docs/prd/01-agent-runtime.md)）。
+///
+/// 修正前它不存在：`probe_agent` 在命令层手工把 `authenticated = true` 拍上去，前端再从
+/// 「available 且没有错误」反推 ready——于是 probe 还没跑完，界面已经说「考古员已就绪」。
+#[derive(Debug, Clone)]
+enum Readiness {
+    NotProbed,
+    Probing,
+    /// 探测跑完了但没过，原样留着那次失败——`status()` 取它的码，
+    /// `parse_source` 直接把它返回给用户，不重新编一句话。
+    Failed(AppError),
+    Ready,
+}
+
 pub struct AgentRuntime {
     backend: Arc<dyn AgentBackend>,
     probe_cache: Mutex<Option<(String, ProbeResult)>>,
+    readiness: StdMutex<Readiness>,
     task_gate: Mutex<()>,
     active_task: StdMutex<Option<ActiveTask>>,
 }
@@ -65,13 +80,55 @@ impl AgentRuntime {
         Self {
             backend,
             probe_cache: Mutex::new(None),
+            readiness: StdMutex::new(Readiness::NotProbed),
             task_gate: Mutex::new(()),
             active_task: StdMutex::new(None),
         }
     }
 
-    pub fn status(&self) -> BackendStatus {
-        self.backend.status()
+    /// 把**后端的安装事实**与**运行时持有的探测结论**合成一个状态，按 [01 §3.5]
+    /// (../../../docs/prd/01-agent-runtime.md) 的 IPC 矩阵。这是状态的唯一出口——
+    /// 前端不再拼装，也不再反推。
+    pub async fn status(&self) -> BackendStatus {
+        let mut status = self.backend.status().await;
+        if !status.available {
+            status.ready = false;
+            status.authenticated = None;
+            status.error_code = Some("agent.backend_unavailable".to_owned());
+            return status;
+        }
+        match self.readiness() {
+            Readiness::NotProbed | Readiness::Probing => {
+                status.ready = false;
+                status.authenticated = None;
+                status.error_code = None;
+            }
+            Readiness::Failed(error) => {
+                status.ready = false;
+                status.authenticated = (error.code == "agent.not_authenticated").then_some(false);
+                status.error_code = Some(error.code);
+            }
+            Readiness::Ready => {
+                status.ready = true;
+                status.authenticated = Some(true);
+                status.error_code = None;
+            }
+        }
+        status
+    }
+
+    fn readiness(&self) -> Readiness {
+        self.readiness
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn set_readiness(&self, next: Readiness) {
+        *self
+            .readiness
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
     }
 
     pub async fn probe(&self, database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -92,9 +149,11 @@ impl AgentRuntime {
         let mut cache = self.probe_cache.lock().await;
         if let Some((cached_key, result)) = cache.as_ref() {
             if cached_key == &cache_key {
+                self.set_readiness(Readiness::Ready);
                 return Ok(result.clone());
             }
         }
+        self.set_readiness(Readiness::Probing);
         let result = self.backend.probe(Arc::clone(&database)).await;
         write_probe_log(
             &database,
@@ -103,9 +162,35 @@ impl AgentRuntime {
             result.as_ref().err(),
             started.elapsed(),
         )?;
-        let result = result?;
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.set_readiness(Readiness::Failed(error.clone()));
+                return Err(error);
+            }
+        };
         *cache = Some((cache_key, result.clone()));
+        self.set_readiness(Readiness::Ready);
         Ok(result)
+    }
+
+    /// **fail closed**：完整 readiness probe 没成功就不解析——不创建 `parse_attempts`、
+    /// 不下发任务（[01 §3.5](../../../docs/prd/01-agent-runtime.md)）。
+    ///
+    /// 修正前这里是 `parse_source` 自己顺手 `probe()` 一次，于是「启动时那次检查」和
+    /// 「这次解析能不能跑」根本没连起来。探测只由启动时的 `probe_agent` 与用户显式重试触发。
+    async fn require_ready(&self) -> AppResult<ProbeResult> {
+        match self.readiness() {
+            Readiness::Failed(error) => return Err(error),
+            Readiness::NotProbed | Readiness::Probing => return Err(not_ready()),
+            Readiness::Ready => {}
+        }
+        self.probe_cache
+            .lock()
+            .await
+            .as_ref()
+            .map(|(_, result)| result.clone())
+            .ok_or_else(not_ready)
     }
 
     pub async fn parse_source(
@@ -114,8 +199,9 @@ impl AgentRuntime {
         source_id: String,
     ) -> AppResult<AttemptSummary> {
         let _task_guard = self.task_gate.lock().await;
+        // 本位币不属于后端 readiness，它是这条任务自己的前置条件（01 §3.6）。
         let base_currency = database.require_base_currency()?;
-        let probe = self.probe(Arc::clone(&database)).await?;
+        let probe = self.require_ready().await?;
         let attempt_id = Uuid::new_v4().to_string();
         let agent_session_id = Uuid::new_v4().to_string();
         let started_at = now()?;
@@ -347,6 +433,16 @@ impl Drop for AgentRuntime {
             }
         }
     }
+}
+
+/// 「已发现合格 CLI，但这次生命周期的 readiness probe 还没开始 / 还没跑完」——
+/// 状态矩阵里这一档 `error_code` 是空（UI 显示「正在检查」），但用户**显式**发起解析时
+/// 命令层必须答一句话（[00 §3.7](../../../docs/prd/00-foundation.md) `agent.not_ready`）。
+fn not_ready() -> AppError {
+    AppError::new(
+        "agent.not_ready",
+        "解析器就绪检查尚未完成，等检查通过后再解析",
+    )
 }
 
 fn resolve_helper_path() -> PathBuf {
@@ -680,15 +776,8 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: "scripted".to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -705,6 +794,289 @@ mod agent {
         }
     }
 
+    /// probe 一直失败的后端。`spawns` 记的是**有没有真的下发过任务**——
+    /// 「不新增 `parse_attempts`」和「不 spawn」是两件事，都要断言。
+    struct FailingProbeBackend {
+        code: &'static str,
+        spawns: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl AgentBackend for FailingProbeBackend {
+        fn id(&self) -> &'static str {
+            "scripted"
+        }
+
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), "1".to_owned())
+        }
+
+        async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
+            Err(AppError::new(self.code, "injected probe failure"))
+        }
+
+        async fn run_task(
+            &self,
+            _database: Arc<Database>,
+            _task: AgentTask,
+            _cancel: watch::Receiver<bool>,
+        ) -> AppResult<AgentTaskResult> {
+            self.spawns.fetch_add(1, Ordering::SeqCst);
+            Err(AppError::new("agent.spawn_failed", "should never run"))
+        }
+    }
+
+    /// probe 卡在半路的后端——「探测中」是一个真实存在的状态，不是理论上的窗口：
+    /// 真实 probe 要跑一次完整 CLI 会话，那几秒里界面此前显示的是「考古员已就绪」。
+    struct GatedProbeBackend {
+        entered: Arc<Notify>,
+        release: Arc<Notify>,
+        spawns: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl AgentBackend for GatedProbeBackend {
+        fn id(&self) -> &'static str {
+            "scripted"
+        }
+
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), "1".to_owned())
+        }
+
+        async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            Ok(probe_result("1"))
+        }
+
+        async fn run_task(
+            &self,
+            _database: Arc<Database>,
+            _task: AgentTask,
+            _cancel: watch::Receiver<bool>,
+        ) -> AppResult<AgentTaskResult> {
+            self.spawns.fetch_add(1, Ordering::SeqCst);
+            Err(AppError::new("agent.spawn_failed", "should never run"))
+        }
+    }
+
+    fn gated_runtime() -> (
+        Arc<AgentRuntime>,
+        Arc<Notify>,
+        Arc<Notify>,
+        Arc<AtomicUsize>,
+    ) {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let runtime = Arc::new(AgentRuntime::new(Arc::new(GatedProbeBackend {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            spawns: Arc::clone(&spawns),
+        })));
+        (runtime, entered, release, spawns)
+    }
+
+    /// **解析前必须先有一次成功的 readiness probe**（[01 §3.5](../../../docs/prd/01-agent-runtime.md)）。
+    /// 生产里那一次由启动时的 `probe_agent` 触发；测试里就在这儿显式跑一次——
+    /// 修正前 `parse_source` 自己顺手探一次，所以这些用例从来不用管就绪度。
+    async fn probed(runtime: &AgentRuntime, database: &Arc<Database>) {
+        runtime.probe(Arc::clone(database)).await.unwrap();
+    }
+
+    fn attempt_count(database: &Database) -> i64 {
+        database
+            .read(|connection| {
+                connection.query_row("SELECT COUNT(*) FROM parse_attempts", [], |row| row.get(0))
+            })
+            .unwrap()
+    }
+
+    fn parse_ready_database(directory: &std::path::Path, source_id: &str) -> Arc<Database> {
+        let database = Arc::new(Database::open(directory).unwrap());
+        database.set_base_currency("AUD").unwrap();
+        insert_source(&database, source_id);
+        database
+    }
+
+    /// **01 §3.5**：`ready = true` 当且仅当本次生命周期内完整 readiness probe 成功。
+    #[tokio::test]
+    async fn readiness_is_false_until_probe_succeeds() {
+        let directory = tempdir().unwrap();
+        let database = Arc::new(Database::open(directory.path()).unwrap());
+        let (runtime, entered, release, _spawns) = gated_runtime();
+
+        let before = runtime.status().await;
+        assert!(before.available, "CLI 合格这件事与就绪度无关");
+        assert!(!before.ready, "probe 还没开始");
+        assert_eq!(before.error_code, None, "「尚未探测」不是错误态");
+        assert_eq!(before.authenticated, None);
+
+        let probing = tokio::spawn({
+            let runtime = Arc::clone(&runtime);
+            let database = Arc::clone(&database);
+            async move { runtime.probe(database).await }
+        });
+        entered.notified().await;
+        let during = runtime.status().await;
+        assert!(!during.ready, "probe 还在跑，界面不得说「已就绪」");
+        assert_eq!(during.error_code, None, "「探测中」也不是错误态");
+        release.notify_one();
+        probing.await.unwrap().unwrap();
+
+        let after = runtime.status().await;
+        assert!(after.ready);
+        assert_eq!(after.authenticated, Some(true));
+        assert_eq!(after.error_code, None);
+
+        // 认证 / helper 启动 / manifest 与密封比较——任一失败都仍是 false。
+        for (code, expected_authenticated) in [
+            ("agent.not_authenticated", Some(false)),
+            ("agent.spawn_failed", None),
+            ("agent.tool_surface_unsealed", None),
+        ] {
+            let runtime = AgentRuntime::new(Arc::new(FailingProbeBackend {
+                code,
+                spawns: Arc::new(AtomicUsize::new(0)),
+            }));
+            runtime
+                .probe(Arc::clone(&database))
+                .await
+                .expect_err("这个后端的 probe 必失败");
+            let status = runtime.status().await;
+            assert!(!status.ready, "{code}");
+            assert_eq!(status.error_code.as_deref(), Some(code));
+            assert_eq!(status.authenticated, expected_authenticated, "{code}");
+            assert!(status.available, "探测失败不得把已合格的安装改称「未安装」");
+        }
+    }
+
+    /// **fail closed**：readiness 没建立，`parse_attempts` 不新增、任务不下发（01 §3.5）。
+    ///
+    /// 修正前 `parse_source` 自己顺手 probe 一次，「probe 未开始」这一档根本拦不住——
+    /// 它会现场探一次然后照常开跑。
+    #[tokio::test]
+    async fn readiness_blocks_attempt_and_task() {
+        let source_id = "00000000-0000-4000-8000-000000000001";
+
+        // ① probe 未开始
+        let directory = tempdir().unwrap();
+        let database = parse_ready_database(directory.path(), source_id);
+        let (runtime, _entered, _release, spawns) = gated_runtime();
+        assert_eq!(
+            runtime
+                .parse_source(Arc::clone(&database), source_id.to_owned())
+                .await
+                .unwrap_err()
+                .code,
+            "agent.not_ready"
+        );
+        assert_eq!(attempt_count(&database), 0);
+        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+
+        // ② probe 进行中
+        let directory = tempdir().unwrap();
+        let database = parse_ready_database(directory.path(), source_id);
+        let (runtime, entered, release, spawns) = gated_runtime();
+        let probing = tokio::spawn({
+            let runtime = Arc::clone(&runtime);
+            let database = Arc::clone(&database);
+            async move { runtime.probe(database).await }
+        });
+        entered.notified().await;
+        assert_eq!(
+            runtime
+                .parse_source(Arc::clone(&database), source_id.to_owned())
+                .await
+                .unwrap_err()
+                .code,
+            "agent.not_ready"
+        );
+        assert_eq!(attempt_count(&database), 0);
+        assert_eq!(spawns.load(Ordering::SeqCst), 0);
+        release.notify_one();
+        probing.await.unwrap().unwrap();
+
+        // ③–⑥ 未认证 / helper 启动失败 / manifest 缺失或不可读 / capability 集合不相等
+        for code in [
+            "agent.not_authenticated",
+            "agent.spawn_failed",
+            "agent.tool_surface_unsealed",
+            "agent.tool_surface_unsealed",
+        ] {
+            let directory = tempdir().unwrap();
+            let database = parse_ready_database(directory.path(), source_id);
+            let spawns = Arc::new(AtomicUsize::new(0));
+            let runtime = AgentRuntime::new(Arc::new(FailingProbeBackend {
+                code,
+                spawns: Arc::clone(&spawns),
+            }));
+            runtime
+                .probe(Arc::clone(&database))
+                .await
+                .expect_err("这个后端的 probe 必失败");
+            assert_eq!(
+                runtime
+                    .parse_source(Arc::clone(&database), source_id.to_owned())
+                    .await
+                    .unwrap_err()
+                    .code,
+                code,
+                "失败的探测结论要如实传给用户，不能一律说「未就绪」"
+            );
+            assert_eq!(attempt_count(&database), 0, "{code}");
+            assert_eq!(spawns.load(Ordering::SeqCst), 0, "{code}");
+        }
+
+        // ⑦ 完整 probe 成功之后才新增
+        let directory = tempdir().unwrap();
+        let database = parse_ready_database(directory.path(), source_id);
+        let runtime = AgentRuntime::new(Arc::new(SpawnFailureBackend));
+        runtime.probe(Arc::clone(&database)).await.unwrap();
+        assert_eq!(
+            runtime
+                .parse_source(Arc::clone(&database), source_id.to_owned())
+                .await
+                .unwrap_err()
+                .code,
+            "agent.spawn_failed",
+            "闸门开了之后失败的是任务本身，不是就绪度"
+        );
+        assert_eq!(attempt_count(&database), 1);
+    }
+
+    /// 最近一次探测结论由 Rust 运行时持有：**再读一次拿到的还是它**，
+    /// 不依赖前端把错误码临时写回自己手里那份 status（修正前 `App.tsx` 就是这么干的）。
+    #[tokio::test]
+    async fn readiness_status_is_runtime_owned() {
+        let directory = tempdir().unwrap();
+        let database = Arc::new(Database::open(directory.path()).unwrap());
+
+        let runtime = AgentRuntime::new(Arc::new(FailingProbeBackend {
+            code: "agent.not_authenticated",
+            spawns: Arc::new(AtomicUsize::new(0)),
+        }));
+        runtime
+            .probe(Arc::clone(&database))
+            .await
+            .expect_err("这个后端的 probe 必失败");
+        let first = runtime.status().await;
+        let second = runtime.status().await;
+        assert_eq!(first.error_code, second.error_code);
+        assert_eq!(
+            second.error_code.as_deref(),
+            Some("agent.not_authenticated")
+        );
+        assert_eq!(second.authenticated, Some(false));
+        assert!(!second.ready);
+
+        let runtime = AgentRuntime::new(Arc::new(SpawnFailureBackend));
+        runtime.probe(Arc::clone(&database)).await.unwrap();
+        assert!(runtime.status().await.ready);
+        assert!(runtime.status().await.ready, "重读不该把结论读没了");
+    }
+
     #[tokio::test]
     async fn attempt_row_written_before_spawn() {
         let directory = tempdir().unwrap();
@@ -712,6 +1084,7 @@ mod agent {
         database.set_base_currency("AUD").unwrap();
         insert_source(&database, "00000000-0000-4000-8000-000000000001");
         let runtime = AgentRuntime::new(Arc::new(SpawnFailureBackend));
+        probed(&runtime, &database).await;
         assert_eq!(
             runtime
                 .parse_source(
@@ -752,15 +1125,8 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: "scripted".to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -797,6 +1163,7 @@ mod agent {
             active: AtomicBool::new(false),
         });
         let runtime = Arc::new(AgentRuntime::new(backend.clone()));
+        probed(&runtime, &database).await;
         let parse_runtime = Arc::clone(&runtime);
         let parse_database = Arc::clone(&database);
         let parse = tokio::spawn(async move {
@@ -839,16 +1206,9 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
+        async fn status(&self) -> BackendStatus {
             let version = self.version.load(Ordering::SeqCst).to_string();
-            BackendStatus {
-                backend_id: "scripted".to_owned(),
-                executable: None,
-                version: Some(version),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), version)
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -893,15 +1253,8 @@ mod agent {
             "unsealed"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: "unsealed".to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("unsealed", PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -929,6 +1282,11 @@ mod agent {
         let source_id = "00000000-0000-4000-8000-000000000003";
         insert_source(&database, source_id);
         let runtime = AgentRuntime::new(Arc::new(UnsealedBackend));
+        // 密封比较失败的 probe 本身就是这条用例的前提：它让 readiness 停在 Failed。
+        runtime
+            .probe(Arc::clone(&database))
+            .await
+            .expect_err("密封比较必失败");
         assert_eq!(
             runtime
                 .parse_source(Arc::clone(&database), source_id.to_owned())
@@ -1093,15 +1451,8 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified(self.id(), PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -1141,6 +1492,7 @@ mod agent {
             error_code: None,
             runs: AtomicUsize::new(0),
         }));
+        probed(&runtime, &database).await;
         assert_eq!(
             runtime
                 .parse_source(Arc::clone(&database), source_id.to_owned())
@@ -1177,6 +1529,7 @@ mod agent {
             runs: AtomicUsize::new(0),
         });
         let runtime = AgentRuntime::new(backend.clone());
+        probed(&runtime, &database).await;
         assert_eq!(
             runtime
                 .parse_source(Arc::clone(&database), source_id.to_owned())
@@ -1206,15 +1559,8 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified(self.id(), PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -1269,7 +1615,9 @@ mod agent {
         database.set_base_currency("AUD").unwrap();
         let source_id = "00000000-0000-4000-8000-000000000006";
         insert_source(&database, source_id);
-        AgentRuntime::new(completing_backend(Duration::ZERO))
+        let runtime = AgentRuntime::new(completing_backend(Duration::ZERO));
+        probed(&runtime, &database).await;
+        runtime
             .parse_source(Arc::clone(&database), source_id.to_owned())
             .await
             .unwrap();
@@ -1301,6 +1649,7 @@ mod agent {
         let source_id = "00000000-0000-4000-8000-000000000007";
         insert_source(&database, source_id);
         let runtime = AgentRuntime::new(completing_backend(Duration::ZERO));
+        probed(&runtime, &database).await;
         let first = runtime
             .parse_source(Arc::clone(&database), source_id.to_owned())
             .await
@@ -1335,6 +1684,7 @@ mod agent {
         insert_source(&database, second_source);
         let backend = completing_backend(Duration::from_millis(30));
         let runtime = Arc::new(AgentRuntime::new(backend.clone()));
+        probed(&runtime, &database).await;
         let first_runtime = Arc::clone(&runtime);
         let first_database = Arc::clone(&database);
         let first = tokio::spawn(async move {
@@ -1365,6 +1715,7 @@ mod agent {
             active: AtomicBool::new(false),
         });
         let runtime = Arc::new(AgentRuntime::new(backend.clone()));
+        probed(&runtime, &database).await;
         let parse_runtime = Arc::clone(&runtime);
         let parse_database = Arc::clone(&database);
         let parse = tokio::spawn(async move {
@@ -1386,13 +1737,14 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
+        async fn status(&self) -> BackendStatus {
             CompletingBackend {
                 active: AtomicUsize::new(0),
                 max_active: AtomicUsize::new(0),
                 delay: Duration::ZERO,
             }
             .status()
+            .await
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -1465,6 +1817,7 @@ mod agent {
         )
         .unwrap();
         let runtime = AgentRuntime::new(Arc::new(InjectionSafeBackend));
+        probed(&runtime, &database).await;
         runtime
             .parse_source(Arc::clone(&database), imported.source_id)
             .await
@@ -1494,15 +1847,8 @@ mod agent {
             "scripted"
         }
 
-        fn status(&self) -> BackendStatus {
-            BackendStatus {
-                backend_id: self.id().to_owned(),
-                executable: None,
-                version: Some("1".to_owned()),
-                available: true,
-                authenticated: Some(true),
-                error_code: None,
-            }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified(self.id(), PathBuf::from("/fake/claude"), "1".to_owned())
         }
 
         async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -1581,6 +1927,7 @@ mod agent {
             })
             .unwrap();
         let runtime = AgentRuntime::new(Arc::new(TimeoutAfterDraftBackend));
+        probed(&runtime, &database).await;
         assert_eq!(
             runtime
                 .parse_source(Arc::clone(&database), timed_source.to_owned())
@@ -1772,6 +2119,8 @@ mod agent {
         )
         .unwrap();
         let runtime = AgentRuntime::claude_default();
+        // 真实 CLI 也走同一道闸门：先探测，探测过了才允许下发（01 §3.5）。
+        runtime.probe(Arc::clone(&database)).await.unwrap();
         for (kind, source) in [
             ("utterance", &utterance.source_id),
             ("screenshot", &image.source_id),
