@@ -2,8 +2,8 @@
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
 status: review
 owner: "@maintainer"
-date: 2026-08-17
-version: v0.14
+date: 2026-08-22
+version: v0.15
 ---
 
 # 02 · 导入 Ingest
@@ -152,7 +152,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | 用户遇到的情况 | 判定处 | 错误码 / 状态 | 应用行为 |
 |---|---|---|---|
 | 未发现合格 agent CLI（未找到候选、不可执行或版本不可读取） | 安装资格检查（[01 §3.5](./01-agent-runtime.md)） | `agent.backend_unavailable` + 稳定的 `availability_reason` | **应用照常启动**，`ready = false`；按原因给安装或修复指引，手工录入可用（[04 §3.5](./04-transactions.md)） |
-| CLI 合格但 readiness probe 尚未完成 | 主动就绪探测（[01 §3.5](./01-agent-runtime.md)） | 非错误；`ready = false` | 显示「正在检查」，**不创建尝试、不下发解析** |
+| CLI 合格但 readiness probe 尚未完成 | 主动就绪探测（[01 §3.5](./01-agent-runtime.md)） | 状态本身非错误；`ready = false`。**用户在这个窗口里显式点解析，命令层返回 `agent.not_ready`** | 显示「正在检查」，**不创建尝试、不下发解析** |
 | CLI 装了但没登录 | readiness probe | `agent.not_authenticated` | 应用照常启动，但指引是**去登录**而不是去安装；不下发解析 |
 | capability manifest 无法证明与预期严格相等 | readiness probe 的密封比较（[01 §3.7](./01-agent-runtime.md)） | `agent.tool_surface_unsealed` | `ready = false`，**拒绝下发任务**，不降级运行 |
 | readiness probe 的其他失败（helper 无法启动、探测超时、额度或网络暂不可用） | readiness probe（[01 §3.5](./01-agent-runtime.md)） | 对应 `agent.spawn_failed` / `agent.timeout` / `agent.quota_exhausted` 等 | 保留安装事实，`ready = false`；**不创建尝试、不改变来源状态、不下发解析**，UI 给对应动作并允许用户显式重探测 |
@@ -245,6 +245,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-22（跨文档同步） | §3.5.1「readiness probe 尚未完成」一行只写了「非错误」，没说用户在这个窗口里**主动**点解析时命令返回什么——落到实现上就是一个必须填的空。补 `agent.not_ready`（[00 §3.7](./00-foundation.md) v0.17 登记）：状态本身仍是非错误的中间态，这个码只属于显式发起的解析请求 | [01 §3.5](./01-agent-runtime.md) v0.23 的第四条实现边界 |
 | 2026-08-17（跨文档同步） | §3.5.1 原把 `agent.backend_unavailable` 缩写成「CLI 没装」，漏掉不可执行与版本不可读取，也没有 probe 进行中的 fail-closed 状态。矩阵按 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 拆为安装资格、探测中、未认证、密封失败与其他 probe 失败五类，并区分 probe 期与解析任务期复用同一错误码时的不同状态行为；应用仍可启动的既有降级原则不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13（实现验收） | **§3.4 的状态机在实现里存在两份，且互相矛盾。** 本节对应的 `SourceState::can_transition_to` 有穷举 25 种转移的测试却无生产调用点；真正生效的是 `agent/runtime.rs` 内联的 `matches!`，两份对 `parsed → parsing` 的答案相反——**测试全绿，因为它测的是没人用的那份**。改定：转移表补 `parsed → parsing`（重新解析，[03 §6](./03-review.md) 本来就要求它）与 `failed → failed`（作废是会被触发两次的补偿动作），并把「只有一处代码写 `sources.state`」写成可执行验收。§6 新增 2 条 | M0 实施验收（2026-08-13）：`rg 'transition_source\|can_transition_to'` 在生产代码里零命中 |
 | 2026-08-13 | 完整 live 验收复现 Claude 对「总共」口述起草成功却漏调 `report_source_total`，使对账静默落成 `not_applicable`。口述明显合计词因此增加代码侧完成前闸门；图片不做假 OCR，仍由模型识别 | [01 Agent 运行时 §3.2](./01-agent-runtime.md) `report_source_total` 可信性要求第 6 条；`verify-m0.mjs` 真实 CLI happy path |
@@ -264,6 +265,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.15 | 2026-08-22 | **补 `agent.not_ready`，`status` 仍为 `review`。** §3.5.1「readiness probe 尚未完成」一行明确：状态是非错误的中间态，但用户在这个窗口里显式发起解析时命令层返回 `agent.not_ready`；不创建尝试、不下发解析的行为不变 |
 | v0.14 | 2026-08-17 | **安装资格 / 解析就绪度跨文档同步，`status` 仍为 `review`。** §3.5.1 不再把 `agent.backend_unavailable` 一律称为「没装」，补稳定 `availability_reason`，并把 readiness probe 完成前及 probe 期其他失败与任务期失败拆开：前者 `ready = false` 且不创建尝试、不改变来源；行为权威出处仍为 [01 §3.5](./01-agent-runtime.md) |
 | v0.13 | 2026-08-13 | **实现回流：**§3.4 转移表补 `parsed → parsing` 与 `failed → failed`，并要求 `sources.state` 只有一处写入点——此前规格里的状态机没有生产调用点，生效的是 `agent/runtime.rs` 里与它矛盾的内联判断。§6 新增 2 条验收；`status` 仍为 `review` |
 | v0.12 | 2026-08-13 | **M0 实现验收进入 `review`。** PNG/JPEG 与口述导入、幂等、串行编排、批量容错、崩溃恢复及真实截图/口述 happy path 已通过统一门禁 |

@@ -27,7 +27,9 @@ interface FoundationStatus {
 
 interface BackendStatus {
   available: boolean
+  availabilityReason: string | null
   authenticated: boolean | null
+  ready: boolean
   errorCode: string | null
   version: string | null
 }
@@ -176,20 +178,14 @@ export function App() {
       call<BackendStatus>('agent_status').then(setBackend),
       refreshSources(),
     ]).catch((error) => setNotice(errorMessage(error)))
+    // **状态只有一个出处**：`probe_agent` 无论成败都返回运行时持有的那份结论（01 §3.5）。
+    // 这里此前在 catch 里把错误码写回自己手上那份 status——前端成了第二个事实源。
     void call<BackendStatus>('probe_agent')
       .then((status) => {
         setBackend(status)
         void refreshAgentLogs()
       })
-      .catch(async (error: unknown) => {
-        const status = await call<BackendStatus>('agent_status')
-        if (error instanceof AppError) {
-          status.errorCode = error.code
-          if (error.code === 'agent.not_authenticated') status.authenticated = false
-        }
-        setBackend(status)
-        void refreshAgentLogs()
-      })
+      .catch((error: unknown) => setNotice(errorMessage(error)))
   }, [refreshAgentLogs, refreshSources])
 
   useEffect(() => {
@@ -208,15 +204,21 @@ export function App() {
       await refreshSources(result.sourceId)
       return
     }
-    setNotice('来源已安全保存，正在还原里面的交易。')
     await refreshSources(result.sourceId)
+    // 就绪度没建立就不下发解析（01 §3.5）。**导入本身照常完成**——证据已落盘，
+    // 等状态变绿再解析即可；服务端也会拒，这里只是别让用户白等一个必然失败的请求。
+    if (!backend?.ready) {
+      setNotice('来源已安全保存。解析器还没就绪，等状态变成「考古员已就绪」后点「解析」。')
+      return
+    }
+    setNotice('来源已安全保存，正在还原里面的交易。')
     try {
       await call('parse_source', { sourceId: result.sourceId })
       setNotice('解析完成，请对照原件确认。')
     } finally {
       await Promise.all([refreshSources(result.sourceId), refreshAgentLogs()])
     }
-  }, [refreshAgentLogs, refreshSources])
+  }, [backend, refreshAgentLogs, refreshSources])
 
   const importPaths = useCallback(async (paths: string[]) => {
     if (!paths.length || busy) return
@@ -300,6 +302,10 @@ export function App() {
   }
 
   const retrySource = async (sourceId: string) => {
+    if (!backend?.ready) {
+      setNotice('解析器还没就绪，等状态变成「考古员已就绪」后再解析。')
+      return
+    }
     setBusy(true)
     try {
       await call('parse_source', { sourceId })
@@ -483,6 +489,8 @@ export function App() {
                   <button
                     type="button"
                     className="retry-link"
+                    disabled={!agentView.ready}
+                    title={agentView.ready ? undefined : '解析器还没就绪'}
                     onClick={() => void retrySource(source.id)}
                   >{source.state === SOURCE_STATE.FAILED ? '重试' : '解析'}</button>
                 )}

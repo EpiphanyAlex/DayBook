@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: review
 owner: "@maintainer"
-date: 2026-08-17
-version: v0.16
+date: 2026-08-22
+version: v0.17
 ---
 
 # 00 · 地基 Foundation
@@ -487,6 +487,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `ingest.evidence_write_failed` | [02](./02-ingest.md) | 证据落盘失败（此时不写 `sources` 行） |
 | `ingest.invalid_state_transition` | [02](./02-ingest.md) | 非法状态转移（§3.4） |
 | `agent.backend_unavailable` | [01](./01-agent-runtime.md) | 安装资格检查未发现合格 CLI：没有候选路径、候选不可执行，或版本无法在限定时间内成功读取（[01 §3.5](./01-agent-runtime.md)）。**不表示完整 readiness probe 的任意失败**——未认证与能力面不密封分别使用 `agent.not_authenticated` 与 `agent.tool_surface_unsealed` |
+| `agent.not_ready` | [01](./01-agent-runtime.md) | **合格 CLI 已发现，但本次应用生命周期内的完整 readiness probe 尚未开始或仍在进行**（2026-08-22 新增，[01 §3.5](./01-agent-runtime.md)）。此时**拒绝创建 `parse_attempts`、拒绝下发解析任务**（fail closed）。状态矩阵里这一档的 `error_code` 是空、UI 显示「正在检查」——**这个码只在用户显式发起解析时由命令层返回**，不写进 `BackendStatus`。probe 已跑完但失败时不用它，用各自的码（`agent.not_authenticated` / `agent.tool_surface_unsealed` / …） |
 | `agent.not_authenticated` | [01](./01-agent-runtime.md) | CLI 存在但未登录（2026-08-10 新增）——与「没装」是两种不同的用户动作，UI 要给不同指引 |
 | `agent.quota_exhausted` | [01](./01-agent-runtime.md) | 后端报告用量额度耗尽（2026-08-10 新增）。**不重试**（[02 导入 §3.5](./02-ingest.md)），否则在用户不知情时接着烧 |
 | `agent.timeout` | [01](./01-agent-runtime.md) | 单次任务超硬超时 |
@@ -600,6 +601,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-22（跨文档同步） | **权威错误码表新增 `agent.not_ready`。** [01 §3.5](./01-agent-runtime.md) 的状态矩阵把「已发现合格 CLI、尚未探测或探测中」定为 `error_code` 空的**非错误**态，但同一条规格又要求这一档 fail closed——用户显式发起解析时命令层必须返回一个码，而矩阵里没有。复用 `agent.backend_unavailable` 会把 v0.16 刚拆开的「安装资格 / 解析就绪度」两层重新合上，所以登记新码，只用于 probe 未开始 / 进行中 | 01 的 M0 修正实施计划（2026-08-22 获批）；[01 §3.5](./01-agent-runtime.md) 状态矩阵与 §6 `agent::readiness_blocks_attempt_and_task` |
 | 2026-08-17（跨文档同步） | 权威错误码表把 `agent.backend_unavailable` 从含糊的「`probe()` 失败」收窄为安装资格失败（未找到、不可执行、版本不可读取）；完整 readiness probe 的认证、密封与其他失败继续使用各自错误码。`agent.tool_surface_unsealed` 同步改准为「无法证明完整 manifest 与预期严格相等」，不再只写“多出工具”；错误码集合不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13 | **验收选择器按真实职责对齐。** 口述落盘/幂等归 `ingest`，span 工具边界与 attempt 生命周期归 `agent`，确认完整性/溯源归 `review`；原来的 `foundation::*` 名称会让 `cargo test <filter>` 在 0 个测试时仍 exit 0，制造假绿。行为判据不变，只把选择器改到实际执行它的测试 | M0 验收清单逐条与 `cargo test -- --list` 对照 |
 | 2026-08-13 | **实现发现“全局本位币决定新交易”没有任何存储与首选路径。** M0 定为本地 `preferences.json` + 首次解析前人工选择；不从地区或来源静默猜，切换不改历史行 | §3.4 已有的逐笔冻结语义；M0 真实确认链路需要完整三元组 |
@@ -625,6 +627,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.17 | 2026-08-22 | **§3.7 新增错误码 `agent.not_ready`，`status` 仍为 `review`。** 合格 CLI 已发现但完整 readiness probe 未开始或进行中时，用户显式发起解析由命令层返回该码并拒绝创建 `parse_attempts`；`BackendStatus` 上这一档仍是 `error_code` 空（UI 显示「正在检查」）。probe 跑完但失败仍用各自的码。错误码集合由 29 条增至 30 条，其余不变 |
 | v0.16 | 2026-08-17 | **安装资格 / 解析就绪度错误语义同步，`status` 仍为 `review`。** `agent.backend_unavailable` 只表示未发现合格 CLI（未找到、不可执行、版本不可读取），不再用「任意 `probe()` 失败」把认证与密封失败混进安装状态；`agent.tool_surface_unsealed` 同步扩准为「无法证明完整 capability manifest 与预期严格相等」，覆盖清单缺失/不可读、缺项、多项及非工具副作用能力；错误码集合未变 |
 | v0.15 | 2026-08-13 | **M0 实现验收进入 `review`。** 六表迁移、整数金额/IPC、证据目录、本位币偏好与访达揭示入口已落地，统一 M0 门禁通过 |
 | v0.14 | 2026-08-13 | **验收审计回流：**把 10 条已漂移的 `foundation::*` 测试选择器对齐到真实的 `ingest` / `agent` / `review` 测试，消除 0-test 假绿；验收行为不变 |
