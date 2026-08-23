@@ -70,6 +70,8 @@ AgentRuntime::parse_source
 - 三种安装失败原因在 UI 上是**三句不同的话**（`src/agent/presentation.ts`）：没找到 → 去装，不可执行 → `chmod`，版本读不出 → 修这个安装。都说成「未安装」等于没指引。
 - `--safe-mode` 会把显式 `--mcp-config` 一起屏蔽，不能用于生产密封启动。
 - **「已装未登录」这一档只有真机能验**：`cargo test` 与 `verify-m0.mjs` 都测不到它，2026-08-23 人工验收才发现界面报的是 `agent.spawn_failed`。复现方式：把 `HOME` 指到一个空目录再起应用（CLI 的凭证在 `$HOME/.claude.json`，换 `HOME` 即未登录），`PATH` 里放一个指向真 CLI 的同名符号链接。同一套受控 `HOME` / `PATH` 也能造出 `not_found` / `not_executable` / `version_unreadable` 三态，以及「`--version` 立即返回、真实会话先 `sleep` 再 exec」的延迟 probe。
+- **会话日志是「跑完一次性落盘」**：`runtime.rs` 的 `write_session_logs` 在 `AgentTaskResult` 回来之后才写整份 `<agent_session_id>.trace.jsonl` / `.debug.jsonl`，所以**解析进行中，界面的「本机解析日志」面板看不到这一次会话的任何一条**（`recent_agent_logs` 读的是目录里已存在的文件）。2026-08-23 人工验收实测：中途刷新只有开机那条能力检查，解析结束后才跳到 17 条。留 M1，见 [01 §7](../../docs/prd/01-agent-runtime.md)。
+- **想在真机上跑一次真实解析而又不污染真实数据目录**：应用用受控 `HOME`（数据目录随之隔离），同时在 `PATH` 上放一个把**子进程** `HOME` 还原成真实用户目录的 `claude` 同名包装——凭证不在受控 `HOME` 里，只复制 `~/.claude.json` 过去仍判未登录。**这个 webview 的辅助功能树是完整的**，`System Events` 的 `AXPress` / `set focused of … to true` 能直接驱动按钮与输入框（`click at` 用不了）；文本框用 `pbcopy` + `⌘V` 输入，React 的受控组件才收得到事件。
 - Claude Code 2.1.229 在有 `structuredContent` 时不把第二个 text content block 交给模型；口述正文因此同时放在 `structuredContent.text`。
 - 探测会真实调用一次无副作用工具来逼出 hook 事件，会消耗少量 CLI 额度。
 - managed policy 不保证在 init 中声明，是规格登记的残余风险。
