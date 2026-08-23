@@ -3,14 +3,14 @@ title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
 date: 2026-08-23
-version: v0.10
+version: v0.11
 ---
 
 # 系统架构基线
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：M0 实现处于 review 阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 的修正已实现，其 3 条人工验收于 2026-08-23 实测通过，当前文档 v0.25、`review`；[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核](./prd/03-review.md) v0.15 同为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
+> **当前状态：M0 实现处于 review 阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 的修正已实现，其 §6 的 5 条人工验收于 2026-08-23 全部实测执行完毕，当前文档 v0.26、`review`；[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核](./prd/03-review.md) v0.15 同为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
 
 ---
 
@@ -157,6 +157,7 @@ version: v0.10
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.11 | 2026-08-23 | **同步 M0 当前状态：[01 Agent 运行时](./prd/01-agent-runtime.md) §6 的后两条人工验收实测执行完毕（→ v0.26），五条至此全部跑完，`status` 仍为 `review`。** 「手工拆密封」通过——在 `PATH` 上放一个追加内置工具的 `claude` 同名包装即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、新来源导入成功而任务不下发，与 §4 的 fail-closed 边界一致。「真实解析中看子进程日志」只在解析结束后成立——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。**架构边界一字未改** |
 | v0.10 | 2026-08-23 | **同步 M0 当前状态：[01 Agent 运行时](./prd/01-agent-runtime.md) 的 3 条人工验收实测通过，回到 `review`，M0 四份现在都是 `review`。** 当天修掉一个只有真机才暴露的实现缺陷——「已装未登录」报的是 `agent.spawn_failed`（失败分类器只读 stderr，而真实 CLI 未登录时 stderr 为空、原因在 stdout 的 stream-json 里），已改为两个流合成一段信号判定。**架构边界与两条物理隔离写入路径未变** |
 | v0.9 | 2026-08-23 | **同步分类体系的 AI-native 写入边界。** 分类对话只产生待确认操作，影响范围由 domain 重算，人确认后经 Tauri command 执行；domain 只校验记忆查询覆盖、标记冲突并执行确认后的确定性生命周期操作，不按规则覆盖 agent 分类。审核纠正、明确商户规则指令与分类合并 / 拆分批量审计三者不再混称「每次修改都进记忆」。同时更新 M0 sub-PRD 当前状态摘要；两条物理隔离写入路径未变 |
 | v0.8 | 2026-08-17 | 同步 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 的安装资格 / 解析就绪度决定：§4 把 readiness probe 移到创建 `parse_attempts` 与下发解析任务之前，探测进程自身不产生 attempt；01 因规格证伪回到 `ready`，00/02/03 仍为 `review`。组件边界未变，控制流顺序改准 |

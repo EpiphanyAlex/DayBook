@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-08-23
-version: v0.35
+version: v0.36
 ---
 
 # sub-PRD 索引
@@ -17,7 +17,7 @@ version: v0.35
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.18 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.25 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.26 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.15 |
 | 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.15 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.8 |
@@ -25,7 +25,7 @@ version: v0.35
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.7 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.12 |
 
-**M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪并重写；2026-08-22 修正实现开工，01 转入 `in-progress`；2026-08-23 §6 人工验收前三条实测执行完毕，01 回到 `review`。**当前状态：[00 地基](./00-foundation.md) v0.18、[01 Agent 运行时](./01-agent-runtime.md) v0.25、[02 导入](./02-ingest.md) v0.15、[03 审核与草稿区](./03-review.md) v0.15 **四份都是 `review`**。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据；新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready 已由 01 v0.23 的实现修正并各自补了自动验收，其人工验收已于 2026-08-23 跑过；03 v0.15 新增的 M2 分类操作审核契约与此前 v0.14 的 M3 事项 update 契约都不改变既有 M0/M1 结论。
+**M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪并重写；2026-08-22 修正实现开工，01 转入 `in-progress`；2026-08-23 §6 人工验收前三条实测执行完毕，01 回到 `review`，同日把剩下两条也跑完，§6 五条人工验收至此全部执行过。**当前状态：[00 地基](./00-foundation.md) v0.18、[01 Agent 运行时](./01-agent-runtime.md) v0.26、[02 导入](./02-ingest.md) v0.15、[03 审核与草稿区](./03-review.md) v0.15 **四份都是 `review`**。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据；新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready 已由 01 v0.23 的实现修正并各自补了自动验收，其人工验收已于 2026-08-23 跑过；03 v0.15 新增的 M2 分类操作审核契约与此前 v0.14 的 M3 事项 update 契约都不改变既有 M0/M1 结论。
 
 > **那轮人工验收抓到一个自动门禁抓不到的缺陷**（2026-08-23，[01 §7](./01-agent-runtime.md)）：「已装未登录」报的是 `agent.spawn_failed` 而不是 `agent.not_authenticated`——**真实 CLI 未登录时 stderr 是 0 字节，原因只写在 stdout 的 stream-json 里**，而失败分类器只读 stderr。规格没错、实现错了，当天改完并补了一条以真实输出为样本的自动验收。**它再次说明同一件事：M0 的门禁只测库、确定性链路与外部 MCP 链路，凡是「真机上那一眼」的问题都只能靠人工验收捞。**
 
@@ -45,7 +45,7 @@ version: v0.35
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（2026-08-23 更新）：① ~~[01 Agent 运行时](./01-agent-runtime.md) 的 3 条人工验收~~ **已于 2026-08-23 跑完，01 回到 `review`**（当天修掉「已装未登录报错码不对」一个实现缺陷，见 [01 §7](./01-agent-runtime.md)）；剩下的人工验收是 §6 的后两条——真实解析中 UI 能看到子进程日志、手工拆掉密封配置一项后应显示 `agent.tool_surface_unsealed`；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00 与 02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有、01 已于 2026-08-23 补上，00 / 02 没有），维护者 review 时一并补。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
+**下一步**（2026-08-23 更新）：① ~~[01 Agent 运行时](./01-agent-runtime.md) 的 5 条人工验收~~ **已于 2026-08-23 全部跑完，01 回到 `review`**（当天修掉「已装未登录报错码不对」一个实现缺陷，见 [01 §7](./01-agent-runtime.md)）；后两条的结论是「手工拆密封」通过、「真实解析中看子进程日志」**只在解析结束后成立**——会话日志一次性落盘，进行中看不到，记为未修、留 M1；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00 与 02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有、01 已于 2026-08-23 补上，00 / 02 没有），维护者 review 时一并补。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -122,6 +122,7 @@ version: v0.35
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.36 | 2026-08-23 | **[01 Agent 运行时](./01-agent-runtime.md) §6 的后两条人工验收实测执行完毕（→ v0.26），五条至此全部跑完；`status` 仍为 `review`，M0 的 go/no-go 未动。** 「手工拆密封」通过：不动产品代码、在 `PATH` 上放一个追加 `--tools Read` 的同名包装即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、新来源导入成功而任务不下发。「真实解析中看子进程日志」**部分满足**：解析结束后 trace / debug 两级都可见且分级符合 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md)，**进行中看不到**——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。**01 §3 决定与依据一字未改，没有证伪任何规格** |
 | v0.35 | 2026-08-23 | **01 的 3 条人工验收实测执行完毕，`status` 由 `in-progress` 回到 `review`——M0 四份现在都是 `review`。** [01 Agent 运行时](./01-agent-runtime.md) → v0.25：三种安装资格指引各不相同且应用照常启动、延迟 probe 期间恒为「正在检查」且 `parse_attempts` 不增、probe 成功后才 ready，三条实测通过；**「已装未登录」一条当场不通过并暴露实现缺陷**——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr，界面因此报 `agent.spawn_failed`；已修并补 1 条以真实输出为样本的自动验收。另记一条**未修、留 M1** 的界面问题（检查中「解析」入口无禁用态视觉）。**§3 决定与依据未改，没有证伪任何规格**；[`docs/PRD.md`](../PRD.md)、[`docs/architecture.md`](../architecture.md)、[`README.md`](../../README.md) / [`README.en.md`](../../README.en.md) 与根 [`CLAUDE.md`](../../CLAUDE.md) 同步当前状态 |
 | v0.34 | 2026-08-23 | **v1 默认账目分类体系跨文档补全，所有 status 保持不变。** [04 交易](./04-transactions.md)→v0.8 定 15 个支出 / 6 个收入分类、方向作用域、生命周期、历史合并拆分与 AI-native 管理；[00 地基](./00-foundation.md)→v0.18 补 M2 `categories/category_id`、迁移预检与批次审计；[01 Agent 运行时](./01-agent-runtime.md)→v0.24、[03 审核](./03-review.md)→v0.15 固定「agent 只提案、界面确认、代码执行」及分里程碑影响预览；[06 记忆](./06-memory.md)→v0.7 改稳定分类 ID、规则软删除与明确指令一次确认；[`docs/architecture.md`](../architecture.md)→v0.9、[`docs/CONTEXT.md`](../CONTEXT.md)→v0.12 与 [`docs/PRD.md`](../PRD.md)→v0.22 同步结构边界、领域语言、M0 当前状态及 M2/M3 涉及模块。具体待确认操作表 / 工具形状与迁移修复入口仍在 M2 前人审，不改变当前 M0 六表五工具或 readiness 实现切片 |
 | v0.33 | 2026-08-22 | **01 的 M0 修正开工。** [01 Agent 运行时](./01-agent-runtime.md) → v0.23，`status` 由 `ready → in-progress`：安装资格改为「跟随符号链接 + 普通文件 + 执行位 + `--version` 限时非空」并给三种稳定 `availability_reason`，`BackendStatus` 增 `ready`，最近一次探测结论由 Rust 运行时持有，`parse_source` 改为 fail-closed 闸门。新增错误码 `agent.not_ready` 连带 [00 地基](./00-foundation.md) → v0.17、[02 导入](./02-ingest.md) → v0.15（两者仍 `review`）。5 条自动验收 + `npm test -- agent/backend-guidance` 已通过；**3 条人工验收待维护者本机执行，通过后 01 才回 `review`** |
