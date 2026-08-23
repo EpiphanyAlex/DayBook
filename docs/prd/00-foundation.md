@@ -602,7 +602,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 - [ ] `cargo test foundation::m0_insert_transaction_with_null_account` 通过——`PRAGMA foreign_keys = ON` 下，M0 schema 里插入 `account_id IS NULL` 的交易**成功**（`accounts` 骨架表存在）；同时插入一个不存在的 `account_id` **被 FK 拒绝**
 - [ ] `cargo test foundation::m2_category_text_migrates_without_loss`（**M2**）通过——非空旧文本按 direction/scope 迁到稳定 ID，同名跨 scope 不合并，`drafted_json` 原文不变
 - [ ] `cargo test foundation::category_migration_preflight_is_read_only`（**M2**）通过——transfer 旧分类或名称冲突完整进入诊断，且 `categories`、旧表、`user_version` 与证据逐位不变；不静默丢弃或留下半迁移
-- [ ] `cargo test foundation::category_migration_repair_path_roundtrip`（**M2，R13 定案后**）通过——用户通过获批修复入口处理全部诊断项，再次预检与迁移成功；该入口不能执行任意 SQL
+- [ ] `cargo test foundation::category_migration_repair_path_roundtrip`（**M2**，R13 定案后）通过——用户通过获批修复入口处理全部诊断项，再次预检与迁移成功；该入口不能执行任意 SQL
 - [ ] `cargo test foundation::category_reference_constraints_hold`（**M2**）通过——scope 不匹配、transfer 带分类、引用停用 / 合并墓碑均被拒；`category_id IS NULL` 可确认；仅原批次整批撤销可清除墓碑并恢复引用
 - [ ] `cargo test foundation::category_batch_audit_is_append_only`（**M2**）通过——合并 / 拆分 / 撤销的逐项审计共享 `batch_id`，旧审计不删除，`drafted_json` 不更新；任一后续冲突使撤销零写入
 - [ ] `cargo test foundation::money_crosses_ipc_as_string` 通过——金额与 `rate_ppm` 序列化出去是十进制字符串，允许范围上界 `10^15` 往返后逐位相等（走 JSON 数字时该用例必须变红）；`i64::MAX` 必须由下一条范围验收拒绝
