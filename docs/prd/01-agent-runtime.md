@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: in-progress
+status: review
 owner: "@maintainer"
 date: 2026-08-23
-version: v0.24
+version: v0.25
 ---
 
 # 01 · Agent 运行时
@@ -567,11 +567,12 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::readiness_blocks_attempt_and_task` 通过——对「probe 未开始 / 进行中 / 未认证 / helper 启动失败 / manifest 缺失或不可读 / capability 集合不相等」逐一发起解析，均不新增 `parse_attempts`、不 spawn 解析任务；完整 probe 成功才各新增一次
 - [ ] `cargo test agent::readiness_status_is_runtime_owned` 通过——probe 成功或失败后再次读取统一状态 IPC，得到的仍是最近一次结论；不依赖前端临时覆写 `authenticated` / `error_code`
 - [ ] `npm test -- agent/backend-guidance` 通过——覆盖「三种安装资格失败原因 / 正在检查 / 未登录 / 密封失败 / 其他探测失败 / ready」；`available = true` 且 probe 未完成时不得显示「考古员已就绪」
+- [ ] `cargo test agent::auth_failure_is_classified_from_stream_json` 通过——**stderr 为空、认证失败只写在 stdout 的 stream-json 里**时仍判为 `agent.not_authenticated`；`is_error` 为真而 `subtype` 仍是 `success` 的终结事件不得被读成成功；stderr 那条老路与「成功输出里出现账目文本不算失败信号」同时不回归（2026-08-23 人工验收发现，样本为真实 CLI 输出）
 - [ ] `cargo test agent::single_concurrent_process` 通过——连续下达两个任务时第二个排队，同时存活的子进程数恒为 1
 - [ ] `rg -n 'sk-|api[_-]?key|Authorization' src-tauri/src` 无命中（不打包厂商凭证）
 - [ ] `node scripts/verify-m0.mjs`（M0 端到端脚本）退出码 0
 
-**人工验收**：
+**人工验收**（**前三条于 2026-08-23 首次实测执行完毕**，逐条结论见 [§7 回流记录](#7-回流记录)；执行方式：以受控 `HOME` / `PATH` 造出四种机器状态启动真实桌面应用，逐条截图核对界面文案与 `parse_attempts` 增量。**后两条仍待执行**）：
 
 - [ ] 没有合格 Claude Code CLI 的干净机器上启动应用，不崩溃；未找到时给安装指引，不可执行或版本不可读取时给修复指引，**不得都断言为「未安装」**
 - [ ] **已安装但未登录**的机器上启动，报的是 `agent.not_authenticated` 对应的「去登录」而不是 `agent.backend_unavailable`——两种状态给同一句指引等于没指引
@@ -583,6 +584,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-23（人工验收） | **「已装未登录」在真机上报的是 `agent.spawn_failed`，不是 §3.5 要求的 `agent.not_authenticated`——规格没错，实现错了，已修。** 根因是失败分类器只读 stderr：**Claude Code 2.1.241 未登录时子进程退出码 1、stderr 是 0 字节**，认证失败只写在 stdout 的 stream-json 里（一条 `"error":"authentication_failed"` 事件 + 一条 `"is_error":true` / `"result":"Not logged in · Please run /login"` 的终结事件）。分类器拿到空串落进兜底分支，于是 `runtime` 里 `authenticated = (code == "agent.not_authenticated")` 永远取不到 `false`，界面显示「解析器需要处理／错误码：agent.spawn_failed」——**正是本节禁止的「两种状态给同一句指引」**。改法：`classify_process_failure(stdout, stderr)` 把终结事件里的 `error` 与 `is_error` 为真时的 `result` 抽出来，与 stderr 合成一段信号交给**同一张词表**判定。**两处易踩的坑一并登记**：① 该终结事件的 `subtype` 仍写着 `"success"`，按它判会把失败读成成功；② 不能把整个 stdout 灌进词表——正常解析的输出里本来就有账目文本。§6 新增 1 条自动验收，样本取自本次真实输出 | 人工验收实测（2026-08-23）：`src-tauri/src/agent/claude.rs` 的 `run_sealed` 失败分支；真实 CLI 2.1.241 在干净 `HOME` 下的密封探测输出 |
+| 2026-08-23（人工验收） | **§6 人工验收前三条实测通过，`status` 由 `in-progress` 回到 `review`。** 做法：受控 `HOME` / `PATH` 造出四种机器状态，启动真实桌面应用逐条截图核对。① **三种安装资格失败各给各的指引**——`not_found`→「未安装 Claude Code／先安装解析器」、`not_executable`→「Claude Code 无法执行／修复解析器的执行权限……`chmod +x`」、`version_unreadable`→「Claude Code 版本读取失败／修复这个安装」，三句互不相同，且**三种状态下应用照常启动、账本与导入界面可用**；② **已装未登录**改判后显示「Claude Code 尚未登录／完成一次终端登录／在终端运行 `claude`，按提示登录后回到日簿重试」（修复前后各截一张，见上一行）；③ **人为延迟 readiness probe**（`PATH` 上放一个先 `sleep` 再 `exec` 真 CLI 的同名包装，`--version` 仍立即返回，故安装资格照常通过）——延迟窗口内 pill 恒为「正在检查 Claude Code」、**不出现错误框**、`parse_attempts` 不增，probe 真跑通后才转「考古员已就绪」。**顺带取得的两条事实**：CLI 2.1.241 的实测能力面与 §3.2 仍严格相等（密封未随版本漂移）；`--version` 与真实会话是两条独立路径，所以「安装资格快、readiness 慢」这个中间态在真机上是常态，不是构造出来的 | 人工验收实测（2026-08-23）：四种受控环境下的真实桌面应用截图；`parse_attempts` 计数前后一致 |
+| 2026-08-23（人工验收，**未修，留 M1**） | **「正在检查」窗口里，来源上的「解析」入口看起来完全可点。** 它确实是 `disabled`、点了不会下发任务（`parse_attempts` 全程不增，服务端另有 `agent.not_ready` 兜底），但 `.retry-link` 没有 `:disabled` 样式、`cursor` 仍是 `pointer`——**界面在说反话**。不改的理由是当前前端是功能基线、M1 才定设计稿与 token system（[`docs/PRD.md` §9](../PRD.md)），且它不构成闸门失效；**记在这里是为了 M1 做审核界面时不要漏掉禁用态**这一整类状态 | 人工验收实测（2026-08-23）：`src/styles.css` 的 `.retry-link`、`src/App.tsx` 的 `disabled={!agentView.ready}` |
 | 2026-08-22（M0 修正实现） | **§3.5 的状态矩阵与「命令层返回什么」之间缺一格。** 矩阵把「已发现、尚未探测或探测中」定为 `error_code` 空的非错误态，同一节又要求这一档 fail closed；用户在这个窗口里点「解析」时，命令必须返回一个码而矩阵里没有。新增 `agent.not_ready`（先登记进 [00 §3.7](./00-foundation.md) v0.17 再写代码），只用于「未开始 / 进行中」；probe 跑完但失败的各档仍返回各自的码。**实现相对规格的另外三处澄清**：① 安装资格鉴定是异步的（含 `--version` 子进程），因此 `AgentBackend::status()` 改为 `async`，整批候选的鉴定给一个总预算，避免版本管理器的几十个候选目录把启动拖长；② 多个候选各自失败时按「走得最远的那次」报原因（`version_unreadable > not_executable > not_found`），指向用户最可能真正想用的那个安装；③ `parse_source` **不再隐式补一次 probe**——它此前自己顺手探一次，「probe 未开始」那一档因此根本拦不住 | 本轮实施计划（2026-08-22 获批）；实现与验收：`src-tauri/src/agent/{backend,claude,runtime}.rs`、`src-tauri/src/lib.rs`、`src/agent/presentation.ts` |
 | 2026-08-17（规格证伪与计划审批） | **§3.5 把「CLI 存在且可执行」写成 `probe()` 的全部职责，但 §3.7 与真实实现又让同一个 probe 负责认证、helper 与密封 capability manifest；安装资格和解析就绪度因此没有一个自洽契约。**实现还暴露两处后果：静态发现只检查 `is_file()`，普通但不可执行的文件也会被当成 available；前端在 `available = true`、`authenticated = null` 且无错误时会在异步 probe 完成前显示 ready。按 [`docs/PRD.md` P5](../PRD.md) 的产品决定拆成 Daybook 安装/启动资格、CLI 安装资格、解析 readiness 三层，新增显式 `ready` 语义与 fail-closed 矩阵。由于原规格被证伪，本文由 `review → draft`；产品决定与规格回流方案获批后，人 + agent 把本节写到可开工标准，再由 `draft → ready`。**后续实现仍须从当前 `ready` 规格重新进入 plan mode，由人审实施计划；批准并真正开始开发时才转 `in-progress`。**当前实现尚未修正，不得回到 `review` | [`docs/PRD.md` P5](../PRD.md)（2026-08-17 部分关闭）；现有实现核对：`src-tauri/src/agent/claude.rs` 的 discovery / probe、`src-tauri/src/lib.rs` 的状态拼装、`src/agent/presentation.ts` 的 ready 推导 |
 | 2026-08-13（实现验收） | **§3.2 可信性要求第 6 条的合计词闸门此前无出口也无边界。** ① 词表只认字面量，认不出「一共去了三个地方」这类非金额用法，而唯一的补救路径是「回报合计」——这种口述**无法完成解析**，agent 只能编一个合计（成为闸门 3 的假基准）或被拒到硬超时后整次作废。补第二条路：在 `unparsed_note` 里说明即可完成，产出 `completed_with_gaps`；闸门挡的是**静默**漏报，写了说明就不静默。② 该拒绝**不计次**，是 M0 唯一一处可无限重试的工具拒绝；改为第二次仍未满足即 `agent.protocol_violation`。**「可补救」必须同时意味着「补救不成会结束」**，否则是挂起不是闸门。§6 新增 2 条验收 | M0 实施验收（2026-08-13）代码审查：`complete_source` 的该分支在 `completion_rejections` 计数之前返回 |
@@ -621,6 +625,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.25 | 2026-08-23 | **§6 人工验收前三条实测执行完毕，`status` 由 `in-progress` 回到 `review`。** 三条里两条直接通过（三种安装资格指引各不相同且应用照常启动；延迟 probe 期间恒为「正在检查」、`parse_attempts` 不增、probe 成功后才 ready）；**「已装未登录」一条不通过并暴露一个实现缺陷**——失败分类器只读 stderr，而真实 CLI 未登录时 stderr 为空、原因只在 stdout 的 stream-json 里，界面因此报 `agent.spawn_failed`。已改为两个流合成一段信号交同一张词表判定，§6 新增 1 条自动验收（样本取自真实输出）。**§3 决定与依据一字未改**——本次没有证伪任何规格。另记一条**未修、留 M1** 的界面问题：检查中「解析」入口无禁用态视觉 |
 | v0.24 | 2026-08-23 | **补分类与商户规则的 AI-native 权限边界，`status` 仍为 `in-progress`。** M0/M1 `draft_transaction.category TEXT` 与五工具 / readiness 修正保持不变；M2 才切稳定 `category_id`，M3 `query_memory` 返回分类 ID。自然语言只能生成结构化待确认操作，影响数量由代码重算，用户确认后 domain 执行；分类目录的有界投递方式及具体表 / 工具形状登记为 M2 开工前待决，不在当前实施切片静默加工具 |
 | v0.23 | 2026-08-22 | **M0 修正实现开工，`status` 由 `ready → in-progress`。** §3.5 补第四条实现边界：未就绪时用户显式发起解析由命令层返回新登记的 `agent.not_ready`（[00 §3.7](./00-foundation.md) v0.17），probe 失败各档仍用各自的码。实现落地：安装资格改为「跟随符号链接 + 普通文件 + 执行位 + `--version` 限时非空」并给出三种稳定 `availability_reason`；`BackendStatus` 增 `ready` / `availability_reason`；最近一次探测结论由 `AgentRuntime` 持有并经统一 IPC 合成；`parse_source` 改为 fail-closed 闸门，不再隐式探测。§6 的 5 条自动验收（2 条安装资格 + 3 条 readiness）与 `npm test -- agent/backend-guidance` 已实现并通过；**3 条人工验收待维护者在本机执行，通过后才回 `review`** |
 | v0.22 | 2026-08-17 | **补齐 M3 事项 create/update 与目标消歧的工具边界，`status` 仍为 `ready`。** 新增只读有界 `find_item_candidates`（最多 8 个最小摘要）；`draft_item` 的 ready update 带唯一 target，needs_target update 持久化候选快照并计入完成条数但不可确认。两工具不得搜索/列举全表、不得写事实或确认。该扩展来自 [05 事项](./05-items.md) v0.8，只影响 M3；M0 五工具集合与 v0.21 readiness 修正计划不变 |

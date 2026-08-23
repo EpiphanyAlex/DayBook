@@ -3,7 +3,7 @@ title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑�
 status: ready
 owner: "@maintainer"
 date: 2026-08-23
-version: v0.22
+version: v0.23
 ---
 
 # Daybook 总 PRD
@@ -262,7 +262,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 
 第 9 步用固定文本而非真实语音：转写由 macOS 系统听写完成、音频不出本机、应用零代码（[ADR-0005 §1](./adr/0005-voice-and-system-integration.md)），所以脚本的被测对象是「文本 → 多笔草稿」这一段，转写本身不在测试范围。
 
-**实施状态**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，当前文档为 v0.24、`in-progress`，还差 3 条维护者本机人工验收才可回到 `review`。[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核与草稿区](./prd/03-review.md) v0.15 仍为 `review`。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线，设计稿和 token design system 在 M1 开工前确定。
+**实施状态**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，**其 3 条人工验收于 2026-08-23 在维护者本机实测通过**，01 当前文档 v0.25、回到 `review`。[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核与草稿区](./prd/03-review.md) v0.15 同为 `review`。**那轮人工验收当场抓到一个自动门禁抓不到的实现缺陷**：「已装未登录」报的是 `agent.spawn_failed` 而非 `agent.not_authenticated`——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr；当天修复并补了一条以真实输出为样本的自动验收（[01 §7](./prd/01-agent-runtime.md)）。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线，设计稿和 token design system 在 M1 开工前确定。
 
 ### 9.4 M0 的 go / no-go（2026-08-10 新增）
 
@@ -399,6 +399,7 @@ v1 只需保证数据形状（一条时间轴 + 两个实体）不挡住这条�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.23 | 2026-08-23 | **同步 M0 当前状态，产品范围不变。** [01 Agent 运行时](./prd/01-agent-runtime.md) → v0.25 `review`：3 条人工验收实测通过，M0 四份 sub-PRD 现在都是 `review`。当天修掉「已装未登录报错码不对」这一只有真机才暴露的实现缺陷。**§9.4 的真实样本 go / no-go 仍未做，M0 仍不得称 done** |
 | v0.22 | 2026-08-23 | **同步当前 M0 修正状态与里程碑依赖，产品范围不变。** 01 的 readiness 修正已在 v0.23 实现批次落地，当前文档 v0.24、`in-progress`，还差 3 条人工验收；00 v0.18、02 v0.15、03 v0.15 保持 `review`。M2 的涉及范围补全为 00/01/02/03/04，M3 补全为 00/01/03/05/06，避免分类 schema、工具权限与确认闸门在实施计划中被漏掉 |
 | v0.21 | 2026-08-17 | **事项规格由「待办 + 时间日志」重写为同一实体的「计划 + 结果」。** 设计评审证伪了「没有自动痕迹 ⇒ 不能记录实际时段」的推导：用户明确口述本身就是来源；正确边界是不从计划、点击时刻或系统活动编造结果。§5.2 增加不定时日期、时间点、最长 24 小时时间块、粗粒度日期范围、独立截止约束、单清单、周视图、自然语言 create/update 草稿与直接操作审计；删除每周实际用时汇总与 `in_progress`，§6 明确完整日历能力当前延期。同步 [05 事项](./prd/05-items.md) v0.8、[ADR-0004](./adr/0004-data-model-sqlite-integer-money.md)、[ADR-0005](./adr/0005-voice-and-system-integration.md)、[03 审核](./prd/03-review.md) v0.14、[`docs/CONTEXT.md`](./CONTEXT.md) v0.11 与根 [`CLAUDE.md`](../CLAUDE.md)。同批把 §4、[ADR-0002](./adr/0002-ai-never-writes-directly.md) 与 [`docs/architecture.md`](./architecture.md) 的批量准入统一为只看 `confirmation_policy`，并扩充规格不变式防回退 |
 | v0.20 | 2026-08-17 | **开放问题 P5 部分关闭：安装资格与解析就绪度正式拆开。** Daybook 的安装/启动不以 agent CLI 状态为前提；解析另做主动就绪探测，合格可执行文件、可读版本、CLI 自身认证、MCP helper 与密封 capability manifest 缺一不可，探测完成前 fail closed。该决定证伪了 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 原先把静态发现与完整探测混在 `probe()` 一句话里的规格，也暴露当前界面可能在探测完成前短暂显示 ready；01 重写为 v0.21 并由 `review → draft → ready`；后续须从 ready 规格产出实施计划、经人批准并真正开工后才进入 `in-progress`。日志默认 14 天也从 P5 未决清单移除。同步修正 `verify-m0.mjs` 的验收选择器门禁：只对已进入实施的 `in-progress / review / done` 强制命中真实测试，避免 `ready` 规格被错误要求先有实现；其余发布项仍开放 |
