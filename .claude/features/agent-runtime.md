@@ -1,6 +1,6 @@
 # Agent 运行时
 
-> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-08-22
+> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-08-23
 
 ## 一句话
 
@@ -52,6 +52,7 @@ AgentRuntime::parse_source
   - 解析就绪度在 `AgentRuntime` 的 readiness cell（`NotProbed / Probing / Failed(AppError) / Ready`），**只由 `probe()` 写**。任务期失败（额度、超时、网络）不写它——那些不改写安装事实。
   - `AgentRuntime::status()` 把两者合成 `BackendStatus`；**前端不再拼装、不再反推 ready**。
 - **`parse_source` 是 fail-closed 闸门**：readiness 非 `Ready` 直接返回——`Failed` 返回那次探测自己的码（`agent.not_authenticated` / `agent.tool_surface_unsealed` / …），`NotProbed` 与 `Probing` 返回 `agent.not_ready`。**它不再隐式补一次 probe**；探测由启动时的 `probe_agent` 或用户显式重试触发。本位币检查仍在最前面（`data.base_currency_required`，不属于 readiness）。
+- **子进程失败原因要同时读 stdout 与 stderr**（`classify_process_failure`）：CLI **未登录时退出码 1、stderr 是 0 字节**，原因只在 stdout 的 stream-json 里——一条 `"error":"authentication_failed"` 事件加一条 `"is_error":true` / `"result":"Not logged in · Please run /login"` 的终结事件。两处抽出来与 stderr 合成一段信号，交**同一张词表**判定。**别按 `subtype` 判**：那条终结事件的 `subtype` 仍写着 `"success"`。也**别把整个 stdout 灌进词表**——正常解析的输出里本来就有账目文本。
 - 密封配置清空 built-in tools、settings、skills、用户 MCP、auto-memory 与可调用 subagent；实测 manifest 多一项就返回 `agent.tool_surface_unsealed`。
 - CLI 仍会声明不可调用的 `general-purpose` agent。只有在 `Agent` / `Task` 工具存在时 agent 定义才算有效能力；hook 不享受这个例外。
 - attempt 在 spawn 前插入。失败、超时、取消、协议失败按 attempt 作废草稿；作废是置 `voided_at` 并写 system 审计，不删行。
@@ -68,6 +69,7 @@ AgentRuntime::parse_source
 - **测试里解析之前要先 `runtime.probe(...)`**（`runtime.rs` 的 `probed()` 助手）。修正前 `parse_source` 自己顺手探一次，所以老用例不用管就绪度；现在不探就是 `agent.not_ready`。
 - 三种安装失败原因在 UI 上是**三句不同的话**（`src/agent/presentation.ts`）：没找到 → 去装，不可执行 → `chmod`，版本读不出 → 修这个安装。都说成「未安装」等于没指引。
 - `--safe-mode` 会把显式 `--mcp-config` 一起屏蔽，不能用于生产密封启动。
+- **「已装未登录」这一档只有真机能验**：`cargo test` 与 `verify-m0.mjs` 都测不到它，2026-08-23 人工验收才发现界面报的是 `agent.spawn_failed`。复现方式：把 `HOME` 指到一个空目录再起应用（CLI 的凭证在 `$HOME/.claude.json`，换 `HOME` 即未登录），`PATH` 里放一个指向真 CLI 的同名符号链接。同一套受控 `HOME` / `PATH` 也能造出 `not_found` / `not_executable` / `version_unreadable` 三态，以及「`--version` 立即返回、真实会话先 `sleep` 再 exec」的延迟 probe。
 - Claude Code 2.1.229 在有 `structuredContent` 时不把第二个 text content block 交给模型；口述正文因此同时放在 `structuredContent.text`。
 - 探测会真实调用一次无副作用工具来逼出 hook 事件，会消耗少量 CLI 额度。
 - managed policy 不保证在 init 中声明，是规格登记的残余风险。

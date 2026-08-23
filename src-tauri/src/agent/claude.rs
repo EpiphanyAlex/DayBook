@@ -280,8 +280,9 @@ impl ClaudeCodeBackend {
                 .map_err(|error| AppError::storage(format!("stderr 采集任务失败：{error}")))??,
         };
         if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(classify_process_error(&stderr));
+            return Err(classify_process_failure(&stdout, &stderr));
         }
         Ok(output)
     }
@@ -668,8 +669,52 @@ fn string_at(value: &Value, path: &[&str]) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn classify_process_error(stderr: &str) -> AppError {
-    let normalized = stderr.to_ascii_lowercase();
+/// **失败原因不一定落在 stderr 上。**（2026-08-23 人工验收实测，Claude Code 2.1.241）
+///
+/// 未登录时子进程退出码是 1、**stderr 是 0 字节**，认证失败只写在 stdout 的 stream-json 里：
+/// 一条 `"error":"authentication_failed"` 的事件，加一条 `"is_error":true` /
+/// `"result":"Not logged in · Please run /login"` 的终结事件。只读 stderr 的分类器拿到空串，
+/// 落到兜底分支 `agent.spawn_failed`，于是「该去登录」和「不知道出了什么事」变成同一句话——
+/// [01 §3.5](../../../docs/prd/01-agent-runtime.md) 明令禁止的正是这件事。
+///
+/// 两个流合成一段信号后交给**同一张词表**判定，避免 stdout 与 stderr 各判各的再分叉。
+fn classify_process_failure(stdout: &str, stderr: &str) -> AppError {
+    let mut signal = stderr.trim().to_owned();
+    for line in stream_json_failure_signals(stdout) {
+        if !signal.is_empty() {
+            signal.push('\n');
+        }
+        signal.push_str(&line);
+    }
+    classify_process_error(&signal)
+}
+
+/// 只取两处承载失败原因的字段：任一事件的顶层 `error`，以及 `is_error` 为真的终结事件的
+/// `result` 文本。**不能按 `subtype` 判**——认证失败那条终结事件的 `subtype` 仍写着
+/// `"success"`，跟着它走会把失败读成成功。整个 stdout 塞进词表同样不行：正常解析的输出里
+/// 本来就会出现账目文本，误判概率不受控。
+fn stream_json_failure_signals(stdout: &str) -> Vec<String> {
+    let mut signals = Vec::new();
+    for line in stdout.lines() {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if let Some(error) = event.get("error").and_then(Value::as_str) {
+            signals.push(error.to_owned());
+        }
+        if event.get("type").and_then(Value::as_str) == Some("result")
+            && event.get("is_error").and_then(Value::as_bool) == Some(true)
+        {
+            if let Some(result) = event.get("result").and_then(Value::as_str) {
+                signals.push(result.to_owned());
+            }
+        }
+    }
+    signals
+}
+
+fn classify_process_error(signal: &str) -> AppError {
+    let normalized = signal.to_ascii_lowercase();
     if normalized.contains("not logged in")
         || normalized.contains("authentication")
         || normalized.contains("login required")
@@ -678,24 +723,24 @@ fn classify_process_error(stderr: &str) -> AppError {
             "agent.not_authenticated",
             "Claude Code 已安装但尚未登录，请先在终端完成登录",
         )
-        .with_detail(json!({ "stderr": stderr.trim() }));
+        .with_detail(json!({ "failure_signal": signal.trim() }));
     }
     if normalized.contains("quota")
         || normalized.contains("usage limit")
         || normalized.contains("rate limit")
     {
         return AppError::new("agent.quota_exhausted", "Claude Code 当前额度不足")
-            .with_detail(json!({ "stderr": stderr.trim() }));
+            .with_detail(json!({ "failure_signal": signal.trim() }));
     }
     AppError::new(
         "agent.spawn_failed",
-        if stderr.trim().is_empty() {
+        if signal.trim().is_empty() {
             "Claude Code 子进程异常退出".to_owned()
         } else {
-            stderr.trim().to_owned()
+            signal.trim().to_owned()
         },
     )
-    .with_detail(json!({ "stderr": stderr.trim() }))
+    .with_detail(json!({ "failure_signal": signal.trim() }))
 }
 
 fn discover_claude() -> Vec<PathBuf> {
@@ -769,6 +814,52 @@ fn node_version_manager_candidates(home: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod agent {
     use super::*;
+
+    /// **2026-08-23 人工验收抓到的真实样本**（Claude Code 2.1.241，干净 `HOME` 下的密封探测）：
+    /// 退出码 1、stderr **0 字节**，失败原因全在 stdout。字段照抄真实输出，只删掉与判定无关的
+    /// usage / uuid 噪声。
+    const UNAUTHENTICATED_STDOUT: &str = concat!(
+        r#"{"type":"system","subtype":"init","tools":["mcp__daybook__read_source"],"apiKeySource":"none"}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","type":"message"},"error":"authentication_failed"}"#,
+        "\n",
+        r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","terminal_reason":"api_error"}"#,
+        "\n",
+    );
+
+    /// [01 §3.5](../../../docs/prd/01-agent-runtime.md)：「已装未登录」必须报 `agent.not_authenticated`。
+    /// 修正前分类器只读 stderr，而这份样本的 stderr 是空的——界面因此显示 `agent.spawn_failed`，
+    /// 「去登录」和「不知道出了什么事」变成同一句话。
+    #[test]
+    fn auth_failure_is_classified_from_stream_json() {
+        assert_eq!(
+            classify_process_failure(UNAUTHENTICATED_STDOUT, "").code,
+            "agent.not_authenticated"
+        );
+
+        // **不能按 `subtype` 判**：这条终结事件明明 `is_error`，`subtype` 却仍写着 `success`。
+        assert!(UNAUTHENTICATED_STDOUT.contains(r#""subtype":"success""#));
+
+        // stderr 那条老路不能因此失效。
+        assert_eq!(
+            classify_process_failure("", "Not logged in").code,
+            "agent.not_authenticated"
+        );
+        assert_eq!(
+            classify_process_failure("", "usage limit reached").code,
+            "agent.quota_exhausted"
+        );
+
+        // 成功的解析输出里本来就会出现账目文本，不得被当成失败信号。
+        let succeeded = concat!(
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"已起草 3 条，合计 168.00 AUD"}"#,
+            "\n",
+        );
+        assert_eq!(
+            classify_process_failure(succeeded, "").code,
+            "agent.spawn_failed"
+        );
+    }
 
     #[test]
     fn probe_covers_builtin_tools() {
