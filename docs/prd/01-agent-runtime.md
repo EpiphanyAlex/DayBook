@@ -2,8 +2,8 @@
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: in-progress
 owner: "@maintainer"
-date: 2026-08-22
-version: v0.23
+date: 2026-08-23
+version: v0.24
 ---
 
 # 01 · Agent 运行时
@@ -65,10 +65,10 @@ version: v0.23
 |---|---|---|---|---|
 | `list_pending_sources` | **M0** | 列出待解析的来源 | ∅ | **仅本次任务指派的来源**（M0 恒为 1 个）；不得遍历 `sources` 全表 |
 | `read_source` | **M0** | 读一个来源的元数据与证据文件；`utterance` 正文同时进入 `structuredContent.text` | ∅ | **仅本次任务指派的来源**；`source_id` 不在指派集合内 → `agent.tool_rejected` |
-| `draft_transaction` | **M0** | 起草一笔交易 | `{draft_transactions}` | ∅ |
+| `draft_transaction` | **M0** | 起草一笔交易；M0/M1 的分类参数仍是可空文本，M2 随 [04 分类](./04-transactions.md) 迁为可空 `category_id` | `{draft_transactions}` | ∅ |
 | `report_source_total` | **M0** | 回报它在来源上看到的合计 | `{parse_attempts.reported_total_*}`（列级，**只写本次尝试那一行**） | ∅ |
 | `complete_source` | **M0** | **声明「这个来源我读完了」**，附条目数与未解析区域 | `{parse_attempts.reported_item_count, .unparsed_note}`（列级，同上） | ∅ |
-| `query_memory` | M3 | 查记忆规则 | ∅ | **仅显式传入的键**（商户名、语境词）；**不提供「列出全部规则」** |
+| `query_memory` | M3 | 查记忆规则；`merchant_category` 返回稳定 `category_id`，不返回会随改名漂移的分类名 | ∅ | **仅显式传入的键**（商户名、语境词）；**不提供「列出全部规则」** |
 | `find_item_candidates` | M3 | 为当前来源中的修改意图查找有界事项候选 | ∅ | 每次最多返回 8 个 `id / title / status / plan摘要 / result摘要 / due / list`；不得列出全表，不返回来源、审计或完整备注 |
 | `draft_item` | M3 | 起草事项的新建或对已有事项的更新/待消歧意图 | `{draft_items}` | target/candidate id 必须来自本次 `find_item_candidates` 快照；不得自行搜索/列举 `items` |
 
@@ -86,6 +86,19 @@ version: v0.23
 - `drafted_json` 完整冻结 operation、resolution_state、目标/候选与原始 patch，确认后的事实更新仍由 [03 审核](./03-review.md) 的人工确认路径完成。
 
 这项 M3 扩展不改变 M0 的五工具集合、密封能力探测或当前安装资格/解析就绪度实现计划。
+
+#### 分类体系与商户分类规则的对话操作（M2/M3 边界，2026-08-23 产品决定）
+
+分类管理遵守 [04 交易 §3.3](./04-transactions.md) 的 AI-native 路径：自然语言只让 agent 生成**结构化待确认操作**，用户在 [03 审核](./03-review.md) 看到影响范围与明细并确认后，确定性 domain 代码才可修改分类、规则或历史事实。
+
+- **M2 分类目录**：新增、含义不变的重命名、停用、删除、合并、拆分与历史重分类都只能形成待确认提案；agent 没有直接写 `categories` / `transactions` / `draft_transactions` 当前值或 `audit_log` 的工具
+- **M3 商户分类规则**：用户明确说「以后 X 归 Y」时，可形成一次规则提案；用户确认后由代码写规则，不等待两次被动纠正。审核中被动重复纠正的升格仍由 [06 记忆 §3.3](./06-memory.md) 定义
+- 高影响提案必须携带足够让代码查询并展示影响范围的稳定目标 ID；**agent 自报的数量不作为确认基准**。M2 由代码重算分类、事实交易与活跃交易草稿的数量 / 明细，M3 记忆启用后再纳入规则
+- 历史拆分需要 agent 给商户分组建议时，未来读取能力只可覆盖**用户这次选中的源分类**，且由代码提供最小商户分组 / 交易摘要；不得借分类管理获得列举全账本、来源证据或完整备注的能力（与本节「只读 ≠ 无限读」同一原则）
+- 用户要求「过去也改」时，规则提案与历史批量改类是两个可区分的操作；规则默认只影响未来，不能把一句「以后」解释成历史回写
+- 对话文本不作为 `memory_rules` 的 value 持久化；持久化的是确认后的结构化规则与 append-only 审计（[06 记忆 §3.1](./06-memory.md)）
+
+**本次只固定能力与权限边界，不命名新工具或新草稿表。** [00 地基 §5](./00-foundation.md) R12 已登记「待确认操作如何持久化 / 使用哪些有界工具」；该方案须在 M2 开工前人审，并按 §3.7 纳入对应里程碑的精确 capability manifest。当前 M0 五工具、`tool_surface_version`、readiness probe 与在实施的 v0.23 修正一项不变。
 
 #### `complete_source`：没有完成协议，`parsed` 就是猜的（2026-08-10 新增，产品决定）
 
@@ -309,6 +322,7 @@ trait AgentBackend {
 - 提示词模板存为**独立文件**，不硬编码在 Rust 字符串里——便于调整与 diff
 - **提示词模板是「程序记忆」，只能由应用版本或人工编辑更新，不得被模型修改。**「程序记忆」指的是**规定 agent 怎么做事的那部分**（提示词、模板、流程），它与 agent 记住的事实（[06 记忆](./06-memory.md)）分属两类：后者随使用积累，前者只能由人改。事实上工具面里没有写文件的工具，所以 agent 现在改不了——**但那是巧合，不是设计**，因此在此明写。任何未来新增的工具都不得让 agent 触及提示词目录
 - **控制流由代码决定**（[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）：是否入库、是否重试、总额是否通过，全由 Rust 侧判断，不问 agent
+- **M2 分类目录同样由代码给出**：agent 只能选当前有效分类或留空，不能在 `draft_transaction` 里用一个陌生名称静默创建分类。分类目录如何有界送入任务（任务上下文或只读工具）尚未批准，列入 §5 R8，M0/M1 继续使用当前可空文本参数
 
 ### 3.7 密封启动配置：有效工具集必须等于 §3.2（2026-08-10 新增，依据 [ADR-0003 §3](../adr/0003-agent-runtime-and-pluggable-backend.md)）
 
@@ -490,6 +504,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 | R4（**2026-08-12 补实测出处，风险等级上调**） | Anthropic 订阅额度政策若再变（[`docs/PRD.md` §12](../PRD.md)），Claude Code 后端可能失效。**R6 spike 第 ③ 项核实的结果不是绿灯**：当下 `claude -p` 确实仍走订阅额度（实测跑通，认证来源为订阅登录而非 API key），但厂商的[法务与合规文档](https://code.claude.com/docs/en/legal-and-compliance)写着「OAuth 认证**仅面向**订阅计划购买者，用于 Claude Code 与其他原生应用的**寻常使用**」「构建产品或服务的开发者**应当使用 API key 认证**」；且该政策**已被改过一次又撤回**——原定 2026-06-15 起 Agent SDK 与 `claude -p` 不再计入订阅额度，当天挂出暂缓公告（[出处](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)）。**机制已经建好并上过一次膛** | 全产品 | 对策仍是可插拔接口，但**从「接口先摆着」提为「第二个后端实现要真能跑」**。判据：Daybook 不提供厂商登录、不打包凭证、不代理不转发（[`CLAUDE.md`](../../CLAUDE.md) 约束 11 已禁这三件事），链路里没有我们的服务端，因此不构成「代用户路由请求」；**但这是一种读法，不是厂商的书面豁免**。**不阻塞 M0**，M4 打包发布前必须重新核实一次当时的条款 |
 | ~~R6~~ **已关闭（2026-08-12）** | **MCP server 的进程归属**：§3.1 原要「主进程内起」，§3.4 原要「Tauri spawn CLI 并把 server 的 stdio 端接上」——两者互斥。三条候选：① 独立 MCP helper 二进制 + Unix domain socket；② 应用自身二进制加 `--mcp-stdio` 子命令；③ 改用 Agent SDK / 库内嵌 | 本文 §3.1 §3.4 §4；[ADR-0003 §1](../adr/0003-agent-runtime-and-pluggable-backend.md)；[`docs/architecture.md`](../architecture.md) | **结论：候选 ①**（独立 helper 二进制 + Unix domain socket）。四项检查已于 2026-08-12 全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)（`claude` 2.1.228 · `rmcp` 3.1.2）。逐项：**①** 候选 ① 与 ② 都实测跑通，**候选 ③ 被 [`CLAUDE.md`](../../CLAUDE.md) 约束 1 挡在实测之前**（Rust 无 Agent SDK，内嵌等于引入 Node/Python 运行时）；选 ① 的理由是**把全部 SQLite 写入收敛到主进程一处**，否决 ② 的完整理由见 §4。**②** MCP 配置契约已确认（内联 JSON 亦可、`env` 会传到子进程、工具命名空间 `mcp__<server>__<tool>`、必须带只用指定配置的开关，否则用户侧 server 会混入）。**③** 厂商条款**不是绿灯**，结论与出处已回流本表 R4 与 [`docs/PRD.md` §12](../PRD.md)。**④** 密封配置实测可达成（内置工具清零、MCP 工具恰好等于我们注入的那组、插件与技能归零，且**订阅登录仍可用**）；探测**过了「机器可读」这条要件**，**「对全部来源权威」只过了一半**——hook 不在握手信息里，改为「主动引发一次工具调用把它逼进事件流」，两处盲区已在 §3.7 如实登记。**两处规格被实现证伪并已改**：`input_schema` 后端不提供（§3.7 已删除该字段并写明兜底）；(a)「探测需单独起进程」由假定升为**实测确认**（握手只在收到提示后才发出）。**未做的一项，如实登记**：`Stop` / `SessionEnd` / `PreCompact` 等 hook 事件是否也如实进流，本次未逐个验证 |
 | ~~R5~~ **已关闭（2026-08-07）** | agent 会话 ID 的粒度——一次导入一个会话，还是一个来源一个会话 | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) schema | **结论：一个来源一个会话**（2026-08-10 精确为「一个来源**一次尝试**一个会话」）。理由是 §3.4 的作废语义要能只作废本次的草稿——若一次导入共用一个会话，批量导入时某一张超时会波及同批其他来源的草稿。落点由「两列 `agent_session_id`」改为 **`parse_attempts` 一行 + 草稿上的 `attempt_id`**（[00 地基 §3.6](./00-foundation.md)），会话 ID 现在只存在尝试行上；**结论未变，键更直接了**（重试同一来源会产生第二行，旧写法下两次重试的 `agent_session_id` 都挂在同一个 `sources` 行上，后者覆盖前者） |
+| R8（**新增 2026-08-23**） | M2 分类目录与用户所选源分类的最小历史候选如何有界交给 agent（任务上下文或只读工具），以及分类 / 规则结构化待确认操作使用哪些表与工具；任何方案都必须保持 agent 不能列举全账本、不能直写分类、规则或历史事实 | 本文 §3.2/§3.6、[00 地基 §5](./00-foundation.md) R12、[03 审核 §3.6](./03-review.md) | M2 开工前出边界方案并人审；工具一旦定名，同步当前里程碑精确工具集、`tool_surface_version` 与密封探测，不改 M0 五工具 |
 
 ## 6. 验收标准
 
@@ -521,6 +536,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::tools_declare_read_scope` 通过——每个工具都声明了读取范围，遍历该声明可断言无「全表/全库」范围
 - [ ] `cargo test agent::read_source_rejects_unassigned` 通过——`read_source` 传入未指派的 `source_id` 时返回 `agent.tool_rejected`，不返回数据
 - [ ] `cargo test agent::query_memory_has_no_list_all` 通过（**M3**）——工具签名要求显式键，不存在「列出全部规则」的调用形式
+- [ ] `cargo test agent::m2_category_selection_uses_active_ids_only` 通过（**M2**）——分类目录启用后，`draft_transaction` 只接受同 direction 的有效 `category_id` 或空；陌生 ID、停用项、合并墓碑均被拒，且不会创建分类
+- [ ] `cargo test agent::category_operations_cannot_write_directly` 通过（**M2**）——分类对话能力只能产出待确认提案；注册工具的写集合与 `{categories, transactions, memory_rules}` 交集为空
+- [ ] `cargo test agent::explicit_rule_command_yields_proposal` 通过（**M3**）——「以后 X 归 Y」只生成一条指向稳定分类 ID 的提案，确认前 `memory_rules` 与历史事实均不变
 - [ ] `cargo test agent::trace_log_has_no_content` 通过——`trace` 级写入路径产生的记录中不含金额字段、`evidence_text` 或 prompt 文本
 - [ ] `cargo test agent::debug_log_is_replayable` 通过——`debug` 级记录的工具调用序列可被反序列化并原样重放（[07 评测 §3.6](./07-eval.md)）
 - [ ] `rg -n 'prompts/' src-tauri/src/mcp` 无命中——工具面不触及提示词目录（§3.6 程序记忆）
@@ -603,6 +621,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.24 | 2026-08-23 | **补分类与商户规则的 AI-native 权限边界，`status` 仍为 `in-progress`。** M0/M1 `draft_transaction.category TEXT` 与五工具 / readiness 修正保持不变；M2 才切稳定 `category_id`，M3 `query_memory` 返回分类 ID。自然语言只能生成结构化待确认操作，影响数量由代码重算，用户确认后 domain 执行；分类目录的有界投递方式及具体表 / 工具形状登记为 M2 开工前待决，不在当前实施切片静默加工具 |
 | v0.23 | 2026-08-22 | **M0 修正实现开工，`status` 由 `ready → in-progress`。** §3.5 补第四条实现边界：未就绪时用户显式发起解析由命令层返回新登记的 `agent.not_ready`（[00 §3.7](./00-foundation.md) v0.17），probe 失败各档仍用各自的码。实现落地：安装资格改为「跟随符号链接 + 普通文件 + 执行位 + `--version` 限时非空」并给出三种稳定 `availability_reason`；`BackendStatus` 增 `ready` / `availability_reason`；最近一次探测结论由 `AgentRuntime` 持有并经统一 IPC 合成；`parse_source` 改为 fail-closed 闸门，不再隐式探测。§6 的 5 条自动验收（2 条安装资格 + 3 条 readiness）与 `npm test -- agent/backend-guidance` 已实现并通过；**3 条人工验收待维护者在本机执行，通过后才回 `review`** |
 | v0.22 | 2026-08-17 | **补齐 M3 事项 create/update 与目标消歧的工具边界，`status` 仍为 `ready`。** 新增只读有界 `find_item_candidates`（最多 8 个最小摘要）；`draft_item` 的 ready update 带唯一 target，needs_target update 持久化候选快照并计入完成条数但不可确认。两工具不得搜索/列举全表、不得写事实或确认。该扩展来自 [05 事项](./05-items.md) v0.8，只影响 M3；M0 五工具集合与 v0.21 readiness 修正计划不变 |
 | v0.21 | 2026-08-17 | **安装资格 / 解析就绪度规格重写，`status` 由 `review → draft → ready`。** §3.5 拆开 Daybook 安装启动、CLI 合格安装与完整 readiness probe：可执行文件 + 可读版本只说明 CLI 可用候选，认证 + helper + 密封 capability manifest 全过才 `ready = true`；探测完成前 fail closed，后端失败不阻止应用启动，本位币仍是任务级前置。补 IPC 状态矩阵、7 条自动验收与 1 条人工验收。当前实现存在 `is_file()` 假阳性与 probe 前短暂假 ready；下一步须从当前 ready 规格产出实施计划、经人批准并真正开始开发时转 `in-progress`，验收通过后才回到 `review` |

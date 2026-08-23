@@ -2,8 +2,8 @@
 title: 06 记忆 Memory — 商户映射、纠正沉淀与语境词表
 status: draft
 owner: "@maintainer"
-date: 2026-08-10
-version: v0.6
+date: 2026-08-23
+version: v0.7
 ---
 
 # 06 · 记忆 Memory
@@ -19,7 +19,7 @@ version: v0.6
 
 降第一项的唯一办法：把用户已经做过的判断记住，下次不要再问。
 
-- 用户第一次把 `SUPERMARKET 1234 CENTRAL` 改成「日用」——第二次就不该再猜错
+- 用户第一次把 `SUPERMARKET 1234 CENTRAL` 改成「食品杂货」——第二次就不该再猜错
 - 用户说「家里那笔」指的是家庭支出——系统该知道
 - 语音听写把「FreshMart」听成「fresh mart」——该有专有名词表纠正
 
@@ -44,7 +44,7 @@ version: v0.6
 
 | 存 | 不存 |
 |---|---|
-| 「`SUPERMARKET *` → 日用」这条映射 | 用户和 agent 说过的话 |
+| 「`SUPERMARKET *` → 食品杂货」这条映射 | 用户和 agent 说过的话 |
 | 「用户把 X 改成了 Y，第 3 次了」这个计数 | 完整的解析上下文 |
 | 「『家里那笔』= 家庭支出」这条语境 | agent 的推理过程 |
 
@@ -58,7 +58,7 @@ version: v0.6
 
 | 类型 | 键 | 值 | 来源 |
 |---|---|---|---|
-| `merchant_category` | 商户文本模式 | 分类 | [03 审核与草稿区](./03-review.md) 的纠正事件 |
+| `merchant_category` | 商户文本模式 | **稳定 `category_id`**（不是展示名） | [03 审核与草稿区](./03-review.md) 的纠正事件，或用户明确的「以后 X 归 Y」指令经确认 |
 | `merchant_normalize` | 商户原文模式 | 归一化名 | 纠正事件 |
 | `context_term` | 用户用语（「家里那笔」） | 语义（家庭支出） | 用户手工录入 |
 | `speech_term` | 易听错的词 | 正确写法（`FreshMart`） | 用户手工录入 + 听写纠正 |
@@ -67,13 +67,14 @@ version: v0.6
 
 | 列 | 说明 |
 |---|---|
-| `id` · `kind` · `pattern` · `value` | 规则本体 |
+| `id` · `kind` · `pattern` · `value` | 规则本体；`merchant_category` 的 value 语义是 [04 分类](./04-transactions.md) 的稳定 `category_id`，其余 kind 仍是文本值。M3 必须把该引用做成数据库可约束的形状，不能只存会随改名漂移的名称；最终列 / CHECK 形状见 §5 R8 |
 | `specificity` | **匹配具体度**（整数，越大越具体），供 §3.6 冲突裁决。由 `pattern` 计算后落库，不在查询时算 |
 | `hit_count` · `last_hit_at` | 命中统计，供记忆页展示。**2026-08-10 起不再用于冲突裁决**，见 §3.6 |
 | `created_by` | `human`（手工录入）/ `derived`（从纠正升格） |
 | **`approved_at`** | **审批时间**——用户点头同意「以后都这样」的那一刻 |
 | **`last_affirmed_at`** | **用户最近一次主动认可这条规则**。§3.6 冲突裁决的第二判据——**只由三种明确动作更新**，见下方 |
 | **`disabled_at` · `disabled_reason`** | **停用原因**——自动停用（§3.6）或用户手动停用 |
+| **`deleted_at`** | **软删除墓碑**——删除后不参与查询或冲突裁决，但规则行、稳定分类目标与 provenance 保留，用于证明分类曾被规则引用并维持审计可追溯性 |
 
 这几组对应「**用户确认的知识**」应有的可追溯性——**它从哪来、谁在何时点的头、为什么不再生效**。补它们的理由是具体的：
 
@@ -122,19 +123,21 @@ version: v0.6
 | `attempt_id` → `parse_attempts(id)` | 哪次解析（[00 地基 §3.6](./00-foundation.md)） |
 | `outcome` | `retrieved`（规则被 `query_memory` 返回了）/ **`consistent_with_rule`**（草稿的值与规则一致）/ `overridden`（用户在审核时改掉了这个值） |
 
-**三个状态全部由代码观察得出，不问 agent**：`retrieved` 来自工具调用的返回内容；`consistent_with_rule` 是「草稿写入时该字段值 == 规则的 `value`」；`overridden` 是「确认入库的值 != 规则的 `value`」。**这是观察，不是分类**——代码没有在做任何业务判断，因此不触碰 [`CLAUDE.md`](../../CLAUDE.md) 约束 15。
+**三个状态全部由代码观察得出，不问 agent**：`retrieved` 来自工具调用的返回内容；`consistent_with_rule` 是「草稿写入时 `category_id ==` 规则目标分类 ID」（其他规则则比较各自字段）；`overridden` 是「确认入库的值 != 规则目标」。**这是观察，不是分类**——代码没有在做任何业务判断，因此不触碰 [`CLAUDE.md`](../../CLAUDE.md) 约束 15。
 
-> **中间那个状态 2026-08-10 由 `applied` 改名。** `applied` 读起来像「agent 因为这条规则才这么写」，但系统观察不到因果——值一致也可能是模型本来就会这么分（`SUPERMARKET` 归日用不需要规则也猜得到）。名字里带因果，读数的人就会把相关当成因果去解释增益。**因果只能靠 `--no-memory` 对照测**（[07 评测 §3.4](./07-eval.md)），不能靠这一列。
+> **中间那个状态 2026-08-10 由 `applied` 改名。** `applied` 读起来像「agent 因为这条规则才这么写」，但系统观察不到因果——值一致也可能是模型本来就会这么分（`SUPERMARKET` 归食品杂货不需要规则也猜得到）。名字里带因果，读数的人就会把相关当成因果去解释增益。**因果只能靠 `--no-memory` 对照测**（[07 评测 §3.4](./07-eval.md)），不能靠这一列。
 
 由此可算三个数：**一致率**（`consistent_with_rule` / `retrieved`，**相关，不是因果**）、**误导率**（`overridden` / `consistent_with_rule`）、**规则增益**（`--no-memory` 对照轮次的纠正率之差，**这一个才是因果**）。§3.6 的自动停用也从「数用户推翻了几次」变成一句对本表的查询。
 
 ### 3.3 规则的产生
 
-- **不是 AI 自主学习**——规则只由两条路径产生：
-  1. **用户在审核界面的纠正**（[03 审核与草稿区 §3.6](./03-review.md) 投递纠正事件）
-  2. **用户手工录入**
-- **纠正 → 规则的门槛**：同一个 (商户模式, 目标分类) 被纠正 **≥ 2 次**才升格为规则。一次可能是特例，两次是模式
-- **升格时通知用户**：「以后 `SUPERMARKET *` 都归日用？」——**不静默学习**。用户必须知道系统学到了什么
+**不是 AI 自主学习。** 规则只由用户最终确认的三条路径产生：
+
+1. **审核中的被动纠正**（[03 审核与草稿区 §3.6](./03-review.md) 投递纠正事件）：同一个 `(商户模式, 目标 category_id)` 第一次只记录纠正，累计 **≥ 2 次**才询问「以后都这样吗」；明确批准后升格。一次可能是特例，两次才足以提问
+2. **用户明确下指令**：「以后 `SUPERMARKET *` 都归食品杂货」。这已经表达了规则意图，不需要先制造两次纠正；agent 生成结构化提案，用户一次确认后生效（[01 Agent 运行时 §3.2](./01-agent-runtime.md)、[03 审核 §3.6](./03-review.md)）
+3. **用户在记忆页手工录入 / 编辑**
+
+三条路径都必须有人工确认，区别只在**何时有资格提出**。明确指令一次确认不是「一次被动纠正立刻学习」，因此不推翻 §4 否决的替代方案。规则默认只影响未来草稿；用户同时要求「过去也改」时，另生成 [04 交易 §3.3](./04-transactions.md) 的历史批量改类操作，展示明细后单独确认。
 
 ### 3.4 规则的应用
 
@@ -161,7 +164,7 @@ query_memory(
 
 1. **批量查，不逐条查** —— 一次调用带上本次解析出的全部键，避免 30 个商户 30 次往返
 2. **工具只按键回答，不提供「列出全部规则」** —— 否则 agent 能把个人语境词表整个拉进上下文（[01 Agent 运行时 §3.2](./01-agent-runtime.md)「只读 ≠ 无限读」、[ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）
-3. **规则是建议，不是决定** —— 审核界面仍可改。用户改了就是新的纠正事件，反哺规则
+3. **规则是建议，不是决定** —— 审核界面仍可改。用户改了就是新的纠正事件，反哺规则。`merchant_category` 返回稳定分类 ID；若目标分类已停用、已合并或 scope 与交易 direction 不符，不得作为有效建议返回
 4. **忘了查是可检出的**（2026-08-10 改，见下方「查询覆盖是协议，不是自觉」）
 
 #### 四类规则各自的调用时机（2026-08-10 补，§3.2 的 `context_term` 此前无处可用）
@@ -193,9 +196,9 @@ query_memory(
 
 > **本条 2026-08-10 首稿写的是「记一条告警，不阻止解析」——那还是没强制。** 告警不改变任何行为，agent 照样能不查就走完，用户照样会看到早就纠正过的规则又一次没生效。**「记下来了」和「拦住了」不是一回事**，而这一节的标题就叫「查询覆盖是协议」。协议的定义是不遵守就走不下去。
 
-**这没有让代码做分类**：代码只回答「这个商户的规则被查过吗」这个纯机械的问题，**规则查出来之后怎么用，仍然完全归 agent**——查到「历史上归日用」之后它照样可以判成别的（[ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）。区别与「domain 标记冲突 vs 覆盖分类」是同一条线：**强制获取上下文允许，替它做决定禁止。**
+**这没有让代码做分类**：代码只回答「这个商户的规则被查过吗」这个纯机械的问题，**规则查出来之后怎么用，仍然完全归 agent**——查到「历史上归食品杂货」之后它照样可以判成别的（[ADR-0006](../adr/0006-smart-agent-dumb-tools.md)）。区别与「domain 标记冲突 vs 覆盖分类」是同一条线：**强制获取上下文允许，替它做决定禁止。**
 
-**为什么这个方案与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md) 一致**：规则是**上下文**（「这家店历史上归日用」），分类才是**决定**。给 agent 上下文、让它决定，符合「推理归 agent」；由代码事后覆盖它的分类，则是把智能放错了层。
+**为什么这个方案与 [ADR-0006](../adr/0006-smart-agent-dumb-tools.md) 一致**：规则是**上下文**（「这家店历史上归食品杂货」），分类才是**决定**。给 agent 上下文、让它决定，符合「推理归 agent」；由代码事后覆盖它的分类，则是把智能放错了层。
 
 #### domain 侧仍然读 `memory_rules`，但只为标记冲突
 
@@ -203,11 +206,16 @@ query_memory(
 
 区别是硬的：**标记**只改变排序与提示，草稿的值不动；**覆盖**会改写 agent 的判断。前者允许，后者禁止。
 
-### 3.5 可见与可编辑
+### 3.5 可见、可编辑，并与分类生命周期联动
 
-- 有一个**记忆页**，列出全部规则、命中次数、最后命中时间、**来源引用与审批时间**（§3.2）
-- 用户可以改、可以删、可以停用；停用的规则显示 `disabled_reason`
-- **删除规则不影响已入库的历史数据**（记忆不回溯，见 §2 非目标）
+- 分类与商户分类规则都以**对话为主入口**：自然语言只生成结构化提案，界面显示商户模式、稳定目标分类与影响范围，用户确认后由代码执行。记忆页继续作为查看、搜索与精调的兜底入口
+- 记忆页列出全部有效 / 停用规则、命中次数、最后命中时间、**来源引用与审批时间**（§3.2）；用户可以改、软删除、停用，停用规则显示 `disabled_reason`
+- **规则删除是软删除**：写 `deleted_at` 后不再返回、命中或参与冲突裁决，但不删除规则行、`target_category_id`、来源关系或审计。被软删除规则引用过的分类仍属于「曾被规则使用」，不能因此获得硬删资格；恢复规则须另行确认并写审计
+- **分类停用**：指向它的 `merchant_category` 规则同步停用，`disabled_reason = category_disabled`；分类重新启用时规则不自动恢复，必须由用户明确恢复
+- **分类合并**：用户在同一张合并确认卡看到规则影响后，全部规则目标随批次改指向合并目标，不再逐条另问；逐项审计共享分类操作 `batch_id`，但这些审计不进入 `memory_rule_corrections` 的 promoted / overridden 计数
+- **分类拆分 / 历史重分类**：历史交易迁移不自动决定未来规则。每个商户组都须另问「以后也这样吗」；未确认规则保持原目标或随原分类停用，不由 agent 猜目标
+- **合并 / 拆分撤销**：只有受影响规则未被再次修改、删除或参与后续分类操作时，才随整批恢复原目标、启停与删除状态；任一规则冲突使整个分类撤销零写入
+- **删除规则或修改规则不影响已入库历史**。只有用户明确要求并另行确认的历史批量改类可以改事实；规则本身永不回溯（见 §2 非目标、[04 交易 §3.3](./04-transactions.md)）
 
 #### 更强的表述：学出来的东西永不成为事实源
 
@@ -246,10 +254,10 @@ query_memory(
 |---|---|
 | 把对话历史当记忆持久化 | 未经提炼、含大量原始账目细节、不可读不可审——见 §3.1 三条理由 |
 | 让 agent 自主决定记什么 | 违反「控制流由代码决定」（[ADR-0003 §5](../adr/0003-agent-runtime-and-pluggable-backend.md)）；且用户会失去对「系统记住了什么」的掌控 |
-| 一次纠正就立刻升格为规则 | 特例会污染规则库（一次在超市买了礼品卡，不等于以后都归礼品） |
+| 一次**被动纠正**就立刻升格为规则 | 特例会污染规则库（一次在超市买了礼品卡，不等于以后都归礼品）。用户明确说「以后 X 归 Y」不在此列：它表达的就是规则意图，但仍需确认提案 |
 | 静默学习不通知用户 | 用户发现系统「自作主张」时的信任损失，远大于多一次确认的成本 |
 | 向量检索 / 嵌入做模糊匹配 | v1 规则量级几百条，直接模式匹配足够；向量库引入依赖、不可解释、且规则要能被用户读懂 |
-| 云端共享规则库（「大家都把超市归日用」） | 违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「数据不出本机」 |
+| 云端共享规则库（「大家都把超市归食品杂货」） | 违反 [ADR-0001](../adr/0001-local-first-desktop-platform.md)「数据不出本机」 |
 | 记忆自动修正已入库的历史 | 事实表只由人工确认动作写入（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 1）；自动回溯修改会让审计失去意义 |
 
 ## 5. 待决与风险
@@ -263,16 +271,18 @@ query_memory(
 | R5 | 记忆页的规则量增长到几百条后的可用性（搜索、分组） | 本文 §3.5 | 真实规则数超 100 时再做 |
 | R6（**新增 2026-08-10**） | **agent 能不能认出「哪些词该当 `context_term` 去查」**——§3.4 让它从口述文本里自己挑口语指代与私人称谓作为 `terms`。挑不出来，`context_term` 这一类就等于没接上 | 本文 §3.4 | M3 实测。**对策方向已定**：仅在 `kind = utterance` 的任务中对 `context_term` 一类开放全量返回——一个有明确边界的例外，不是取消「按键回答」原则 |
 | R7（**新增 2026-08-10**） | **两个门槛（2 次升格 / 3 次推翻）该定多少**——§3.6 已把它们降级为初值，但校准需要 `draft_memory_hits` 攒够数据 | 本文 §3.3/§3.6、[07 评测](./07-eval.md) | M3 用满两周后按采纳率/误导率/规则增益调，**结果回流本文并进 [07](./07-eval.md) 的指标集** |
+| R8（**新增 2026-08-23**） | `merchant_category` 必须由数据库约束地引用稳定分类 ID，但当前统一 `memory_rules.value` 还是通用文本；分类 direction scope 也会影响同商户规则的冲突域 | 本文 §3.2、[00 地基 §3.6](./00-foundation.md) `categories`、[01 Agent 运行时 §5](./01-agent-runtime.md) R8 | M3 schema 开工前决定 `target_category_id` / kind-specific CHECK 等具体形状，并拿「同商户既有支出也有收入」样本验证；不能继续存展示名 |
 
 ## 6. 验收标准
 
 - [ ] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [ ] `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 全绿
 - [ ] `cargo test memory::no_conversation_persisted` 通过——扫描 `memory_rules` 的写入路径，断言无「原始对话 / 完整上下文」类字段被写入
-- [ ] `cargo test memory::rule_requires_two_corrections` 通过——一次纠正不产生规则，第二次才产生
-- [ ] `cargo test memory::promotion_requires_user_ack` 通过——升格为规则前有确认步骤，未确认则不写入
+- [ ] `cargo test memory::rule_requires_two_corrections` 通过——一次**被动纠正**不产生规则，第二次才提出升格
+- [ ] `cargo test memory::explicit_instruction_skips_correction_threshold` 通过——明确「以后 X 归 Y」一次确认后写规则；确认前不写，且不会伪造两条 correction provenance
+- [ ] `cargo test memory::promotion_requires_user_ack` 通过——无论重复纠正还是明确指令，确认前都不写入规则
 - [ ] `cargo test memory::query_only_answers_given_keys` 通过——`query_memory` 只返回传入商户的规则；不存在「列出全部」的调用形式（§3.4、[01 §3.2](./01-agent-runtime.md)）
-- [ ] `cargo test memory::domain_never_overwrites_category` 通过——domain 侧读规则只产生冲突标记，草稿的 `category` 值不被改写（§3.4）
+- [ ] `cargo test memory::domain_never_overwrites_category` 通过——domain 侧读规则只产生冲突标记，草稿的 `category_id` 值不被改写（§3.4）
 - [ ] `cargo test memory::rules_never_touch_fact_tables` 通过——规则的任何应用路径都不写 `transactions` / `items`（§3.5「学出来的东西永不成为事实源」）
 - [ ] `cargo test memory::rule_records_provenance` 通过——升格产生的规则在 `memory_rule_corrections` 里有 ≥2 行 `role = "promoted"`，每行的 `correction_id` 指向真实的 `audit_log` 行，且规则 `approved_at` 非空（§3.2）
 - [ ] `cargo test memory::specific_rule_beats_wildcard` 通过——`SUPERMARKET 1234 CENTRAL` 的专属规则压过 `SUPERMARKET *`，**即使后者 `last_hit_at` 更新**（§3.6 第 1 级）
@@ -284,13 +294,20 @@ query_memory(
 - [ ] `cargo test memory::persistent_coverage_gap_is_protocol_violation` 通过——补查后仍有遗漏时 `parse_attempts.outcome == "protocol_violation"`
 - [ ] `cargo test memory::passive_confirm_does_not_reaffirm` 通过（**§3.2**）——规则被应用后随批量确认入库且未被改动，`last_affirmed_at` **不变**（`hit_count` 增加）；只有明确批准 / 手工编辑 / 冲突里选中三种动作才更新它
 - [ ] `cargo test memory::context_terms_are_queried_by_key` 通过——`query_memory(terms: [...])` 只返回传入词的规则；**不存在按 `kind` 列出全部 `context_term` 的调用形式**（§3.4）
-- [ ] `cargo test memory::delete_rule_does_not_touch_history` 通过——删规则后已入库交易的分类不变
+- [ ] `cargo test memory::merchant_category_targets_stable_id` 通过——分类改名后规则无需改 value 仍指向同一 ID；不存在把展示名作为目标的写入路径
+- [ ] `cargo test memory::category_disable_disables_rules_without_auto_restore` 通过——分类停用使关联规则失效并记录原因；重新启用分类不自动恢复
+- [ ] `cargo test memory::category_merge_redirects_rules_in_same_batch` 通过——合并确认一次后全部规则目标随同一 `batch_id` 重定向，不要求第二轮逐规则确认
+- [ ] `cargo test memory::category_batch_rule_undo_is_all_or_nothing` 通过——规则未后续变化时恢复批次前目标 / 启停 / 删除状态，任一规则冲突时整个分类撤销零写入
+- [ ] `cargo test memory::category_batch_audit_is_not_correction` 通过——合并 / 拆分的批量审计不增加 promoted / overridden 计数
+- [ ] `cargo test memory::delete_rule_does_not_touch_history` 通过——软删除规则后已入库交易的分类不变
+- [ ] `cargo test memory::deleted_rule_still_blocks_category_hard_delete` 通过——规则软删除后仍保留稳定分类目标与 provenance，目标分类仍不具备硬删资格
 - [ ] `cargo test memory::rules_are_suggestions_not_decisions` 通过——规则应用后草稿仍可编辑，且编辑产生新的纠正事件
-- [ ] `npm test -- memory/rules-page` 通过——记忆页能列出、编辑、停用、删除规则
+- [ ] `npm test -- memory/rules-page` 通过——记忆页能列出、编辑、停用、软删除规则，并默认隐藏已删除墓碑
 
 **人工验收**（**M3 判定标准**）：
 
 - [ ] 连续两次把同一商户改成同一分类后，系统询问是否记住；确认后第三次不再需要改
+- [ ] 对话说「以后这个商户归食品杂货」后，只需审核一次结构化规则提案；不要求先改错两次，且历史交易不自动变化
 - [ ] 记忆页上能看懂系统记住了什么——**规则用人话呈现，不是 JSON**
 
 ## 7. 回流记录
@@ -313,6 +330,7 @@ query_memory(
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.7 | 2026-08-23 | **商户分类规则改为稳定分类 ID 语义，`status` 仍为 `draft`。** 用户明确「以后 X 归 Y」经一次提案确认即可生效，不等待两次被动纠正；重复纠正门槛保持。补规则软删除墓碑、分类停用 / 合并 / 拆分 / 整批撤销联动与批量审计不计纠正；合并规则随同一确认卡迁移，拆分 / 历史重分类才另问。规则默认只影响未来，具体可约束 FK 形状登记为 M3 schema 待决，不继续存展示名 |
 | v0.6 | 2026-08-10 | **公开文档降噪。** 商户与个人语境示例改为虚构、中性值；同时把现行正文中的作者视角改成系统职责表述。schema、规则语义与验收标准未变 |
 | v0.5 | 2026-08-10 | **文档审查第二轮回流三处，都是「同一轮里改得不够彻底」。** ① §3.4「查询覆盖是协议」**由告警改为可补救的拒绝**（`agent.memory_lookup_incomplete`）——告警不改变行为，等于没强制。② §3.2 `last_affirmed_at` **收窄为只由三种明确动作更新**——把「未被改动地确认」算作认可，等于把 `last_hit_at` 的自我强化原样搬过来。③ `draft_memory_hits.outcome` 的 `applied` **改名 `consistent_with_rule`**——因果观察不到，名字不该暗示它。§6 验收新增 2 条、改写 2 条 |
 | v0.4 | 2026-08-10 | **文档审查回流六处。** ① `source_correction_ids` 改为关系表 **`memory_rule_corrections`**（原列指向不存在的实体）。② 新增 **`draft_memory_hits`**——此前无从验证「记忆是唯一的复利」。③ §3.4 约束 4 由「靠提示词、不强制」改为**完成时校验查询覆盖**并记协议告警。④ §3.4 补**四类规则各自的调用时机**，`context_term` 此前无处可用。⑤ §3.6 冲突裁决由 `last_hit_at` 改为**具体度 → `last_affirmed_at` → `approved_at`** 三级。⑥ §3.5 的头一句改写为准确表述。§3.2 字段表随之增删；§5 新增 R6、R7；§6 验收新增 6 条、改写 2 条 |

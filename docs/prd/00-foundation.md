@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: review
 owner: "@maintainer"
-date: 2026-08-22
-version: v0.17
+date: 2026-08-23
+version: v0.18
 ---
 
 # 00 · 地基 Foundation
@@ -167,10 +167,12 @@ base_amount_minor = round_half_even(
 
 ```
 sources · parse_attempts · draft_transactions · transactions · draft_items · items
-accounts · memory_rules · memory_rule_corrections · draft_memory_hits · audit_log
+accounts · categories · memory_rules · memory_rule_corrections · draft_memory_hits · audit_log
 ```
 
-**M0 建其中六张**：`sources` · `parse_attempts` · `draft_transactions` · `transactions` · **`accounts`（骨架）** · `audit_log`。其余随对应 sub-PRD 在后续里程碑建（`draft_items` / `items` 属 [05 事项](./05-items.md)，M3；`memory_rules` / `memory_rule_corrections` / `draft_memory_hits` 属 [06 记忆](./06-memory.md)，M3）。
+**M0 建其中六张**：`sources` · `parse_attempts` · `draft_transactions` · `transactions` · **`accounts`（骨架）** · `audit_log`。其余随对应 sub-PRD 在后续里程碑建：`categories` 属 [04 交易 §3.3](./04-transactions.md)，M2；`draft_items` / `items` 属 [05 事项](./05-items.md)，M3；`memory_rules` / `memory_rule_corrections` / `draft_memory_hits` 属 [06 记忆](./06-memory.md)，M3。
+
+> **分类列按里程碑分两阶段，不能倒写当前 M0 实况**（产品决定，2026-08-23）：M0/M1 已落地且当前受审的 `draft_transactions.category TEXT` / `transactions.category TEXT` 保持原契约；M2 新增 `categories` 并把当前业务列迁为 `category_id → categories(id)`。因此下方两张 M0 表继续列出 `category TEXT`，它们描述的是**当前已实现切片**，不是 v1 终态。M2 目标、迁移边界与验收见本节「`categories` — 分类（M2）」；[01 Agent 运行时](./01-agent-runtime.md) 的 M0 `draft_transaction` 参数也在 M2 才切换，不能让未来分类实体改写当前五工具验收。
 
 > **`parse_attempts` 为什么在 M0**（2026-08-10 加入，产品决定）：M0 的**全部目的**是度量「视觉模型读真实账单准不准」与「一段口述能不能可靠拆多笔」（[`docs/PRD.md` §9.1](../PRD.md)）。而 `sources.agent_session_id` 只存**最近一次**解析——重试一次就把上一次覆盖掉，失败历史、换过哪个模型、提示词改没改全部丢失，[07 评测 §3.5](./07-eval.md)「区分模型退步与提示词变更导致的回归」这条直接落空。**一张表换掉一次不可解释的 M0 基线，值。**
 >
@@ -194,6 +196,35 @@ accounts · memory_rules · memory_rule_corrections · draft_memory_hits · audi
 | `archived_at` | TEXT | 可空 | 软归档：销户的卡不删，历史交易还挂着它 |
 
 **M0 只建表、不写行、UI 不呈现。** 语义（账户与渠道是两个维度）见 [04 交易 §3.4](./04-transactions.md)。**别在 M0 给它加字段**——真实需要的列（机构、币种、卡号后四位、初始余额）要等 M2 拿到真实账单再定，现在猜等于白猜一遍。
+
+#### `categories` — 分类（M2 建表并迁移）
+
+分类产品语义、默认清单与生命周期的权威出处是 [04 交易 §3.3](./04-transactions.md)；本节只固定跨模块必须共用的 M2 数据边界。
+
+| 列 | 类型 | 空 | 说明 |
+|---|---|---|---|
+| `id` | TEXT PK | 非空 | 稳定 UUID；默认分类与用户分类同一种实体 |
+| `name` | TEXT | 非空 | 展示名；默认值统一四个汉字，用户自定义不受此限制 |
+| `normalized_name` | TEXT | 非空 | 同 scope 唯一键；具体 Unicode / 空白算法是 [04 §5](./04-transactions.md) R6，M2 实施计划前定 |
+| `scope` | TEXT | 非空 | `expense` / `income`，创建后不可修改 |
+| `sort_order` | INTEGER | 非空 | 同 scope 的显示顺序；默认分类按 [04 §3.3](./04-transactions.md) 固定顺序种入，用户分类追加在后 |
+| `created_at` | TEXT | 非空 | |
+| `disabled_at` | TEXT | 可空 | 停用不改历史 |
+| `merged_into_id` | TEXT → `categories(id)` | 可空 | 合并墓碑；非空期间不可选择、手工恢复或再次参与分类操作，只有成功撤销写入它的原合并批次才可清空 |
+
+**约束**：`UNIQUE(scope, normalized_name)`；`merged_into_id` 不得等于自身，且源 / 目标 scope 必须相同（跨行约束由触发器或等强度的 domain 事务校验保证）。`draft_transactions.category_id` / `transactions.category_id` 均可空；`transfer` 必须为空，`expense` / `income` 引用的分类 scope 必须匹配。`category_id IS NULL` 是「未分类」，不是一行系统分类，也不能成为合并目标。
+
+**M2 只前进迁移边界**：
+
+1. 在任何建表、重建表或写 `user_version` 之前，对旧 schema 做一次**只读预检**：计算每行的目标 scope / 规范化名称 / 候选分类 ID，并把所有冲突与无法映射行完整写入诊断结果
+2. `transfer` 上存在旧分类文本、名称规范化冲突或其他无法映射情况时，预检必须在**零 schema 写入**状态停止；诊断保留稳定行 ID、原 direction 与原分类文本，不静默清空、丢弃或改 direction。用户可执行的修复入口仍由 §5 R13 决定，不能等应用进入半迁移或无法启动后才要求在应用内修改
+3. 预检无问题后，新建 `categories` 并按 [04 §3.3](./04-transactions.md) 固定顺序种入默认分类；之后应用启动或升级不得重复补种
+4. 非空历史 `category TEXT` 按 `(direction 对应 scope, normalized_name)` 建立或复用分类实体，再回填 `category_id`；空字符串按空值处理
+5. 同名文本同时用于支出与收入时生成两个不同 ID；不因名字相同跨 scope 合并
+6. `drafted_json` 保留 agent 当时输出的原始分类文本，不回写成 ID；迁移只改当前业务列，证据与审计快照原样保留
+7. 重建外键并完成一致性检查后才移除旧 `category TEXT`；迁移事务任一步失败都整体回滚，不带半迁移状态启动
+
+分类合并、拆分与撤销会逐项写 `audit_log` 并共享 `batch_id`；`audit_log.batch_id` 在 M2 增加为可空列，普通单项操作留空。撤销先验证本批受影响对象均未发生后续修改或分类操作，再恢复完整批次前状态：合并撤销可清除本批写入的源 `merged_into_id`；部分 / 完全拆分撤销恢复源与目标原状态，仅由本批新建且恢复引用后仍无引用的目标分类可删除；任一冲突整批拒绝。仅凭审计 before/after 是否足以承载分类操作待确认态，尚未获产品批准；结构化待确认操作的表与 MCP 工具形状必须在 M2 开工前由 [01 Agent 运行时](./01-agent-runtime.md) 与 [03 审核与草稿区](./03-review.md) 共同定案，本节不自行发明新表。
 
 > **2026-08-07 M0 开工评审**：以下 M0 表的字段**逐列定死**。此前本节只写「关键约束」并注明「详细字段由对应 sub-PRD 在开工前补进」——现在正是开工前，不补齐则每次实施各写各的（**零沉默原则**）。**2026-08-10 由四张增至六张**（新增 `parse_attempts` 与 `accounts` 骨架，理由见上）。
 > 类型省略处按 §3.3 约定：ID 为 `TEXT`（UUID v4）、时间为 `TEXT`（RFC 3339 UTC）、业务日期为 `TEXT`（`YYYY-MM-DD`）。
@@ -337,7 +368,7 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 | `rate_ppm` | INTEGER | 可空 | 同上 |
 | `direction` | TEXT | 非空 | `expense` / `income` / `transfer` |
 | `merchant` | TEXT | 非空 | **原文**，不做归一化覆盖（[04 交易 §3.1](./04-transactions.md)） |
-| `category` | TEXT | 可空 | 起草时未必判得出 |
+| `category` | TEXT | 可空 | **M0/M1 阶段列**，起草时未必判得出；M2 迁为 `category_id → categories(id)`，见本节「`categories` — 分类」 |
 | `channel` | TEXT | 可空 | 同上 |
 | `confidence` | INTEGER | 可空 | agent 自评 0–100，供 [03 审核 §3.4](./03-review.md) 异常前置排序 |
 | `created_at` | TEXT | 非空 | |
@@ -409,7 +440,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `amount_minor` · `currency` | | 非空 | 原币 |
 | `base_amount_minor` · `base_currency` · `rate_ppm` | | **非空** | 三元组齐全且自洽（§3.4） |
 | `direction` · `merchant` | TEXT | 非空 | |
-| `merchant_normalized` · `category` · `channel` · `note` | TEXT | 可空 | |
+| `merchant_normalized` · `category` · `channel` · `note` | TEXT | 可空 | `category` 是 **M0/M1 阶段列**；M2 迁为可空 `category_id → categories(id)` |
 | `account_id` | TEXT → `accounts(id)` | 可空 | **哪张卡 / 哪个账户**（[04 交易 §3.4](./04-transactions.md)）。**M0/M1 恒为空，M2 起启用**——见下方「账户与渠道是两个维度」 |
 | `confirmed_at` | TEXT | 非空 | 事实表的行必然经人确认 |
 | `deleted_at` | TEXT | 可空 | **软删除**（[04 交易 §3.5](./04-transactions.md)）；非空的行不进任何汇总 |
@@ -439,6 +470,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `action` | TEXT | 非空 | `create` / `update` / `confirm` / `discard` / `void` / `delete` |
 | `before_json` · `after_json` | TEXT | 可空 | `create` 无 before，`delete` 无 after |
 | `agent_session_id` | TEXT | 可空 | `actor = agent` 时非空 |
+| `batch_id` | TEXT | 可空 | **M2 新增**；分类合并 / 拆分 / 整批撤销的逐项审计共享一个 UUID，普通操作为空 |
 
 > **`actor` 为什么必须有 `system`**：超时作废草稿（[01 Agent 运行时 §3.4](./01-agent-runtime.md)）、状态机推进、迁移——这些由代码执行，既不是 agent 也不是人。只给 `{agent, human}` 会逼实现者往里塞一个语义错误的值。
 
@@ -453,6 +485,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 7. 金额与汇率**在 IPC 上是字符串**，两侧各有一次范围校验（2026-08-10 新增，§3.4「金额怎么过 IPC」）
 8. `draft_transactions.source_id` 必须等于其 `attempt_id` 所属的 `parse_attempts.source_id`；`sources.latest_attempt_id` 非空时，该尝试也必须属于同一个来源。SQLite 的行内 CHECK 无法跨表表达，迁移用触发器（或等强度的数据层事务检查）强制
 9. `voided_at` 只表达系统对失败尝试的补偿性作废，`discarded_at` 只表达人主动丢弃；两者都保留历史行，审核列表只展示二者均为空且未消费的草稿
+10. **M2 分类约束**：`transfer.category_id IS NULL`，支出 / 收入的分类 scope 与 direction 相同；停用或合并墓碑不接受新引用。只有通过原批次撤销事务才可清除该批写入的墓碑并恢复原引用。合并 / 拆分 / 撤销逐项追加审计并共享 `batch_id`，不得改 `drafted_json`
 
 ### 3.7 命令契约与错误形状
 
@@ -538,6 +571,8 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | R11（**新增 2026-08-10**） | **M3 的 ordinal 跨表唯一**——同一段口述会同时产出 `draft_transactions` 与 `draft_items`，两张表**各自**的 `UNIQUE(attempt_id, source_ordinal)` **保证不了跨表唯一**：交易第 2 条和事项第 2 条会同时存在，而 [07 评测](./07-eval.md) 的对齐按 ordinal 配对 | 本文 §3.6、[05 事项](./05-items.md)、[07 评测 §3.2](./07-eval.md) | **M3 开工前决**，两条候选：① domain 在同一事务里跨表检查；② 引入一张公共的位置占用表。**不阻塞 M0**（`draft_items` 是 M3 的表），登记以免被沉默填掉 |
 | R9（**新增 2026-08-10**） | **范围不变式挡不住时怎么办**——§3.4 用「IPC 传字符串 + `\|v\| ≤ 10^15`」换掉了全链路 `bigint`。若将来出现合法但超范围的金额（极端通胀币种、或产品扩到机构场景），路径是**全链路 `bigint`**：IPC 已经是字符串，改动面收窄在 TS 侧 | 本文 §3.4/§3.8、[`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) | 出现第一个被 `data.amount_out_of_range` 拒绝的**合法**金额时。**在此之前不做**——`bigint` 的代价是真的，而这个场景至今是假想的 |
 | R8（**新增 2026-08-10**） | **跨 exponent 币种的汇率精度**——`rate_ppm` 是主单位汇率 × 1e6（§3.4）。原币 exponent 大于本位币时有效精度会掉：`1 JPY = 0.010412 AUD` 存成 `10412`，相对精度只剩 1e-4，大额换算后可能与账单印的折算金额差几分，从而让总额校验系统性 `failed` | 本文 §3.4、[03 审核 §5](./03-review.md) R6 | **M2 与 R3（舍入规则）一并实测**。候选：提高标度到 1e-9（`rate_nano`），或对该情形改存「最小单位对最小单位」的比率。**M0/M1 不动**——验证场景的两个币种 exponent 都是 2，本条不触发 |
+| R12（**新增 2026-08-23**） | AI-native 分类管理的结构化待确认操作如何持久化、使用哪些有界 MCP 工具；若直接新增写分类 / 规则 / 事实的工具会破坏 [ADR-0002](../adr/0002-ai-never-writes-directly.md) | 本文 §3.6 `categories`、[01 Agent 运行时](./01-agent-runtime.md)、[03 审核](./03-review.md) | M2 开工前从当前产品规则产出边界方案并由人审；在此之前不命名表 / 工具，不改 M0 五工具 |
+| R13（**新增 2026-08-23**） | 分类迁移只读预检发现旧 `transfer.category TEXT` 或名称冲突后，用户从哪里完成修复并安全重试；启动后才报错会把用户锁在无法使用应用也无法修改数据的死路里 | 本文 §3.6「M2 只前进迁移边界」、[03 审核与草稿区](./03-review.md) | **M2 进入 `ready` 前决定**可执行的修复入口（迁移前 UI、专用命令或等强度方案）及备份 / 重试流程；必须在旧 schema 未改写时可用，不扩成通用 SQL 工具 |
 
 ## 6. 验收标准
 
@@ -565,6 +600,11 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 - [ ] `cargo test ingest::utterance_source_roundtrip` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——未报告合计的 `utterance` 尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
 - [ ] `cargo test foundation::m0_insert_transaction_with_null_account` 通过——`PRAGMA foreign_keys = ON` 下，M0 schema 里插入 `account_id IS NULL` 的交易**成功**（`accounts` 骨架表存在）；同时插入一个不存在的 `account_id` **被 FK 拒绝**
+- [ ] `cargo test foundation::m2_category_text_migrates_without_loss`（**M2**）通过——非空旧文本按 direction/scope 迁到稳定 ID，同名跨 scope 不合并，`drafted_json` 原文不变
+- [ ] `cargo test foundation::category_migration_preflight_is_read_only`（**M2**）通过——transfer 旧分类或名称冲突完整进入诊断，且 `categories`、旧表、`user_version` 与证据逐位不变；不静默丢弃或留下半迁移
+- [ ] `cargo test foundation::category_migration_repair_path_roundtrip`（**M2，R13 定案后**）通过——用户通过获批修复入口处理全部诊断项，再次预检与迁移成功；该入口不能执行任意 SQL
+- [ ] `cargo test foundation::category_reference_constraints_hold`（**M2**）通过——scope 不匹配、transfer 带分类、引用停用 / 合并墓碑均被拒；`category_id IS NULL` 可确认；仅原批次整批撤销可清除墓碑并恢复引用
+- [ ] `cargo test foundation::category_batch_audit_is_append_only`（**M2**）通过——合并 / 拆分 / 撤销的逐项审计共享 `batch_id`，旧审计不删除，`drafted_json` 不更新；任一后续冲突使撤销零写入
 - [ ] `cargo test foundation::money_crosses_ipc_as_string` 通过——金额与 `rate_ppm` 序列化出去是十进制字符串，允许范围上界 `10^15` 往返后逐位相等（走 JSON 数字时该用例必须变红）；`i64::MAX` 必须由下一条范围验收拒绝
 - [ ] `cargo test foundation::amount_out_of_range_rejected` 通过——`|v| > 10^15` 的金额在序列化前被拒并返回 `data.amount_out_of_range`
 - [ ] `npm test -- bridge/money-parse` 通过——`call<T>` 把字符串金额解析成安全整数，超范围抛 `data.amount_out_of_range`；组件里不存在第二处解析
@@ -627,6 +667,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.18 | 2026-08-23 | **补 M2 分类实体与迁移边界，`status` 仍为 `review`。** v1 终态表清单新增 `categories`；明确 M0/M1 已实现的 `category TEXT` 不变，M2 才迁为稳定 `category_id`。补分类表最小列、方向 / 停用 / 合并引用约束、默认只种一次、旧文本无损迁移、迁移前只读预检、`audit_log.batch_id` 与完整批次前状态撤销；结构化分类操作的表 / 工具形状及诊断修复入口登记为 M2 `ready` 前待决，不自行发明、不改变当前 M0 六表五工具 |
 | v0.17 | 2026-08-22 | **§3.7 新增错误码 `agent.not_ready`，`status` 仍为 `review`。** 合格 CLI 已发现但完整 readiness probe 未开始或进行中时，用户显式发起解析由命令层返回该码并拒绝创建 `parse_attempts`；`BackendStatus` 上这一档仍是 `error_code` 空（UI 显示「正在检查」）。probe 跑完但失败仍用各自的码。错误码集合由 29 条增至 30 条，其余不变 |
 | v0.16 | 2026-08-17 | **安装资格 / 解析就绪度错误语义同步，`status` 仍为 `review`。** `agent.backend_unavailable` 只表示未发现合格 CLI（未找到、不可执行、版本不可读取），不再用「任意 `probe()` 失败」把认证与密封失败混进安装状态；`agent.tool_surface_unsealed` 同步扩准为「无法证明完整 capability manifest 与预期严格相等」，覆盖清单缺失/不可读、缺项、多项及非工具副作用能力；错误码集合未变 |
 | v0.15 | 2026-08-13 | **M0 实现验收进入 `review`。** 六表迁移、整数金额/IPC、证据目录、本位币偏好与访达揭示入口已落地，统一 M0 门禁通过 |
