@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-**仓库处于 M0 实现 review / 修正阶段（2026-08-23）**：Tauri/React/Rust、六表地基、五工具密封 agent 链路、截图/口述导入与审核确认已经落地，`src/` 与 `src-tauri/` 均已创建。[00 地基](./docs/prd/00-foundation.md) v0.18、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.26、[02 导入](./docs/prd/02-ingest.md) v0.15、[03 审核](./docs/prd/03-review.md) v0.15 **四份当前都是 `review`**——01 的安装资格 / 解析就绪度修正已落地，其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕（当天修掉一个「已装未登录报错码不对」的实现缺陷；另有两条未修、留 M1 的界面问题，见 [01 §7](./docs/prd/01-agent-runtime.md)）。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go/no-go 尚未完成，所以**不得称 M0 已 done**。当前前端是功能基线，不是设计定稿；M1 开工前确定设计稿与 token design system。设计文档仍是产品与架构的事实源——版本号以各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 为准。
+**仓库处于 M0 实现 review / 修正阶段（2026-08-24）**：Tauri/React/Rust、六表地基、五工具密封 agent 链路、截图/口述导入与审核确认已经落地，`src/` 与 `src-tauri/` 均已创建。[00 地基](./docs/prd/00-foundation.md) v0.19、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.26、[02 导入](./docs/prd/02-ingest.md) v0.16、[03 审核](./docs/prd/03-review.md) v0.16 **四份当前都是 `review`**——01 的安装资格 / 解析就绪度修正已落地，其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕（当天修掉一个「已装未登录报错码不对」的实现缺陷；另有两条未修、留 M1 的界面问题，见 [01 §7](./docs/prd/01-agent-runtime.md)）。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go/no-go 尚未完成，所以**不得称 M0 已 done**。当前前端是功能基线，不是设计定稿。**M1 开工前那两项前置里，token design system 已于 2026-08-24 完成**——[`design.md`](./design.md) **v0.5 定稿**，三条「待澄清」拍定，已接进 [`.claude/rules/frontend.md`](./.claude/rules/frontend.md) §10–§11，**因此它现在是 code review 判据**；[`docs/design/`](./docs/design/README.md) 的九屏参考稿已评审，八条偏差逐条回流（三条改变了已写定的产品决定，见该文件），但**设计稿本身尚未按新规格重画**。设计文档仍是产品与架构的事实源——版本号以各文件 frontmatter 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md) 为准。
 
 > ✅ **阻塞 M0 的 R6 spike 已于 2026-08-12 做完并关闭，其结论已在 M0 实现中验证。** **MCP server 跑在独立 helper 二进制里**，由 agent CLI 自己 `fork/exec`，helper 经 Unix domain socket 连回 Tauri 主进程、**自己不碰数据库**（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)）。密封启动配置的具体 flag 组合与已验证的 CLI 版本号在 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](./docs/spikes/2026-08-12-r6-agent-runtime.md)——**动 agent 运行时之前先读那一份**，里面三个反直觉的坑会直接决定实现对不对。
 
@@ -110,6 +110,7 @@
 | 金额、汇率、草稿区、审计（❌/✅ 代码对照） | @.claude/rules/money-and-data.md |
 | Rust / Tauri：分层、错误契约、MCP 工具面、SQLite | @.claude/rules/rust-tauri.md |
 | React / TypeScript：IPC 桥、审核界面键盘流、性能 | @.claude/rules/frontend.md |
+| 界面视觉：色阶、字号、间距、组件规格、三类输入 | [`design.md`](./design.md)（v0.5 **定稿，是判据**）+ @.claude/rules/frontend.md |
 | 某个功能「现在是怎么实现的」 | @.claude/features/README.md |
 | 开发期 subagent 找谁干、边界在哪 | [`.claude/agents/README.md`](./.claude/agents/README.md) |
 

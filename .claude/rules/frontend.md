@@ -215,7 +215,54 @@ const loading = true                              // 布尔名不像布尔
 
 **时间轴是共同骨架，但 UI 分两个视图**——**不在同一张日历里混着显示钱和时间**（[ADR-0004 §4](../../docs/adr/0004-data-model-sqlite-integer-money.md)）。交易组件与事项组件不共用同一个列表容器。
 
-## 10. 门禁
+## 10. 三类输入，职责不混用
+
+> 依据 [`design.md`](../../design.md) v0.5（**2026-08-24 定稿**）。**2026-08-24 新增。**
+
+全应用只有三种输入，**各自的视觉与职责在 token 层就是分开的**，不许互相借样式：
+
+| 输入 | 长什么样 | 用在哪 | 不许用在哪 |
+|---|---|---|---|
+| **composer** | 一张纸，**上边一条粗墨线** | 自然语言输入：说一段话、对 agent 下指令 | 任何结构化字段 |
+| **boxed field** | 常规描边框 | 设置、首次引导等**表单**场景 | 审核界面的行内编辑 |
+| **inline field** | **虚线下划线**，聚焦才变成框 | 审核界面的行内编辑（[§5](#5-审核界面键盘优先) 硬要求 2） | 表单 |
+
+```tsx
+// ✅ 正确 —— 审核界面改金额用 inline，视觉上「这是一条可改的既有值」
+<InlineField value={draft.amountMinor} onCommit={...} />
+
+// ❌ 错误 —— 在审核行里用 boxed，40 行 × 每行一个方框 = 一屏方框，
+//    而这一屏的判定标准是「40 笔 30 秒」，视觉噪音直接吃掉它
+<BoxedField value={draft.amountMinor} />
+
+// ❌ 错误 —— 用 composer 收结构化字段，用户会以为可以随便写
+<Composer placeholder="金额" />
+```
+
+**为什么写成规则而不是随手挑**：composer 是「你说，我来整理」，boxed 是「请填这一格」，inline 是「这是我读出来的，你改」。**三句话对应产品的三种关系**——把 boxed 用进审核界面，那一屏就从「核对 AI 的产出」变回了「填表」，而不填表是这个产品存在的理由（[`docs/PRD.md` §1.1](../../docs/PRD.md)）。
+
+## 11. design token 是实现判据
+
+> [`design.md`](../../design.md) 自 **v0.5（2026-08-24）** 起是定稿，**因此它现在是 code review 的判据**，不再是参考。
+
+```tsx
+// ❌ 错误 —— 组件里写死颜色与字号，token 体系立刻失效
+<h2 style={{ color: '#463021', fontSize: 27 }}>4 条待确认</h2>
+<div style={{ background: '#f7f5f1' }} />
+
+// ✅ 正确 —— 只引用 semantic 层
+<h2 className="title-lg text-fg-primary">4 条待确认</h2>
+<div className="bg-surface" />
+```
+
+四条底线，每条都对应 [`design.md`](../../design.md) 里一条有理由的决定：
+
+1. **组件只引用 semantic，不引用 primitive。** `--color-fg-primary` 可以，`--ink-950` 不行——按区域重映射（`paper` / `rail`）全靠这一层，直连 primitive 的组件搬到另一个区域就错
+2. **禁用态不换底色。** 继承所在区域面色 + 去掉描边 + 字色取 `fg.muted`（paper 区 5.09:1 / rail 区 4.75:1，两区都过 AA）。**没有 `bg.disabled` 这个 token**，写一个出来就是缺陷
+3. **草稿不许有颜色。** AI 写入 / 未确认一律 `ink.400` + 45° 斜纹——**机器写的东西不配拥有颜色**，这是约束 3 在 token 层的形状。给草稿行上意图色，等于在视觉上把它冒充成事实
+4. **最小字号 11px**（`{typography.label}`），低于 11px 一律不允许；`fg.faint` 未过 AA（3.4 / 3.1），**只许用于占位符与分隔符**，不许承载信息
+
+## 12. 门禁
 
 改完前端代码，四条都要绿（[`CLAUDE.md`](../../CLAUDE.md) 约束 16）：
 

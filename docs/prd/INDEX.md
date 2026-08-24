@@ -2,7 +2,7 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-23
+date: 2026-08-24
 version: v0.36
 ---
 
@@ -16,13 +16,13 @@ version: v0.36
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.18 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.19 |
 | 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.26 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排、降级与失败态矩阵 | **`review`** | v0.15 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面 | **`review`** | v0.15 |
-| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.8 |
-| 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.8 |
-| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.7 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`review`** | v0.16 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`review`** | v0.16 |
+| 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.9 |
+| 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.9 |
+| 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.8 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.12 |
 
 **M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪并重写；2026-08-22 修正实现开工，01 转入 `in-progress`；2026-08-23 §6 人工验收前三条实测执行完毕，01 回到 `review`，同日把剩下两条也跑完，§6 五条人工验收至此全部执行过。**当前状态：[00 地基](./00-foundation.md) v0.18、[01 Agent 运行时](./01-agent-runtime.md) v0.26、[02 导入](./02-ingest.md) v0.15、[03 审核与草稿区](./03-review.md) v0.15 **四份都是 `review`**。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据；新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready 已由 01 v0.23 的实现修正并各自补了自动验收，其人工验收已于 2026-08-23 跑过；03 v0.15 新增的 M2 分类操作审核契约与此前 v0.14 的 M3 事项 update 契约都不改变既有 M0/M1 结论。
@@ -33,7 +33,7 @@ version: v0.36
 >
 > **同一次人工验收暴露了一个门禁盲区，值得单独记一笔**：桌面应用当天**根本起不来**（`src-tauri` 两个 bin 缺 `default-run`；`icons/icon.png` 是 16 位/通道，tauri 判定图标无效后 abort），而 `node scripts/verify-m0.mjs` 不带 `--skip-live` 全绿。**M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有一条会启动桌面壳。** 两条已修复并各补一条 `cargo test` 断言（[03 §6](./03-review.md)）。
 
-**`review` 不等于 M0 产品 go。** 01 的 M0 修正已实现、自动验收通过、§6 前三条人工验收于 2026-08-23 实测通过，因而回到 `review`；但维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测仍未完成；在正式给出 go / no-go、完成收尾之前，M0 四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿；M1 开工前先确定设计稿与 token design system。
+**`review` 不等于 M0 产品 go。** 01 的 M0 修正已实现、自动验收通过、§6 前三条人工验收于 2026-08-23 实测通过，因而回到 `review`；但维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测仍未完成；在正式给出 go / no-go、完成收尾之前，M0 四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿。**M1 开工前那两项前置里，token design system 已于 2026-08-24 完成**（[`design.md`](../../design.md) v0.5 定稿并接进 [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) §10–§11，[03 §5](./03-review.md) R8 关闭）；参考设计稿已归档评审并逐条回流（[`docs/design/README.md`](../design/README.md) 八条决定），但**它本身尚未按其中第 1、3、6 条重画**。
 
 > ✅ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-12 回到 `ready`——M0 不再被阻塞。** 它曾于 2026-08-09 退回 `draft`：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。R6 的四项检查已全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
@@ -45,9 +45,11 @@ version: v0.36
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（2026-08-23 更新）：① ~~[01 Agent 运行时](./01-agent-runtime.md) 的 5 条人工验收~~ **已于 2026-08-23 全部跑完，01 回到 `review`**（当天修掉「已装未登录报错码不对」一个实现缺陷，见 [01 §7](./01-agent-runtime.md)）；后两条的结论是「手工拆密封」通过、「真实解析中看子进程日志」**只在解析结束后成立**——会话日志一次性落盘，进行中看不到，记为未修、留 M1；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00 与 02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有、01 已于 2026-08-23 补上，00 / 02 没有），维护者 review 时一并补。若进入 M1，先确定审核主路径设计稿与 token design system，再做 40 笔 30 秒的审核界面。
+**下一步**（2026-08-23 更新）：① ~~[01 Agent 运行时](./01-agent-runtime.md) 的 5 条人工验收~~ **已于 2026-08-23 全部跑完，01 回到 `review`**（当天修掉「已装未登录报错码不对」一个实现缺陷，见 [01 §7](./01-agent-runtime.md)）；后两条的结论是「手工拆密封」通过、「真实解析中看子进程日志」**只在解析结束后成立**——会话日志一次性落盘，进行中看不到，记为未修、留 M1；② 按 [07 §3.4](./07-eval.md) 的构成采样、标注（`node scripts/export-fixture.mjs` 可预填）、跑分（`node scripts/eval.mjs`，**烧额度**）、逐条 diff；③ 给出 go / conditional-go / no-go 并回流 [`docs/PRD.md` §9.4](../PRD.md)；④ M0 四份收尾三件事。07 的**工具链已可用**：评分器 · `fixtures/manifest.json` · 一条合成夹具 · `eval::*` 回归 · `node scripts/eval.mjs --dry-run`（已进 `verify-m0.mjs`）· 夹具导出器 · **真跑 agent 的轮次**（烧额度、不进 CI）。当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00 与 02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有、01 已于 2026-08-23 补上，00 / 02 没有），维护者 review 时一并补。若进入 M1：token design system 与「40 笔 30 秒」的测量协议**都已就位**（[03 §6](./03-review.md)「40 笔 30 秒怎么测」，R4 关闭），**剩下的 M1 前置是 [03 §5](./03-review.md) 的 R1（原图区域高亮 spike）与 R3（前端状态管理选型）**，以及按已定规格重画参考设计稿。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
+
+> **2026-08-24 参考设计稿评审：八条偏差全部拍定并回流**（[`docs/design/README.md`](../design/README.md)）。其中**三条改变了已写定的产品决定**：① 默认账目分类由「15 支出 + 6 收入 · 四字名」改为「**19 支出 + 7 收入 · 两字名**」，新增订阅与美容、四条粘连分类各自拆开、税费不再预置（[04 §3.3](./04-transactions.md)）；② [04 §3.6](./04-transactions.md) 改写为「**轴 / 派生量**」两层并给出判据，渠道分布保持必做、按星期几聚合明确不做；③ 批准「**丢进来就自动整理**」（[02 §3.5](./02-ingest.md)），并把此前三条看似矛盾的决定统一到一条判据——**消耗额度必须由一个明确的、用户当场知道自己做了的动作触发**，因此自动重试与文件夹监听仍然被否决。另外 [`design.md`](../../design.md) 的三条「待澄清」同日拍定（`chart.7` 取 115°、禁用态改为不换底只降字色、字号表的族列升为规范），`ink-800` / `paper-500` 的取值口径定为 **OKLCH 规整值**——图标原色被同时指派给两档，在体系里不可表达。**分类改名波及 [03](./03-review.md) / [06](./06-memory.md) 的举例，已同步。**
 
 ## 里程碑 × sub-PRD
 
