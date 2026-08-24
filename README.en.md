@@ -162,7 +162,8 @@ The reasoning behind these choices is in [ADR-0001](./docs/adr/0001-local-first-
 | Implementation rules split by topic | [`.claude/rules/`](./.claude/rules/) |
 | "How is this feature actually implemented right now?" | [`.claude/features/`](./.claude/features/) |
 | App icon and loading animation (palette, geometry, motion spec) | [`assets/brand/README.md`](./assets/brand/README.md) |
-| UI token system (color ramps, type scale, spacing, component specs) — **under review** | [`design.md`](./design.md) |
+| UI token system (color ramps, type scale, spacing, component specs, the three input kinds) — **v0.5, final** | [`design.md`](./design.md) |
+| Desktop reference design draft (nine screens, 1440 × 900) — **reviewed; all eight deviations folded back into the specs** | [`docs/design/README.md`](./docs/design/README.md) |
 
 Opening a pull request? The workflow and the template are described in [`CLAUDE.md`](./CLAUDE.md).
 

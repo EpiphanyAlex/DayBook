@@ -1,5 +1,5 @@
 ---
-version: 0.4
+version: 0.5
 name: Daybook-desktop-tokens
 description: 日簿 Daybook 桌面端的 token design system —— 一套为「事后补记」写的全亮界面。底色是 Cloud Dancer 米白 ({colors.paper-200})，也正是应用图标的底板；棕墨 ({colors.ink-950}) 只作为文字、图标与线，层次由四级浅面加一根发丝线承担，不靠明暗反转。四个语义色同亮度 (L .58) 同彩度 (C .105) 站在一个色环上——靛青 action、松绿 settled、麻黄 caution、朱砂 alarm，全部取自应用图标里已有的颜色。三层单向依赖：primitive → semantic（按区域重映射）→ component，组件只准引用 semantic。产品最生死的一条约束在 token 层就有名字：AI 写入的草稿只给中性灰与 45° 斜纹，机器写的东西不配拥有颜色。
 
@@ -62,7 +62,6 @@ colors:
   paper-bg-selected: "#e6f2fd"
   paper-bg-hover: "rgba(33,18,8,.04)"
   paper-bg-pressed: "rgba(33,18,8,.08)"
-  paper-bg-disabled: "#c1b6a2"
   paper-border-subtle: "rgba(33,18,8,.10)"
   paper-border-default: "rgba(33,18,8,.18)"
   paper-border-strong: "rgba(33,18,8,.45)"
@@ -75,7 +74,6 @@ colors:
   rail-bg-selected: "#fdfcf9"
   rail-bg-hover: "rgba(33,18,8,.035)"
   rail-bg-pressed: "rgba(33,18,8,.07)"
-  rail-bg-disabled: "#ded8ce"
   rail-border-subtle: "rgba(33,18,8,.10)"
   rail-border-default: "rgba(33,18,8,.16)"
 
@@ -128,7 +126,7 @@ colors:
   chart-4: "#b06154"
   chart-5: "#68b4b3"
   chart-6: "#ac9acd"
-  chart-7: "#9eac76"
+  chart-7: "#a1ac74"
   chart-8: "#cf9295"
 
 typography:
@@ -256,8 +254,7 @@ components:
     padding: "0 {spacing.4}"
     height: 40px
   button-primary-disabled:
-    backgroundColor: "{colors.paper-bg-disabled}"
-    textColor: "{colors.fg-faint}"
+    textColor: "{colors.fg-muted}"
     rounded: "{rounded.sm}"
   button-secondary:
     backgroundColor: "{colors.paper-bg-surface-raised}"
@@ -314,8 +311,7 @@ components:
     border: "1px solid {colors.intent-action-accent}"
     shadow: "0 0 0 2px {colors.paper-bg-surface}, 0 0 0 4px {colors.intent-action-accent}"
   field-boxed-disabled:
-    backgroundColor: "{colors.paper-bg-disabled}"
-    textColor: "{colors.fg-faint}"
+    textColor: "{colors.fg-muted}"
 
   # ── 徽章：kind 说「是什么」，status 说「怎么样」，两件事分开表达
   badge-kind:
@@ -449,7 +445,7 @@ components:
     backgroundColor: "{colors.intent-settled-fill}"
     rounded: "{rounded.full}"
   toggle-off:
-    backgroundColor: "{colors.paper-bg-disabled}"
+    backgroundColor: "{colors.paper-500}"
     rounded: "{rounded.full}"
   notice:
     backgroundColor: "{colors.ink-900}"
@@ -481,7 +477,7 @@ components:
 
 > 出处：Claude Design 项目「Daybook桌面端设计」的 `Daybook Token System v3.dc.html`（v0.4 · 全亮），2026-08-14 落到本仓库。
 > **两边同步。** 本文与设计稿都是 v0.4，意图色六列、品类措辞一致；差异出现时以本文为准，并回流设计稿。
-> **状态：待评审，不是定稿。** 仓库根 [`CLAUDE.md`](./CLAUDE.md)「当前状态」写明 M1 开工前才确定 token design system；当前 `src/` 的界面是 M0 功能基线，**尚未按本文实现**。
+> **状态：已评审定稿（2026-08-24），v0.5。** 三条「待澄清」已拍定并落进正文（见「已澄清」），`ink-800` / `paper-500` 的取值口径定为 OKLCH 规整值。**本文现在是 M1 前端实现的判据**，已接进 [`.claude/rules/frontend.md`](./.claude/rules/frontend.md)。当前 `src/` 的界面仍是 M0 功能基线，**尚未按本文实现**——「定稿」说的是规格定了，不是实现跟上了。
 > 图形的事实源在 [`assets/brand/README.md`](./assets/brand/README.md)，不在这里——本文只取它的颜色。
 
 ## Overview
@@ -522,6 +518,10 @@ primitive（1.x 的色阶，不带含义）
 
 **不要为了「统一」去改图标的 hex。** 图标有自己的事实源（[`assets/brand/README.md`](./assets/brand/README.md)），它的色板服务于 512px 的图形，token 服务于界面文字的对比度，两套值各自成立。
 
+**反方向同样不许**（2026-08-24 定，[`docs/design/README.md`](./docs/design/README.md) 第 6 条）：**参考设计稿把 `ink-800` 与 `paper-500` 用回了图标原色**（`#4e2f1c` / `#c4b79c`），本文以**规整值为准**，设计稿按本文改那两个 hex。理由不是「规整更好看」，是**原色在这套体系里根本不可表达**——上游的取色论证自己写着「`#4E2F1C` 棕墨 → `ink.800 / 900`」，一个 hex 被指派给两档；把它放进 `ink.800`，`ink.900` 就得脱离色阶。**十档要成阶才能让人挑**，这也是「Lint 状态」把 79 条 `orphaned-tokens` warning 解释为「色阶本身就是规格」的同一条理由。
+
+> 允许并接受的后果：屏 01 那种「左栏图标紧挨导航当前项」的位置，图标的棕与标题的棕**并排能看出一点差**（ΔRGB 8）。**图标原色是推导起点，不是 token 值**——这点差是规整的代价，不是缺陷。
+
 > ⚠️ **设计稿里的图标是 13a 之前的版本。** 2026-08-13 图标改用了方案 13a「平移居中」（最外层加一个 `translate`，把纸堆挪到画布正中）。**13a 只挪位置，四个取色源一个都没变**，所以上表与整套取色论证不受影响；但设计稿里那张 `assets/icon.svg` 的构图已经过时，以仓库的 [`assets/brand/icon.svg`](./assets/brand/icon.svg) 为准。
 
 ## Colors
@@ -536,20 +536,20 @@ primitive（1.x 的色阶，不带含义）
 |---|---|---|---|
 | `{colors.ink-950}` | `oklch(.20 .030 55)` | `#211208` | 所有主文字 15.6:1 · 通知条底 |
 | `{colors.ink-900}` | `oklch(.26 .035 55)` | `#311f13` | 通知条 / 图表最深档 —— 全亮界面里唯一的深色面 |
-| `{colors.ink-800}` | `oklch(.33 .040 55)` | `#463021` | 图标那支棕本色 · 通知条上的抬升块 |
+| `{colors.ink-800}` | `oklch(.33 .040 55)` | `#463021` | 标题 / 导航当前项 / 结构线 · 通知条上的抬升块 |
 | `{colors.ink-700}` | `oklch(.42 .030 55)` | `#5a493e` | 纸面次级文字 7.3:1 |
 | `{colors.ink-600}` | `oklch(.52 .022 55)` | `#73665d` | 纸面弱化文字 4.8:1 —— **正文可读性下限** |
-| `{colors.ink-500}` | `oklch(.62 .018 55)` | `#8f847c` | 占位符 / 分隔 / 禁用；纸面 3.1:1 *仅装饰* |
-| `{colors.ink-400}` | `oklch(.72 .015 55)` | `#aca29c` | 禁用文字 / 草稿斜纹 / 图表次环 |
+| `{colors.ink-500}` | `oklch(.62 .018 55)` | `#8f847c` | 占位符 / 分隔；纸面 3.1:1 *仅装饰*（**不再用于禁用文字**） |
+| `{colors.ink-400}` | `oklch(.72 .015 55)` | `#aca29c` | 草稿斜纹 / 图表次环 |
 | `{colors.ink-300}` | `oklch(.82 .013 55)` | `#cbc2bc` | 通知条上的次级文字 |
-| `{colors.ink-200}` | `oklch(.89 .010 55)` | `#e0d9d5` | 冷调分隔线 / 禁用填充 |
+| `{colors.ink-200}` | `oklch(.89 .010 55)` | `#e0d9d5` | 冷调分隔线 |
 | `{colors.ink-100}` | `oklch(.945 .008 55)` | `#f1ebe8` | 通知条上的主文字 |
 | `{colors.paper-50}` | `oklch(.99 .004 82)` | `#fdfcf9` | 灯箱上的原件纸 / 卡片抬升面 |
 | `{colors.paper-100}` | `oklch(.97 .006 82)` | `#f7f5f1` | 内容面板底（审核栏、账目、设置） |
 | `{colors.paper-200}` | `oklch(.948 .008 82)` | `#f0ede8` | **应用底色 · Cloud Dancer**：顶栏与来源夹 |
 | `{colors.paper-300}` | `oklch(.92 .011 82)` | `#e8e4dd` | 工作台桌面（灯箱背后那层）· 下沉块 |
-| `{colors.paper-400}` | `oklch(.885 .016 82)` | `#ded8ce` | 禁用填充 / 打印纸边 / 边框 |
-| `{colors.paper-500}` | `oklch(.78 .030 82)` | `#c1b6a2` | 纸面上的边框 / 禁用按钮填充 |
+| `{colors.paper-400}` | `oklch(.885 .016 82)` | `#ded8ce` | 打印纸边 / 边框 |
+| `{colors.paper-500}` | `oklch(.78 .030 82)` | `#c1b6a2` | 纸面上的边框 / `toggle-off` 轨道 |
 
 ### 四个语义色：共享 L 与 C，只换 hue
 
@@ -609,7 +609,6 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 | `color.bg.selected` | `{colors.brand-100}` | — | `{colors.paper-50}` | — |
 | `color.bg.hover` | ink α.04 | — | ink α.035 | — |
 | `color.bg.pressed` | ink α.08 | — | ink α.07 | — |
-| `color.bg.disabled` | `{colors.paper-500}` | — | `{colors.paper-400}` | — |
 | `color.fg.primary` | `{colors.ink-950}` | **16.7** | `{colors.ink-950}` | **15.6** |
 | `color.fg.secondary` | `{colors.ink-700}` | 7.9 | `{colors.ink-700}` | 7.3 |
 | `color.fg.muted` | `{colors.ink-600}` | 5.1 | `{colors.ink-600}` | 4.8 |
@@ -621,9 +620,25 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 
 对比度那两列 = 该色作为文字压在本区域 `color.bg.surface` 上的值，**已逐条验算，与设计稿声称的数字全部相符（误差 < 0.05）**。
 
-- **`fg.faint` 未过 AA**（3.4 / 3.1），仅限占位符、分隔符、禁用文本等非信息性用途。
+- **`fg.faint` 未过 AA**（3.4 / 3.1），仅限占位符与分隔符等非信息性用途。**禁用文本不用它**——见下面「禁用态」。
 - **最深的面是 `bg.canvas`（`{colors.paper-300}`）**，`fg.muted` 压在它上面只有 **4.38** —— 在桌面上放正文时降一档用 `fg.secondary`。
 - **rail 与 paper 的文字色完全一致**：区域只换面色，不换字色，这样同一个组件搬到任何区域都不用改 token。
+
+#### 禁用态：不换底，只降字色（2026-08-24 定）
+
+**禁用态没有专属面色。** 语义映射表里**没有 `color.bg.disabled`**，这是有意的：
+
+> 禁用 = **继承所在区域的 `bg.surface`** + **去掉描边** + **字色取 `fg.muted`**。
+
+| | 压在 `paper` 区（`paper.100`） | 压在 `rail` 区（`paper.200`） |
+|---|---|---|
+| `fg.muted`（`ink.600` `#73665d`） | **5.09** | **4.75** |
+
+两区都过 AA。**为什么不是「把禁用填充从 `paper.500` 降到 `paper.400`」**（那样 `ink.700` 能到 6.03）：那条路要把字色抬到 `ink.700`，而它离正文色只差一档——**「字够黑」正是「这个能点」的视觉信号**，用破坏可点性去换对比度是拿错了东西换。而且 `paper.400` 已经是「打印纸边 / 边框」，再兼禁用面色会让边框与禁用面同色，`rail` 区还会与 `paper` 区变得一模一样，丢掉「同一组件搬到任何区域都不改 token」这条性质。
+
+**WCAG 对禁用控件不作对比度要求**，所以旧写法（`paper.500` 底 + `ink.500` 字 = **1.82**）不算违规。改它的理由不是合规：**禁用按钮上的那行字，正是用户需要看清才知道「为什么点不动」的那句。**
+
+> **`toggle-off` 不走这条规则。** 一个关着的开关**不是禁用**——它可点、状态明确，所以它保留自己的实心轨道（`{colors.paper-500}`），不继承区域面色。
 - `fg.numeral`（来源计数那个数字）用 `{colors.caution-700}`，它是图标麻色压深后的那一档。
 
 ### L2 · 意图语义（intent，不随区域变化）
@@ -672,7 +687,9 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 
 ### 图表色序（为 M1 统计图预留）
 
-分类色序不是新调色板，而是把意图色的色环补满：第一环 `oklch(.58 .105 h)`，第二环 `oklch(.72 .075 h)`，hue 每 45° 取一档。同环内亮度一致，**灰度打印仍能靠 hue 区分**。
+分类色序不是新调色板，而是把意图色的色环补满：第一环 `oklch(.58 .105 h)` 就是四个意图色本身，第二环 `oklch(.72 .075 h)` **落在第一环留下的缝里**。同环内亮度一致，**灰度打印仍能靠 hue 区分**。
+
+**两环都不是等距的**，别照「每 45° 一档」去推（2026-08-24 更正，原文如此写过）。第一环的 hue 由图标取色决定——30 / 80 / 150 / 245，缝宽分别是 50° / 70° / 95° / 145°；第二环取**最宽那几道缝的中点**：115°（80–150 的正中）· 195°（150–245，中点 197.5°）· 300° 与 15°（245–30 那道 145° 的宽缝里放两档）。50° 那道最窄的缝不放。
 
 | Token | oklch | sRGB | |
 |---|---|---|---|
@@ -682,7 +699,7 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 | `{colors.chart-4}` | `oklch(.58 .105 30)` | `#b06154` | ＝ `critical.500` |
 | `{colors.chart-5}` | `oklch(.72 .075 195)` | `#68b4b3` | |
 | `{colors.chart-6}` | `oklch(.72 .075 300)` | `#ac9acd` | |
-| `{colors.chart-7}` | `oklch(.72 .075 120)` | `#9eac76` | 设计稿标注 115°，实际取值 120°，见「待澄清 ①」 |
+| `{colors.chart-7}` | `oklch(.72 .075 115)` | `#a1ac74` | 第一环 80–150 那道缝的正中 |
 | `{colors.chart-8}` | `oklch(.72 .075 15)` | `#cf9295` | |
 
 **序号 1–4 与意图色重合，因此图表里不得用序号 1–4 表达「正常分类」之外的含义。**
@@ -715,7 +732,9 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 | `{typography.money-sm}` | 15 / 1.2 / 0 · 600 | mono | 300.00 CNY |
 | `{typography.num-meta}` | 11 / 1.4 / .04em | mono | 1 CNY = 0.210000 AUD · 2026-08-08 · schema 6 |
 
-> 「族」这一列是**按 §1.2 的职责描述推导的**，设计稿的字号表本身没有逐 token 标注字体族。见「待澄清 ③」。
+「族」这一列是**规范的一部分**，不是注释：每个字号 token 的字体族由它决定，组件不得另选。
+
+**`eyebrow` 归 `mono` 不是从渲染反推的**——上面 §1.2 的 `font.mono` 职责里本来就写着「区段标签」，而 `eyebrow` 的示例正是「来源原件 · 不可改写」这类区段标签。职责描述与设计稿的实际渲染（等宽 + `.16em` 字距）两边一致。
 
 ## Layout
 
@@ -810,7 +829,7 @@ Daybook 同屏有两种**用途不同的区域**：`rail`（顶栏、来源夹�
 | `button-ghost` | 透明 / `action.text` 字，无边框 | 单条确认 |
 | `button-alarm-ghost` | 透明 → hover `alarm.surface` / `alarm.text` 字 | 丢弃 |
 
-四档状态：`default` / `hover`（`.fill-hover`）/ `active`（`bg.pressed`）/ `focus-visible`（`ring.focus`）/ `disabled`（`bg.disabled` + `fg.faint`）。**按钮搬到 `rail` 区域用同一套 token**，区域只换面色。
+四档状态：`default` / `hover`（`.fill-hover`）/ `active`（`bg.pressed`）/ `focus-visible`（`ring.focus`）/ `disabled`（**不换底、去掉描边、字色取 `fg.muted`**，见「禁用态」）。**按钮搬到 `rail` 区域用同一套 token**，区域只换面色。
 
 ### 输入
 
@@ -934,15 +953,17 @@ v0.3 的 intent 表是 `.surface / .border / .fill / .fill-hover / .text` 五列
 
 > **已回流**（2026-08-14）：Claude Design 项目里的 `Daybook Token System v3.dc.html` 已更新为六列并升到 v0.4，同一处还附了「v0.4 更正」说明为什么拆。回读逐字节校验一致，**两边不再有分叉**。
 
-## 待澄清
+## 已澄清（2026-08-24 定案）
 
-**这三条是把设计稿转成本文时发现的，不是实现问题——动手实现前值得先定。**
+**这三条是把设计稿转成本文时发现的，三条都已拍定并落进上面的正文。** 保留问题与理由，因为它们解释了几个数字为什么是现在这个值。
 
-### ① `chart.7` 是 115° 还是 120°？
+### ① `chart.7` 取 115°（`#a1ac74`）
 
-设计稿的标签写 `115°`，但那个色块的实际取值是 `oklch(.72 .075 120)`。**本文按实际取值记 120°**（`#9eac76`）；若应为 115°，正确值是 `#a1ac74`。第二环若要严格按「每 45° 一档」，从 195° 起应是 195 / 240 / 285 / 330，而设计稿给的是 195 / 300 / 120(115) / 15——**实际是绕整个色环取的补位，不是等距 45°**，措辞可以再收一次。
+设计稿的标签写 `115°`，而那个色块的实际取值是 `oklch(.72 .075 120)`——**标签是对的，色块是四舍五入之后算出来的。** 判据是把两环的 hue 都算一遍：第一环 30 / 80 / 150 / 245 之间的缝宽是 50° / 70° / 95° / 145°，而 **115° 正好是 80–150 那道缝的正中**，195° 也只差它那道缝的中点 2.5°——「补最宽的缝、取中点」这条规律能同时解释两个值，120° 解释不了任何东西。
 
-### ② 禁用态的文字压在禁用填充上只有 1.82:1
+顺带更正一处措辞：原文写「hue 每 45° 取一档」，**两环都不成立**（见「图表色序」）。第一环的 hue 由图标取色决定，第二环是绕着缝补位。
+
+### ② 禁用态改成「不换底、只降字色」
 
 设计稿把 `color.bg.disabled` 定为 `paper.500`（paper 区）/ `paper.400`（rail 区），又把 `ink.500` / `ink.400` 标为「禁用文字」。两者一撞，实测：
 
@@ -953,11 +974,11 @@ v0.3 的 intent 表是 `.surface / .border / .fill / .fill-hover / .text` 五列
 | `ink.500` `#8f847c` | **1.82** | 2.57 |
 | `ink.400` `#aca29c` | 1.25 | 1.76 |
 
-WCAG 对禁用控件不作对比度要求，**所以这不算违规**——但 1.82:1 已经接近读不出来，而禁用按钮上的字正是用户需要看清才知道「为什么点不动」的那句。**paper 区连 `ink.700` 都只到 4.26**，说明问题在底色而不在字色：`paper.500` 作为禁用填充太深了。建议要么禁用填充降到 `paper.400`（`ink.700` 达 6.03），要么禁用态改成「不变底、只降字色 + 去掉描边」。
+**结论：问题在底色，不在字色**——`paper.500` 作为禁用填充太深了，paper 区连 `ink.700` 都只到 4.26。定案是**取消禁用专属面色**，理由与完整规则见上面「禁用态：不换底，只降字色」。`color.bg.disabled` 与 `paper-bg-disabled` / `rail-bg-disabled` 两个 primitive 已删除。
 
-### ③ 字号表没有逐 token 标注字体族
+### ③ 字号表的「族」列是规范，不是推导
 
-设计稿 §1.2 用散文规定了三个族的职责，但字号表本身没有「族」这一列。本文那一列是**按职责描述推导的**：`display.*`/`title.*`/`serif.quote` → display，`body.*`/`label` → sans，`eyebrow`/`money.*`/`num.meta` → mono。**`eyebrow` 归 mono 是按设计稿自身的渲染反推的**（它渲染成等宽 + `.16em` 字距），值得确认。
+已把那一列升为规范正文（见「Typography」）。**`eyebrow` 归 `mono` 有正文依据**——§1.2 的 `font.mono` 职责里写着「区段标签」，不只是从渲染反推。
 
 ## Lint 状态
 
@@ -965,15 +986,15 @@ WCAG 对禁用控件不作对比度要求，**所以这不算违规**——但 1
 npx @google/design.md@0.4.0 lint design.md
 ```
 
-**0 error。** 剩下的 warning 分三类，**每一类都是刻意留的，不要靠删内容去清零**：
+**0 error · 113 warning**（2026-08-24 实测）。warning 分三类，**每一类都是刻意留的，不要靠删内容去清零**：
 
 | 规则 | 数量级 | 为什么留着 |
 |---|---|---|
-| `broken-ref`（`border` / `shadow` 不是它认识的 sub-token） | ~30 | v0.4.0 只认 `backgroundColor / textColor / typography / rounded / padding / size / height / width`。**但发丝线与 `ring.marker` 正是这套体系的承重墙**——「被选中的来源」全靠 3px 靛青内嵌线表达。删掉它们能清零 warning，也能让规格失去一半信息。参考用的 `notion-DESIGN.md` 同样在用这两个字段。 |
-| `contrast-ratio`（9 条） | 9 | **7 条是误报**：linter 把 `backgroundColor: transparent` 当成纯黑算。那 7 个组件实际压在 `paper.100` / `paper.200` / `draft.surface` 上，实算 4.75–17.73:1，全部过 AA。它们必须保持透明——**同一个组件搬到 rail 或 paper 都不改 token，靠的就是继承区域面色**。剩下 2 条（禁用态）是真的，见「待澄清 ②」。 |
-| `orphaned-tokens`（~79） | ~79 | 未被任何 `components:` 条目引用的 primitive 与 semantic。**色阶本身就是规格**——`ink.100`–`ink.950` 十档要成阶才能让人挑，不是每一档都得有组件用。图表色序整组也在这里，它是给 M1 预留的。 |
+| `broken-ref`（`border` / `shadow` 不是它认识的 sub-token） | 28 | v0.4.0 只认 `backgroundColor / textColor / typography / rounded / padding / size / height / width`。**但发丝线与 `ring.marker` 正是这套体系的承重墙**——「被选中的来源」全靠 3px 靛青内嵌线表达。删掉它们能清零 warning，也能让规格失去一半信息。参考用的 `notion-DESIGN.md` 同样在用这两个字段。 |
+| `contrast-ratio`（7 条） | 7 | **7 条全是误报**：linter 把 `backgroundColor: transparent` 当成纯黑算。那 7 个组件实际压在 `paper.100` / `paper.200` / `draft.surface` 上，实算 4.75–17.73:1，全部过 AA。它们必须保持透明——**同一个组件搬到 rail 或 paper 都不改 token，靠的就是继承区域面色**。**原先另有 2 条真报警（禁用态），已于 2026-08-24 修掉**（「已澄清 ②」）——禁用态不再有专属面色，两个 disabled 组件也就不再声明 `backgroundColor`。 |
+| `orphaned-tokens` | 78 | 未被任何 `components:` 条目引用的 primitive 与 semantic。**色阶本身就是规格**——`ink.100`–`ink.950` 十档要成阶才能让人挑，不是每一档都得有组件用。图表色序整组也在这里，它是给 M1 预留的。 |
 
-7 条误报的实算值（跑一次就能复核）：
+7 条误报的实算值（跑一次就能复核；2026-08-24 实测命中的正是下表这 7 个组件）：
 
 | 组件 | 实际底色 | 实算 |
 |---|---|---|

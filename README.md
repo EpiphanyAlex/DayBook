@@ -160,7 +160,8 @@ Daybook 的前提相反：**主路径不要求逐条填表；生活可以先发�
 | 按主题拆分的实现细则 | [`.claude/rules/`](./.claude/rules/) |
 | 「这个功能现在是怎么实现的」 | [`.claude/features/`](./.claude/features/) |
 | 应用图标与加载动画（色板、几何、动效规格） | [`assets/brand/README.md`](./assets/brand/README.md) |
-| 界面 token 体系（色阶、字号、间距、组件规格）**待评审** | [`design.md`](./design.md) |
+| 界面 token 体系（色阶、字号、间距、组件规格、三类输入）**v0.5 已定稿** | [`design.md`](./design.md) |
+| 桌面端参考设计稿（九个屏 · 1440 × 900）**已评审，八条偏差已回流** | [`docs/design/README.md`](./docs/design/README.md) |
 
 要提 PR 的话，流程与模板见 [`CLAUDE.md`](./CLAUDE.md)。
 

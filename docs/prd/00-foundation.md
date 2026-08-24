@@ -2,8 +2,8 @@
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
 status: review
 owner: "@maintainer"
-date: 2026-08-23
-version: v0.18
+date: 2026-08-24
+version: v0.19
 ---
 
 # 00 · 地基 Foundation
@@ -204,7 +204,7 @@ accounts · categories · memory_rules · memory_rule_corrections · draft_memor
 | 列 | 类型 | 空 | 说明 |
 |---|---|---|---|
 | `id` | TEXT PK | 非空 | 稳定 UUID；默认分类与用户分类同一种实体 |
-| `name` | TEXT | 非空 | 展示名；默认值统一四个汉字，用户自定义不受此限制 |
+| `name` | TEXT | 非空 | 展示名；默认值统一**两个汉字**，用户自定义不受此限制。**同名只在同一 `scope` 内唯一**——「礼金」「其他」两侧各有一条（[04 §3.3](./04-transactions.md)「跨 scope 允许同名」） |
 | `normalized_name` | TEXT | 非空 | 同 scope 唯一键；具体 Unicode / 空白算法是 [04 §5](./04-transactions.md) R6，M2 实施计划前定 |
 | `scope` | TEXT | 非空 | `expense` / `income`，创建后不可修改 |
 | `sort_order` | INTEGER | 非空 | 同 scope 的显示顺序；默认分类按 [04 §3.3](./04-transactions.md) 固定顺序种入，用户分类追加在后 |
@@ -667,6 +667,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.19 | 2026-08-24 | **跟随 [04 §3.3](./04-transactions.md) v0.9，`status` 仍为 `review`（M2 表，M0 实现不受影响）。** `categories.name` 的注释由「默认值统一四个汉字」改为「两个汉字」，并注明唯一性只在同一 `scope` 内。**`UNIQUE(scope, normalized_name)` 这条约束本来就是对的、一个字没改**——变的是它从此**真的被用到**：四字命名下没有任何两条默认分类同名，`scope` 那一列在种入路径上从未被行使过；两字命名后「礼金」与「其他」两侧各一条，**种子数据本身就会去撞这个索引**。这一行存在的意义是提醒实现者别在种入时按 `name` 去查重 |
 | v0.18 | 2026-08-23 | **补 M2 分类实体与迁移边界，`status` 仍为 `review`。** v1 终态表清单新增 `categories`；明确 M0/M1 已实现的 `category TEXT` 不变，M2 才迁为稳定 `category_id`。补分类表最小列、方向 / 停用 / 合并引用约束、默认只种一次、旧文本无损迁移、迁移前只读预检、`audit_log.batch_id` 与完整批次前状态撤销；结构化分类操作的表 / 工具形状及诊断修复入口登记为 M2 `ready` 前待决，不自行发明、不改变当前 M0 六表五工具 |
 | v0.17 | 2026-08-22 | **§3.7 新增错误码 `agent.not_ready`，`status` 仍为 `review`。** 合格 CLI 已发现但完整 readiness probe 未开始或进行中时，用户显式发起解析由命令层返回该码并拒绝创建 `parse_attempts`；`BackendStatus` 上这一档仍是 `error_code` 空（UI 显示「正在检查」）。probe 跑完但失败仍用各自的码。错误码集合由 29 条增至 30 条，其余不变 |
 | v0.16 | 2026-08-17 | **安装资格 / 解析就绪度错误语义同步，`status` 仍为 `review`。** `agent.backend_unavailable` 只表示未发现合格 CLI（未找到、不可执行、版本不可读取），不再用「任意 `probe()` 失败」把认证与密封失败混进安装状态；`agent.tool_surface_unsealed` 同步扩准为「无法证明完整 capability manifest 与预期严格相等」，覆盖清单缺失/不可读、缺项、多项及非工具副作用能力；错误码集合未变 |

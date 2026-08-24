@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<!--
+  归档副本 · 出处：Claude Design 项目「Daybook 桌面端 Token 设计系统」
+  b57b93f0-3547-496b-bf08-c7d73692ef15 / 「Daybook 桌面端设计稿 v9.dc.html」，导入于 2026-08-23。
+  相对上游只改了两处，都是被迫的，理由见 ./README.md「归档时改了什么」：
+    1. 删掉 <script src="./support.js"> —— 该运行时会注入 unpkg.com 的 React CDN（违反约束 2），
+       且 React 重排 style 字符串后设计稿自己的 [style*="…"] 选择器会失配，渲染结果与设计意图相反。
+    2. 12 处 src="assets/icon.svg" 改指 ../../assets/brand/icon.svg —— 图标的事实源只有一份。
+  正文（含 <x-dc>/<helmet> 包裹与所有内联样式）与上游逐字一致。用浏览器直接打开即可，无需任何运行时。
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daybook 桌面端设计稿 v9 · 事项规格同步</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<!-- 设计稿也保持离线：实现时使用系统字体，或将字体文件随应用本地打包。support.js 是本地文件，不是远程依赖。 -->
+<style>
+  :root {
+    --ink-950: #211208;
+    --ink-900: #311f13;
+    --ink-800: #4e2f1c;
+    --ink-700: #5a493e;
+    --ink-600: #73665d;
+    --ink-500: #8f847c;
+    --paper-50: #fdfcf9;
+    --paper-100: #f7f5f1;
+    --paper-200: #f0ede8;
+    --paper-300: #e8e4dd;
+    --paper-500: #c4b79c;
+    --brand-100: #e6f2fd;
+    --brand-500: #3e80b4;
+    --brand-600: #1f5f8f;
+    --brand-700: #15466a;
+    --positive-100: #e7f4e9;
+    --positive-600: #296a3b;
+    --positive-700: #1d4e2b;
+    --caution-100: #f7efe2;
+    --caution-500: #9b7225;
+    --caution-700: #583d00;
+    --critical-100: #fdece8;
+    --critical-500: #b06154;
+    --critical-700: #663028;
+    --hairline: rgba(33,18,8,.10);
+    --border: rgba(33,18,8,.24);
+    --focus: 0 0 0 2px var(--paper-100), 0 0 0 4px var(--brand-500);
+  }
+  body { margin: 0; background: var(--paper-300); color: var(--ink-950); font-family: "PingFang SC", "Helvetica Neue", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--brand-700); text-decoration: none; }
+  a:hover { color: var(--ink-800); }
+  h1, h2, h3 { color: var(--ink-800); }
+  code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  input, textarea, button { font: inherit; box-sizing: border-box; }
+  button, a { transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: var(--focus) !important; }
+  input::placeholder, textarea::placeholder { color: var(--ink-500); opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0ms !important; animation-duration: 0ms !important; } }
+
+  /* 三种输入职责：composer（自然语言主路径）/ boxed（设置与补全）/ inline（审核行内编辑）。 */
+  .composer-shell, div:has(> textarea[rows="2"]) { border: 1px solid rgba(78,47,28,.30) !important; border-top: 2px solid var(--ink-800) !important; background: var(--paper-50) !important; transition: border-color 140ms ease, box-shadow 140ms ease; }
+  .composer-shell:hover, div:has(> textarea[rows="2"]):hover { border-color: rgba(78,47,28,.48) !important; }
+  .composer-shell:focus-within, div:has(> textarea[rows="2"]):focus-within { border-color: var(--brand-500) !important; border-top-color: var(--ink-800) !important; box-shadow: var(--focus) !important; }
+  .field-composer, textarea[rows] { width: 100%; background: transparent !important; color: var(--ink-950) !important; border: 0 !important; outline: 0 !important; font-family: "PingFang SC", "Helvetica Neue", system-ui, sans-serif !important; resize: none !important; }
+  .field-boxed, input:not([type]):not(.field-composer):not(.field-inline) { background: var(--paper-50) !important; color: var(--ink-950) !important; border: 1px solid var(--border) !important; border-radius: 6px !important; outline: 0 !important; transition: border-color 140ms ease, box-shadow 140ms ease; }
+  .field-boxed:hover, input:not([type]):not(.field-composer):not(.field-inline):hover { border-color: rgba(78,47,28,.48) !important; }
+  .field-boxed:focus-visible, input:not([type]):not(.field-composer):not(.field-inline):focus-visible { border-color: var(--brand-500) !important; }
+  .field-inline { background: transparent !important; border: 0 !important; border-bottom: 1px dashed rgba(155,114,37,.55) !important; border-radius: 0 !important; outline: 0 !important; }
+  .field-inline:focus-visible { background: var(--paper-50) !important; border-radius: 6px !important; border-color: var(--brand-500) !important; }
+
+  /* 应用位置用棕墨；用户的动作、焦点与链接继续用靛青。 */
+  .nav-current, nav > span[style*="box-shadow: inset 3px 0 #1f5f8f"] { background: #f1ebe8 !important; color: var(--ink-800) !important; box-shadow: inset 3px 0 var(--ink-800) !important; }
+  .nav-sub-current, nav span[style*="background: rgba(169,198,232,.32)"] { background: rgba(78,47,28,.08) !important; color: var(--ink-800) !important; }
+
+  /* 事项视图专用组件。 */
+  .db-frame { width: 1440px; height: 900px; overflow: hidden; background: var(--paper-300); box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr; }
+  .db-rail { display: flex; flex-direction: column; overflow: hidden; background: var(--paper-200); border-right: 1px solid var(--hairline); }
+  .db-brand { padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px; }
+  .db-brand img { width: 24px; height: 24px; border-radius: 6px; }
+  .db-brand strong { font-family: "Songti SC", "STSong", serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: var(--ink-800); }
+  .db-brand small { font-family: "SFMono-Regular", "Menlo", monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: var(--ink-600); }
+  .db-nav { padding: 4px 10px 12px; display: grid; gap: 2px; }
+  .db-nav > * { padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: var(--ink-700); }
+  .db-nav .sub { padding: 5px 11px 5px 22px; font-size: 12px; }
+  .db-rail footer { margin-top: auto; padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid var(--hairline); }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #488c58; }
+  .week-layout { display: grid; grid-template-columns: minmax(0,1fr) 318px; overflow: hidden; }
+  .week-main { min-width: 0; display: grid; grid-template-rows: 64px 66px 32px 34px 38px 1fr; overflow: hidden; background: var(--paper-100); }
+  .week-toolbar { padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--hairline); }
+  .week-toolbar h1 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 22px; font-weight: 600; color: var(--ink-800); }
+  .icon-button, .secondary-button { height: 30px; padding: 0 11px; display: inline-grid; place-items: center; background: var(--paper-50); color: var(--ink-950); border: 1px solid rgba(33,18,8,.18); border-radius: 6px; cursor: pointer; }
+  .icon-button { width: 30px; padding: 0; }
+  .primary-button { height: 32px; padding: 0 14px; background: var(--brand-600); color: var(--paper-50); border: 0; border-radius: 6px; font-weight: 600; cursor: pointer; }
+  .ghost-button { height: 26px; padding: 0 9px; background: transparent; color: var(--brand-700); border: 0; border-radius: 6px; cursor: pointer; }
+  .week-columns { display: grid; grid-template-columns: 56px repeat(7, 1fr); border-bottom: 1px solid rgba(196,183,156,.75); }
+  .day-heading { padding: 7px 6px 6px; display: grid; gap: 3px; justify-items: center; border-right: 1px solid rgba(196,183,156,.55); color: var(--ink-600); font-size: 11px; }
+  .day-heading strong { width: 24px; height: 24px; display: grid; place-items: center; font: 500 13px "SFMono-Regular", "Menlo", monospace; color: var(--ink-950); }
+  .day-heading.today { background: var(--brand-100); color: var(--brand-700); }
+  .day-heading.today strong { background: #b4d6f3; border-radius: 50%; color: var(--brand-700); font-weight: 600; }
+  .track { display: grid; grid-template-columns: 56px repeat(7,1fr); align-items: stretch; border-bottom: 1px solid rgba(196,183,156,.65); background: var(--paper-200); }
+  .track-label { padding: 0 7px; display: flex; align-items: center; justify-content: flex-end; border-right: 1px solid rgba(196,183,156,.75); font: 600 9px "SFMono-Regular", "Menlo", monospace; letter-spacing: .04em; color: var(--ink-600); }
+  .track-item { margin: 3px; padding: 0 7px; min-width: 0; display: flex; align-items: center; gap: 5px; overflow: hidden; background: var(--paper-50); border-radius: 5px; box-shadow: inset 2px 0 var(--item-accent, var(--ink-800)); font-size: 11px; color: var(--ink-800); }
+  .track-item.range { background: rgba(78,47,28,.07); border: 1px solid rgba(78,47,28,.20); box-shadow: inset 3px 0 var(--ink-800); }
+  .track-item.due { background: var(--caution-100); color: var(--caution-700); box-shadow: inset 3px 0 var(--caution-500); }
+  .track-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .calendar-grid { min-height: 0; display: grid; grid-template-columns: 56px repeat(7,1fr); overflow: hidden; }
+  .time-axis { position: relative; border-right: 1px solid var(--paper-500); }
+  .time-axis span { position: absolute; right: 7px; transform: translateY(-50%); font: 9px "SFMono-Regular", "Menlo", monospace; color: var(--ink-600); }
+  .day-column { position: relative; border-right: 1px solid rgba(196,183,156,.55); background-image: repeating-linear-gradient(to bottom, rgba(196,183,156,.5) 0 1px, transparent 1px 42px); }
+  .day-column.today { background-color: rgba(230,242,253,.72); }
+  /* 短事项（≤30 分钟）不按时长压扁：小时格里最小 34px，标题始终完整。 */
+  .event { position: absolute; left: 3px; right: 3px; min-height: 34px; padding: 4px 6px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; background: var(--item-bg, rgba(196,183,156,.22)); border-radius: 5px; box-shadow: inset 2px 0 var(--item-accent, var(--ink-800)); color: var(--ink-800); box-sizing: border-box; }
+  .event b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+  .event small { font: 9px "SFMono-Regular", "Menlo", monospace; color: var(--ink-700); white-space: nowrap; }
+  .event.done { opacity: .76; background: var(--positive-100); box-shadow: inset 2px 0 var(--positive-600); }
+  .event.overlap-a { right: calc(50% + 1px); }
+  .event.overlap-b { left: calc(50% + 1px); }
+  .now-line { position: absolute; left: 0; right: 0; border-top: 1.5px solid var(--critical-500); z-index: 3; }
+  .now-line::before { content: ""; position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--critical-500); }
+  .items-side { min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--paper-200); border-left: 1px solid var(--hairline); }
+  .items-side section { padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
+  .side-title { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 17px; font-weight: 600; color: var(--ink-800); }
+  .mini-list { margin-top: 8px; display: grid; gap: 6px; }
+  .mini-card { padding: 8px 9px; display: grid; gap: 2px; background: var(--paper-50); border-radius: 6px; box-shadow: inset 3px 0 var(--item-accent, var(--ink-800)); }
+  .mini-card strong { font-size: 12px; font-weight: 500; color: var(--ink-950); }
+  .mini-card small { font-size: 10px; color: var(--ink-600); }
+  .mini-card.warning { background: var(--caution-100); box-shadow: inset 3px 0 var(--caution-500); }
+  .mini-card.alarm { background: var(--critical-100); box-shadow: inset 3px 0 var(--critical-500); }
+  .list-row { padding: 5px 7px; display: grid; grid-template-columns: 9px 1fr auto; gap: 8px; align-items: center; border-radius: 6px; font-size: 12px; }
+  .list-row.active { background: #f1ebe8; color: var(--ink-800); font-weight: 600; }
+  .list-swatch { width: 7px; height: 7px; border-radius: 2px; background: var(--item-accent, var(--ink-800)); }
+  .composer-compact { margin-top: auto; padding: 10px 12px; display: grid; gap: 7px; background: var(--paper-100); border-top: 1px solid var(--hairline); }
+  .composer-compact .row { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+
+  .review-layout { display: grid; grid-template-columns: minmax(0,42fr) minmax(0,58fr); overflow: hidden; }
+  .source-pane { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background-color: var(--paper-300); background-image: radial-gradient(rgba(33,18,8,.07) .7px, transparent .7px); background-size: 6px 6px; }
+  .draft-pane { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: var(--paper-100); border-left: 1px solid var(--hairline); }
+  .pane-header { padding: 18px 22px 12px; border-bottom: 1px solid var(--hairline); }
+  .pane-header p { margin: 0; font: 600 10px "SFMono-Regular", "Menlo", monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-600); }
+  .pane-header h2 { margin: 7px 0 0; font-family: "Songti SC", "STSong", serif; font-size: 21px; color: var(--ink-800); }
+  .source-sheet { margin: 16px 22px; padding: 28px; background: var(--paper-50); box-shadow: 0 18px 46px rgba(33,18,8,.18), inset 0 0 60px rgba(155,114,37,.06); }
+  .source-sheet blockquote { margin: 0; padding-left: 15px; border-left: 3px double var(--paper-500); font-family: "Songti SC", "STSong", serif; font-size: 15px; line-height: 2; color: var(--ink-950); }
+  .draft-list { padding: 12px 18px; display: grid; gap: 9px; align-content: start; overflow: hidden; }
+  .change-card { padding: 11px 12px; display: grid; gap: 8px; background: var(--paper-50); border: 1px solid var(--hairline); border-radius: 10px; box-shadow: inset 3px 0 var(--brand-600); }
+  .change-card.unresolved { border-color: rgba(155,114,37,.45); box-shadow: inset 3px 0 var(--caution-500); }
+  .change-top { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: start; }
+  .picked { width: 16px; height: 16px; display: grid; place-items: center; border-radius: 6px; background: var(--brand-600); color: var(--paper-50); font-size: 10px; }
+  .diff-grid { display: grid; grid-template-columns: 1fr 24px 1fr; gap: 8px; align-items: stretch; }
+  .diff-cell { padding: 7px 8px; display: grid; gap: 2px; background: var(--paper-100); border-radius: 6px; font-size: 11px; }
+  .diff-cell.after { background: #f1ebe8; border: 1px solid rgba(78,47,28,.16); }
+  .candidate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .candidate { padding: 7px 8px; background: var(--paper-100); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
+</style>
+</helmet>
+<div style="padding: 48px; display: flex; flex-direction: column; gap: 56px; background: #e8e4dd; color: #211208;">
+
+  <div style="display: flex; flex-direction: column; gap: 12px; max-width: 1440px;">
+    <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;">
+      <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #663028;">DAYBOOK · 桌面端设计稿 v9 · 事项规格同步</span>
+      <span style="font-size: 12px; color: #5a493e;">九个屏 · 1440 × 900 · 取自 <a href="Daybook Token System v3.dc.html">Token System v3</a>（<a href="Daybook 桌面端设计稿 v8.dc.html">v8 稿</a>）</span>
+    </div>
+    <p style="max-width: 1000px; margin: 0; font-size: 13px; line-height: 1.7; color: #5a493e;">本轮同步 <a href="#06">事项周视图</a> 与 <a href="#06b">事项变更审核</a>：事项改为同一实体的<strong style="font-weight: 600; color: #4e2f1c;">计划与结果</strong>两端，周视图明确分出截止、日期范围、不定时、小时格、未安排和待处理；自然语言修改必须先显示目标与字段差异。输入统一为三类：<strong style="font-weight: 600; color: #4e2f1c;">自然语言 composer · 设置 boxed field · 审核 inline field</strong>。棕墨负责应用位置、标题、输入纸边和结构线；靛青负责用户动作、链接、焦点与“今天”等当前上下文，避免两个颜色争夺同一语义。</p>
+  </div>
+
+  <section id="01" data-screen-label="01 第一次打开" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">01</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">第一次打开</strong><span style="font-size: 12px; color: #5a493e;">整页只有一件事：那张纸 · 首次提交前先说明数据如何保存和解析</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">补记</span>
+            <a href="#04" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">账目</a>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid rgba(33,18,8,.10);">
+          <div style="padding: 12px 14px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">整理记录</span>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #8f847c;">00</span>
+          </div>
+          <div style="flex: 1; padding: 4px 14px 14px; align-content: start;">
+            <div style="box-sizing: border-box; min-height: 96px; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 16px 14px; border: 1px dashed rgba(196,183,156,.9); border-radius: 8px;">
+              <span style="font-size: 12px; color: #73665d;">还没有整理记录</span>
+              <span style="text-align: center; font-size: 11px; line-height: 1.6; color: #8f847c;">每次整理都会存成一条<br />原始内容和草稿都能翻回来</span>
+            </div>
+          </div>
+        </div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <section style="display: grid; grid-template-rows: auto 1fr; overflow: hidden; background-color: #e8e4dd; background-image: radial-gradient(rgba(33,18,8,.07) .7px, transparent .7px); background-size: 6px 6px;">
+          <header style="padding: 20px 26px 0; display: flex; align-items: end; justify-content: space-between; gap: 12px;">
+            <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">补记 · 新的一段</p>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; color: #73665d;">08-14 周五 14:02</span>
+          </header>
+
+          <div style="display: grid; place-items: center; padding: 0 26px 24px; overflow: hidden;">
+            <div style="width: 760px; display: grid; justify-items: stretch;">
+              <h1 style="margin: 0 0 4px; font-family: 'Songti SC', 'STSong', serif; font-size: 27px; font-weight: 600; line-height: 1.45;">今天有什么要记的？</h1>
+              <p style="margin: 0 0 18px; font-size: 13px; line-height: 1.8; color: #5a493e;">直接输入、使用 macOS 系统听写，或把截图丢在这张纸上。解析出的条目先列成草稿，确认后才写入账本。</p>
+
+              <div class="composer-shell" style="position: relative; padding: 22px 24px 14px; display: grid; gap: 14px; background: #fdfcf9; box-shadow: 0 20px 50px rgba(33,18,8,.18), inset 0 0 70px rgba(155,114,37,.05); border: 1px solid rgba(62,128,180,.35); border-radius: 2px;">
+                <span style="position: absolute; top: 10px; left: 22px; right: 22px; height: 6px; opacity: .3; background: repeating-linear-gradient(90deg, #211208 0 1px, transparent 1px 20px);"></span>
+
+                <div style="padding-top: 6px; background-image: repeating-linear-gradient(to bottom, transparent 0 33px, rgba(196,183,156,.5) 33px 34px);">
+                  <textarea rows="4" placeholder="上周三在 Coles 买菜 62.4，周五和同事吃饭我先付的 96…" style="width: 100%; padding: 0; background: transparent; color: #211208; border: 0; outline: none; font-family: 'Songti SC', 'STSong', serif; font-size: 16px; line-height: 34px; resize: none;"></textarea>
+                </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 12px; border-top: 1px solid rgba(196,183,156,.75);">
+                  <div style="display: flex; align-items: center; gap: 9px;">
+                    <button type="button" style="height: 32px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; color: #211208; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 13px; cursor: pointer;">＋ 截图</button>
+                    <span style="font-size: 12px; color: #73665d;">拖到这张纸上 · ⌘V 粘贴都行</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="display: flex; align-items: center; gap: 9px; color: #5a493e;">
+                      <span aria-hidden="true" style="width: 30px; height: 30px; display: grid; place-items: center; background: #f1ebe8; color: #4e2f1c; border: 1px solid rgba(78,47,28,.22); border-radius: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 13px;">⌨</span>
+                      <span style="display: grid; gap: 1px;"><strong style="font-size: 12px; font-weight: 600; color: #4e2f1c;">可用 macOS 系统听写</strong><span style="font-size: 10px; color: #8f847c;">先点输入框，再用你的系统快捷键</span></span>
+                    </span>
+                    <span style="width: 1px; height: 26px; background: rgba(33,18,8,.12);"></span>
+                    <button type="button" disabled="" style="height: 38px; padding: 0 18px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600;">整理 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 500; opacity: .8;">⌘↩</span></button>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 12px; color: #73665d;">不知道怎么说？</span>
+                <button type="button" style="padding: 7px 12px; background: rgba(253,252,249,.85); color: #5a493e; border: 1px solid rgba(33,18,8,.12); border-radius: 999px; font-size: 12px; cursor: pointer;">昨天超市 62.4</button>
+                <button type="button" style="padding: 7px 12px; background: rgba(253,252,249,.85); color: #5a493e; border: 1px solid rgba(33,18,8,.12); border-radius: 999px; font-size: 12px; cursor: pointer;">下周一要交房租</button>
+                <button type="button" style="padding: 7px 12px; background: rgba(253,252,249,.85); color: #5a493e; border: 1px solid rgba(33,18,8,.12); border-radius: 999px; font-size: 12px; cursor: pointer;">周四下午三点看牙医</button>
+                <button type="button" style="padding: 7px 12px; background: rgba(253,252,249,.85); color: #5a493e; border: 1px solid rgba(33,18,8,.12); border-radius: 999px; font-size: 12px; cursor: pointer;">把这张账单记一下</button>
+              </div>
+
+              <div style="margin-top: 22px; padding-top: 16px; display: grid; gap: 12px; border-top: 1px solid rgba(196,183,156,.7);">
+                <span style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 13px; color: #5a493e;">先定个常用货币</span>
+                  <input placeholder="比如 AUD" style="width: 112px; height: 30px; padding: 0 10px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; letter-spacing: .08em;" />
+                  <button type="button" disabled="" style="height: 30px; padding: 0 12px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 12px; font-weight: 600;">好</button>
+                  <span style="font-size: 12px; color: #73665d;">只问这一次</span>
+                </span>
+                <div style="padding: 12px 14px; display: grid; gap: 5px; background: rgba(253,252,249,.72); border: 1px solid rgba(33,18,8,.12); border-radius: 8px;">
+                  <strong style="font-size: 13px; font-weight: 600;">你的数据如何保存和解析</strong>
+                  <span style="font-size: 12px; line-height: 1.75; color: #5a493e;">账本、原始文件和日志保存在这台 Mac，你可以在访达中查看或删除。</span>
+                  <span style="font-size: 12px; line-height: 1.75; color: #5a493e;">整理时，截图和文字会由 Claude Code 发往其模型服务商，并使用你的订阅额度。</span>
+                  <span style="font-size: 12px; line-height: 1.75; color: #5a493e;">Daybook 没有账号或远程服务端，不代理解析流量，也不收集遥测。</span>
+                  <a href="#07" style="justify-self: start; margin-top: 2px; font-size: 12px;">在设置里查看详细说明 ›</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+    </div>
+  </section>
+
+  <section id="02" data-screen-label="02 说了一段" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">02</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">说了一段</strong><span style="font-size: 12px; color: #5a493e;">主要动作：确认这 7 条草稿 · 左边原始内容，右边逐条草稿</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">补记</span>
+            <a href="#04" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">账目</a>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid rgba(33,18,8,.10);">
+          <div style="padding: 12px 14px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">整理记录</span>
+            <button type="button" style="height: 24px; padding: 0 9px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.20); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 开始整理</button>
+          </div>
+          <div style="flex: 1; padding: 0 10px 10px; display: grid; gap: 2px; align-content: start; overflow: hidden;">
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">今天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; background: #e6f2fd; box-shadow: inset 3px 0 #1f5f8f; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600;">今天 14:02 的补记</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">7 条待确认</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">银行账单 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">3 条已记下 · 11:20</span></div>
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">前几天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">微信支付账单.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">3 条待确认 · 8/13</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">随口记的几句</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">2 条已记下 · 8/12</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">Wise 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">5 条已记下 · 8/11</span></div>
+          </div>
+        </div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <div style="display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); overflow: hidden;">
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background-color: #e8e4dd; background-image: radial-gradient(rgba(33,18,8,.07) .7px, transparent .7px); background-size: 6px 6px;">
+            <header style="padding: 20px 24px 12px; display: flex; align-items: end; justify-content: space-between; gap: 12px;">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">原始内容</p>
+                <h1 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600;">今天 14:02 的补记</h1>
+              </div>
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; color: #73665d;">08-14 14:02</span>
+            </header>
+
+            <div style="padding: 6px 24px 0; overflow: hidden;">
+              <div style="position: relative; padding: 26px 28px; background: #fdfcf9; box-shadow: 0 18px 46px rgba(33,18,8,.18), inset 0 0 60px rgba(155,114,37,.06);">
+                <span style="position: absolute; top: 11px; left: 24px; right: 24px; height: 6px; opacity: .32; background: repeating-linear-gradient(90deg, #211208 0 1px, transparent 1px 20px);"></span>
+                <p style="margin: 0; padding-left: 16px; border-left: 3px double #c4b79c; font-family: 'Songti SC', 'STSong', serif; font-size: 15px; line-height: 2; color: #211208;">上周三在 Coles 买菜 62.4，周五和同事在市区吃饭我先付的 96，他们转我 64。周六打车回家 28.7，还有一笔 300 块人民币的红包，那天汇率大概 1 块 2 毛 1。对了下周一要交房租，还得约个牙医，一直拖着。</p>
+              </div>
+              <p style="margin: 13px 0 0; font-size: 13px; line-height: 1.7; color: #5a493e;">原始内容保持原样，存在本机；右边每条草稿都标了出处，可逐条核对。</p>
+              <div style="margin-top: 16px; padding: 10px 12px; display: flex; gap: 9px; align-items: start; background: rgba(253,252,249,.7); border: 1px solid rgba(33,18,8,.08); border-radius: 8px;">
+                <img src="../../assets/brand/icon.svg" alt="" style="flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; border-radius: 4px;" />
+                <p style="margin: 0; font-size: 12px; line-height: 1.7; color: #5a493e;">已生成 5 条交易草稿、2 条事项草稿；其中 1 条需要补充收支方向与汇率。</p>
+              </div>
+            </div>
+
+            <footer style="padding: 14px 24px 18px; display: grid; gap: 8px;">
+              <span style="font-size: 12px; color: #73665d;">发现错误？直接编辑对应条目。也可以补充新的文字或图片后重新整理。</span>
+<div style="padding: 11px 13px 10px; display: grid; gap: 9px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; border-color: rgba(33,18,8,.16); box-shadow: 0 8px 24px rgba(33,18,8,.08);">
+              <textarea rows="2" placeholder="再说一句，或者把补充的截图拖进来…" style="width: 100%; padding: 2px; background: transparent; color: #211208; border: 0; outline: none; font-size: 14px; line-height: 1.7; resize: none;"></textarea>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                <button type="button" style="height: 28px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; background: #f7f5f1; color: #211208; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 截图</button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; color: #5a493e; font-size: 11px;"><span aria-hidden="true" style="color: #4e2f1c; font-family: 'SFMono-Regular', 'Menlo', monospace;">⌨</span>输入框支持 macOS 系统听写</span>
+                  <button type="button" disabled="" style="height: 32px; padding: 0 14px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 13px; font-weight: 600;">整理 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 500; opacity: .8;">⌘↩</span></button>
+                </div>
+              </div>
+            </div>
+            </footer>
+          </section>
+
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: #f7f5f1; border-left: 1px solid rgba(33,18,8,.10);">
+            <header style="padding: 20px 22px 13px; display: flex; align-items: end; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(33,18,8,.10);">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">草稿 · 未写入账本</p>
+                <h2 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600;">7 条待确认</h2>
+              </div>
+              <a href="#02" style="font-size: 13px; text-decoration: underline;">全部取消勾选</a>
+            </header>
+
+            <div style="padding: 14px 22px 0; display: grid; gap: 11px; align-content: start; overflow: hidden;">
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #663028;">需要补充 · 1</span>
+              <article style="padding: 13px 14px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; border-color: rgba(176,97,84,.45);">
+                <div style="display: grid; grid-template-columns: 18px 20px 1fr; gap: 10px; align-items: start;">
+                  <span style="width: 16px; height: 16px; margin-top: 3px; border: 1px solid rgba(33,18,8,.35); border-radius: 6px;"></span>
+                  <span style="margin-top: 3px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">01</span>
+                  <div style="min-width: 0;">
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                      <p style="margin: 0; font-family: 'Songti SC', 'STSong', serif; font-size: 17px; font-weight: 600;">微信红包</p>
+                      <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 20px; font-weight: 600;">300.00 <span style="font-size: 12px; color: #73665d;">CNY</span></p>
+                    </div>
+                    <p style="margin: 8px 0 0; padding: 7px 9px; background: #e8e4dd; border-radius: 6px; font-family: 'Songti SC', 'STSong', serif; font-size: 13px; line-height: 1.55; color: #5a493e;">“还有一笔 300 块人民币的红包”</p>
+                    <div style="margin-top: 11px; display: grid; gap: 8px;">
+                      <div style="display: grid; grid-template-columns: 84px 1fr; gap: 10px; align-items: center;">
+                        <span style="font-size: 13px; color: #583d00;">收入还是支出</span>
+                        <span style="display: flex; align-items: center; gap: 7px;">
+                          <button type="button" style="height: 30px; padding: 0 14px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">支出</button>
+                          <button type="button" style="height: 30px; padding: 0 14px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">收入</button>
+                          <span style="font-size: 12px; color: #73665d;">原文没写明</span>
+                        </span>
+                      </div>
+                      <div style="display: grid; grid-template-columns: 84px 76px 92px auto 1fr; gap: 8px; align-items: center;">
+                        <span style="font-size: 13px; color: #583d00;">换算汇率</span>
+                        <input value="AUD" style="height: 30px; padding: 0 8px; background: #fdfcf9; border-radius: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; font-weight: 600; border: 1px solid rgba(33,18,8,.24);" />
+                        <input value="0.21" style="height: 30px; padding: 0 8px; background: #fdfcf9; border-radius: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; border: 1px solid #3e80b4;" />
+                        <button type="button" style="height: 30px; padding: 0 12px; background: #1f5f8f; color: #fdfcf9; border: 0; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">应用汇率</button>
+                        <span style="font-size: 12px; color: #73665d;">折算后 63.00 AUD</span>
+                      </div>
+                      <span style="font-size: 12px; color: #663028;">两项补齐前，这条不计入账目合计。</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <span style="margin-top: 2px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">交易 · 4</span>
+              <div style="background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; overflow: hidden;">
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">02</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Coles</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span>买菜 · 8月5日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">62.40</span>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10); box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">03</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">市区吃饭（我先付的）</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span>吃饭 · 8月7日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">96.00</span>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10); box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">04</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: #1d4e2b;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">同事转回来</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 150);"></span>人情 · 收入 · 8月7日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600; color: #1d4e2b;">+64.00</span>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10); box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">05</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">打车回家</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 240);"></span>交通 · 8月8日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">28.70</span>
+                </div>
+              </div>
+
+              <span style="margin-top: 2px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">事项 · 2</span>
+              <div style="background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; overflow: hidden;">
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">06</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">交房租</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 15);"></span>钱事 · 8月17日 周一 · 不定时</span></span>
+                  <span style="padding: 2px 8px; background: #e6f2fd; border-radius: 999px; font-size: 12px; color: #15466a;">已安排</span>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 18px 20px 1fr auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10); box-shadow: inset 3px 0 #1f5f8f;">
+                  <span style="width: 16px; height: 16px; display: grid; place-items: center; background: #1f5f8f; border-radius: 6px; color: #fdfcf9; font-size: 11px;">✓</span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">07</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">约牙医</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span>健康 · 原文没说哪天</span></span>
+                  <span style="padding: 2px 8px; background: #f0ede8; border-radius: 999px; font-size: 12px; color: #5a493e;">未安排</span>
+                </div>
+              </div>
+            </div>
+
+            <footer style="padding: 13px 22px 16px; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center; background: #f0ede8; border-top: 1px solid rgba(33,18,8,.10);">
+              <div style="display: flex; flex-direction: column;"><strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 20px; font-weight: 600;">6</strong><span style="font-size: 12px; color: #73665d;">条已勾选</span></div>
+              <button type="button" style="height: 40px; background: #1f5f8f; color: #fdfcf9; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">确认并记下所选 6 条 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; font-weight: 500; opacity: .8;">⌘↩</span></button>
+              <span style="grid-column: 2; justify-self: start; font-size: 12px; color: #73665d;">写入：账目 4 笔 · 事项 2 件 · 未勾选的 1 条留在这条整理记录里</span>
+            </footer>
+          </section>
+        </div>
+    </div>
+  </section>
+
+  <section id="03" data-screen-label="03 解析中" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">03</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">解析中</strong><span style="font-size: 12px; color: #5a493e;">解析中：可以等，也可以停止解析 · 草稿逐条出现</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">补记</span>
+            <a href="#04" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">账目</a>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid rgba(33,18,8,.10);">
+          <div style="padding: 12px 14px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">整理记录</span>
+            <button type="button" style="height: 24px; padding: 0 9px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.20); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 开始整理</button>
+          </div>
+          <div style="flex: 1; padding: 0 10px 10px; display: grid; gap: 2px; align-content: start; overflow: hidden;">
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">今天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; background: #e6f2fd; box-shadow: inset 3px 0 #1f5f8f; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600;">银行账单 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">正在解析 · 11:20</span></div>
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">前几天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">微信支付账单.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">3 条待确认 · 8/13</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">随口记的几句</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">2 条已记下 · 8/12</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">Wise 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">5 条已记下 · 8/11</span></div>
+          </div>
+        </div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <div style="display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); overflow: hidden;">
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background-color: #e8e4dd; background-image: radial-gradient(rgba(33,18,8,.07) .7px, transparent .7px); background-size: 6px 6px;">
+            <header style="padding: 20px 24px 12px; display: flex; align-items: end; justify-content: space-between; gap: 12px;">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">来源图片</p>
+                <h1 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600;">银行账单 8月.png</h1>
+              </div>
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; color: #73665d;">1170 × 2532</span>
+            </header>
+
+            <div style="padding: 6px 24px 0; overflow: hidden;">
+              <div style="padding: 18px; background: #fdfcf9; box-shadow: 0 18px 46px rgba(33,18,8,.18);">
+                <div style="height: 300px; display: grid; place-content: center; justify-items: center; gap: 8px; background: repeating-linear-gradient(135deg, #f0ede8 0 8px, #e8e4dd 8px 16px); border: 1px solid rgba(33,18,8,.10);">
+                  <code style="font-size: 12px; letter-spacing: .06em; color: #5a493e;">你拖进来的那张账单截图</code>
+                </div>
+              </div>
+              <p style="margin: 13px 0 0; font-size: 13px; line-height: 1.7; color: #5a493e;">来源图片保持原样，存在本机，解析完还能对着核。</p>
+              <div style="margin-top: 16px; padding: 10px 12px; display: flex; gap: 9px; align-items: start; background: rgba(253,252,249,.7); border: 1px solid rgba(33,18,8,.08); border-radius: 8px;">
+                <img src="../../assets/brand/icon.svg" alt="" style="flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; border-radius: 4px;" />
+                <p style="margin: 0; font-size: 12px; line-height: 1.7; color: #5a493e;">解析这一步会把图片交给 Claude Code 发往其模型服务商，使用你的订阅额度。</p>
+              </div>
+            </div>
+
+            <footer style="padding: 14px 24px 18px; display: grid; gap: 8px;">
+              <span style="font-size: 12px; color: #73665d;">可以继续补充，排在这张后面解析</span>
+<div style="padding: 11px 13px 10px; display: grid; gap: 9px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; border-color: rgba(33,18,8,.16); box-shadow: 0 8px 24px rgba(33,18,8,.08);">
+              <textarea rows="2" placeholder="比如「这张里的餐费都算吃饭」…" style="width: 100%; padding: 2px; background: transparent; color: #211208; border: 0; outline: none; font-size: 14px; line-height: 1.7; resize: none;"></textarea>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                <button type="button" style="height: 28px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; background: #f7f5f1; color: #211208; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 截图</button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; color: #5a493e; font-size: 11px;"><span aria-hidden="true" style="color: #4e2f1c; font-family: 'SFMono-Regular', 'Menlo', monospace;">⌨</span>输入框支持 macOS 系统听写</span>
+                  <button type="button" disabled="" style="height: 32px; padding: 0 14px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 13px; font-weight: 600;">整理 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 500; opacity: .8;">⌘↩</span></button>
+                </div>
+              </div>
+            </div>
+            </footer>
+          </section>
+
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: #f7f5f1; border-left: 1px solid rgba(33,18,8,.10);">
+            <header style="padding: 20px 22px 13px; display: flex; align-items: end; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(33,18,8,.10);">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">草稿 · 未写入账本</p>
+                <h2 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600; color: #5a493e;">正在解析</h2>
+              </div>
+              <span style="display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.16); border-radius: 999px; font-size: 12px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #3e80b4; box-shadow: 0 0 0 3px rgba(62,128,180,.22);"></span>正在解析图片</span>
+            </header>
+
+            <div style="padding: 16px 22px 0; display: grid; gap: 14px; align-content: start; overflow: hidden;">
+              <div style="padding: 14px 16px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                  <strong style="font-size: 13px; font-weight: 600; color: #15466a;">共 2 页 · 正在第 1 页</strong>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #73665d;">已用时 14 秒</span>
+                </div>
+                <div style="margin-top: 12px; height: 6px; background: #a9c6e8; border-radius: 999px; overflow: hidden;"><span style="display: block; width: 45%; height: 6px; background: repeating-linear-gradient(90deg, #3e80b4 0 12px, #1f5f8f 12px 24px);"></span></div>
+                <div style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                  <div style="display: grid; gap: 3px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; line-height: 1.5; color: #73665d;">
+                    <span>11:20:11 开始解析</span>
+                    <span>11:20:13 已生成 3 条草稿</span>
+                    <span style="color: #15466a;">11:20:14 正在核对声明合计</span>
+                  </div>
+                  <button type="button" style="height: 30px; padding: 0 12px; background: transparent; color: #663028; border: 1px solid rgba(102,48,40,.4); border-radius: 6px; font-size: 13px; cursor: pointer;">停止解析</button>
+                </div>
+              </div>
+
+              <div style="display: grid; gap: 10px;">
+                <div style="padding: 12px 14px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <div style="display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;">
+                    <span style="width: 16px; height: 16px; margin-top: 2px; border: 1px solid rgba(33,18,8,.20); border-radius: 6px;"></span>
+                    <div style="display: grid; gap: 8px;"><span style="display: block; height: 14px; width: 52%; background: repeating-linear-gradient(45deg, #e8e4dd 0 5px, #f0ede8 5px 10px);"></span><span style="display: block; height: 14px; width: 34%; background: repeating-linear-gradient(45deg, #e8e4dd 0 5px, #f0ede8 5px 10px);"></span><span style="display: block; height: 14px; width: 100%; background: repeating-linear-gradient(45deg, #e8e4dd 0 5px, #f0ede8 5px 10px);"></span></div>
+                  </div>
+                </div>
+                <div style="padding: 12px 14px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <div style="display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start;">
+                    <span style="width: 16px; height: 16px; margin-top: 2px; border: 1px solid rgba(33,18,8,.20); border-radius: 6px;"></span>
+                    <div style="display: grid; gap: 8px;"><span style="display: block; height: 14px; width: 40%; background: repeating-linear-gradient(45deg, #e8e4dd 0 5px, #f0ede8 5px 10px);"></span><span style="display: block; height: 14px; width: 28%; background: repeating-linear-gradient(45deg, #e8e4dd 0 5px, #f0ede8 5px 10px);"></span></div>
+                  </div>
+                </div>
+                <p style="margin: 2px 0 0; font-size: 12px; color: #73665d;">这些是草稿，确认后才会写入账本。</p>
+              </div>
+            </div>
+
+            <footer style="padding: 13px 22px 16px; display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; background: #f0ede8; border-top: 1px solid rgba(33,18,8,.10);">
+              <div style="display: flex; flex-direction: column;"><strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 20px; font-weight: 600; color: #8f847c;">—</strong><span style="font-size: 12px; color: #73665d;">条待确认</span></div>
+              <button type="button" disabled="" style="height: 40px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600;">解析完成后可确认</button>
+            </footer>
+          </section>
+        </div>
+    </div>
+  </section>
+
+  <section id="03b" data-screen-label="03b 解析完成 · 对账" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">03b</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">解析完成 · 对账</strong><span style="font-size: 12px; color: #5a493e;">声明合计、草稿合计、差额与确认按钮固定同屏 —— 对账不通过时不能一次确认全部</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">补记</span>
+            <a href="#04" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">账目</a>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid rgba(33,18,8,.10);">
+          <div style="padding: 12px 14px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">整理记录</span>
+            <button type="button" style="height: 24px; padding: 0 9px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.20); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 开始整理</button>
+          </div>
+          <div style="flex: 1; padding: 0 10px 10px; display: grid; gap: 2px; align-content: start; overflow: hidden;">
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">今天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; background: #e6f2fd; box-shadow: inset 3px 0 #1f5f8f; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600;">银行账单 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">3 条待确认 · 11:20</span></div>
+            <span style="padding: 8px 4px 4px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; color: #8f847c;">前几天</span>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">微信支付账单.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">3 条待确认 · 8/13</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">随口记的几句</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">2 条已记下 · 8/12</span></div>
+            <div style="padding: 7px 9px; display: grid; gap: 2px; border-radius: 6px; cursor: default;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #5a493e;">Wise 8月.png</span><span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">5 条已记下 · 8/11</span></div>
+          </div>
+        </div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <div style="display: grid; grid-template-columns: minmax(0, 42fr) minmax(0, 58fr); overflow: hidden;">
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background-color: #e8e4dd; background-image: radial-gradient(rgba(33,18,8,.07) .7px, transparent .7px); background-size: 6px 6px;">
+            <header style="padding: 20px 24px 12px; display: flex; align-items: end; justify-content: space-between; gap: 12px;">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">来源图片</p>
+                <h1 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600;">银行账单 8月.png</h1>
+              </div>
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; color: #73665d;">1170 × 2532</span>
+            </header>
+
+            <div style="padding: 6px 24px 0; overflow: hidden;">
+              <div style="padding: 18px; background: #fdfcf9; box-shadow: 0 18px 46px rgba(33,18,8,.18);">
+                <div style="height: 300px; display: grid; place-content: center; justify-items: center; gap: 8px; background: repeating-linear-gradient(135deg, #f0ede8 0 8px, #e8e4dd 8px 16px); border: 1px solid rgba(33,18,8,.10);">
+                  <code style="font-size: 12px; letter-spacing: .06em; color: #5a493e;">你拖进来的那张账单截图</code>
+                </div>
+              </div>
+              <p style="margin: 13px 0 0; font-size: 13px; line-height: 1.7; color: #5a493e;">来源图片保持原样，存在本机，解析完还能对着核。</p>
+              <div style="margin-top: 16px; padding: 10px 12px; display: flex; gap: 9px; align-items: start; background: rgba(253,252,249,.7); border: 1px solid rgba(33,18,8,.08); border-radius: 8px;">
+                <img src="../../assets/brand/icon.svg" alt="" style="flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; border-radius: 4px;" />
+                <p style="margin: 0; font-size: 12px; line-height: 1.7; color: #5a493e;">解析已完成。这一步把图片交给 Claude Code 发往其模型服务商，使用了你的订阅额度。</p>
+              </div>
+            </div>
+
+            <footer style="padding: 14px 24px 18px; display: grid; gap: 8px;">
+              <span style="font-size: 12px; color: #73665d;">发现错误？直接编辑对应条目。也可以补充新的文字或图片后重新整理。</span>
+<div style="padding: 11px 13px 10px; display: grid; gap: 9px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; border-color: rgba(33,18,8,.16); box-shadow: 0 8px 24px rgba(33,18,8,.08);">
+              <textarea rows="2" placeholder="比如「这张里的餐费都算吃饭」…" style="width: 100%; padding: 2px; background: transparent; color: #211208; border: 0; outline: none; font-size: 14px; line-height: 1.7; resize: none;"></textarea>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                <button type="button" style="height: 28px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; background: #f7f5f1; color: #211208; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 12px; cursor: pointer;">＋ 截图</button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; color: #5a493e; font-size: 11px;"><span aria-hidden="true" style="color: #4e2f1c; font-family: 'SFMono-Regular', 'Menlo', monospace;">⌨</span>输入框支持 macOS 系统听写</span>
+                  <button type="button" disabled="" style="height: 32px; padding: 0 14px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 13px; font-weight: 600;">整理 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 500; opacity: .8;">⌘↩</span></button>
+                </div>
+              </div>
+            </div>
+            </footer>
+          </section>
+
+          <section style="display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; background: #f7f5f1; border-left: 1px solid rgba(33,18,8,.10);">
+            <header style="padding: 20px 22px 13px; display: flex; align-items: end; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(33,18,8,.10);">
+              <div>
+                <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">草稿 · 未写入账本</p>
+                <h2 style="margin: 8px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 22px; font-weight: 600;">3 条待确认</h2>
+              </div>
+              <span style="display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.16); border-radius: 999px; font-size: 12px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>解析完成 11:20:31</span>
+            </header>
+
+            <div style="padding: 15px 22px 0; display: grid; gap: 12px; align-content: start; overflow: hidden;">
+              <div style="padding: 14px 16px; display: grid; gap: 11px; background: #fdfcf9; border: 1px solid rgba(176,97,84,.45); border-radius: 10px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                  <strong style="font-size: 13px; font-weight: 600;">与账单声明合计对账</strong>
+                  <span style="display: inline-flex; gap: 7px; align-items: center; padding: 4px 10px; background: #f6e9e6; border-radius: 999px; font-size: 12px; font-weight: 600; color: #663028;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #b06154;"></span>对账不符</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                  <div style="padding: 9px 11px; display: grid; gap: 3px; background: #f7f5f1; border-radius: 8px;"><span style="font-size: 11px; color: #73665d;">账单声明合计</span><code style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 17px; font-weight: 600;">176.20</code></div>
+                  <div style="padding: 9px 11px; display: grid; gap: 3px; background: #f7f5f1; border-radius: 8px;"><span style="font-size: 11px; color: #73665d;">草稿合计</span><code style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 17px; font-weight: 600;">148.40</code></div>
+                  <div style="padding: 9px 11px; display: grid; gap: 3px; background: #f6e9e6; border-radius: 8px;"><span style="font-size: 11px; color: #73665d;">差额</span><code style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 17px; font-weight: 600; color: #663028;">−27.80</code></div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; color: #73665d;">
+                  <span>对账状态</span>
+                  <span style="padding: 3px 9px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(33,18,8,.14); color: #73665d;">通过</span>
+                  <span style="padding: 3px 9px; border-radius: 999px; font-size: 12px; background: #f6e9e6; border: 1px solid rgba(176,97,84,.5); color: #663028; font-weight: 600;">不符（当前）</span>
+                  <span style="padding: 3px 9px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(33,18,8,.14); color: #73665d;">无法校验</span>
+                  <span style="margin-left: 2px;">声明合计取自账单第 2 页底部</span>
+                </div>
+                <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5a493e;">第 2 页有一笔 27.80 被遮挡，没有生成草稿。差额归零前不能一次确认全部；可以逐条确认已核对的 3 条，或者补一张更清晰的截图重新解析。</p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <button type="button" style="height: 30px; padding: 0 12px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">重新解析这张图</button>
+                  <button type="button" style="height: 30px; padding: 0 12px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">手动补一笔 27.80</button>
+                  <button type="button" style="height: 30px; padding: 0 12px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">看第 2 页原图</button>
+                </div>
+              </div>
+
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">草稿 · 3 条 · 当前策略 single_only</span>
+              <div style="background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px; overflow: hidden;">
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 20px 1fr auto auto; gap: 10px; align-items: center;">
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">01</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span>房租（半月）</span><span style="font-size: 12px; color: #73665d;">住 · 8月13日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">132.00</span>
+                  <button type="button" style="height: 26px; padding: 0 9px; background: transparent; color: #15466a; border: 1px solid rgba(33,18,8,.18); border-radius: 6px; font-size: 11px; cursor: pointer;">确认这一条</button>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 20px 1fr auto auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10);">
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">02</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span>超市</span><span style="font-size: 12px; color: #73665d;">买菜 · 8月13日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">11.50</span>
+                  <button type="button" style="height: 26px; padding: 0 9px; background: transparent; color: #15466a; border: 1px solid rgba(33,18,8,.18); border-radius: 6px; font-size: 11px; cursor: pointer;">确认这一条</button>
+                </div>
+                <div style="padding: 10px 14px; display: grid; grid-template-columns: 20px 1fr auto auto; gap: 10px; align-items: center; border-top: 1px solid rgba(33,18,8,.10);">
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; color: #73665d;">03</span>
+                  <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span>订阅 · 音乐</span><span style="font-size: 12px; color: #73665d;">订阅 · 8月13日</span></span>
+                  <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">4.90</span>
+                  <button type="button" style="height: 26px; padding: 0 9px; background: transparent; color: #15466a; border: 1px solid rgba(33,18,8,.18); border-radius: 6px; font-size: 11px; cursor: pointer;">确认这一条</button>
+                </div>
+              </div>
+              <p style="margin: 2px 0 0; font-size: 12px; color: #73665d;">这些是草稿，确认后才会写入账本。</p>
+            </div>
+
+            <footer style="padding: 13px 22px 16px; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center; background: #f0ede8; border-top: 1px solid rgba(33,18,8,.10);">
+              <div style="display: flex; flex-direction: column;"><strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 20px; font-weight: 600; color: #663028;">0 / 3</strong><span style="font-size: 12px; color: #73665d;">已逐条确认</span></div>
+              <button type="button" disabled style="height: 40px; background: #ded8ce; color: #8f847c; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: not-allowed;">对账通过后才可一次确认全部</button>
+              <span style="grid-column: 2; justify-self: start; font-size: 12px; color: #663028;">差额 −27.80 未归零；文件来源只能逐条确认，不能批量提交</span>
+            </footer>
+          </section>
+        </div>
+    </div>
+  </section>
+
+  <section id="04" data-screen-label="04 账目" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">04</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">账目</strong><span style="font-size: 12px; color: #5a493e;">主要动作：翻这个月的花销 · 视图切换收进左栏，筛选进工具条</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <a href="#01" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">补记</a>
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">账目</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #15466a; font-weight: 600; background: rgba(169,198,232,.32);">按天排</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">看统计</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">按月看总数</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">改动记录</span>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1;"></div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <div style="display: grid; grid-template-columns: 1fr 320px; overflow: hidden;">
+          <section style="padding: 22px 28px; overflow: hidden; background: #f7f5f1;">
+            <header style="display: grid; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid #c4b79c;">
+              <div style="display: flex; align-items: end; justify-content: space-between; gap: 16px;">
+                <div>
+                  <p style="margin: 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">花的钱 · 按天排</p>
+                  <div style="margin-top: 8px; display: flex; align-items: center; gap: 12px;">
+                    <button type="button" title="上个月" style="width: 30px; height: 30px; display: grid; place-items: center; background: #fdfcf9; color: #5a493e; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 13px; cursor: pointer;">‹</button>
+                    <h1 style="margin: 0; font-family: 'Songti SC', 'STSong', serif; font-size: 26px; font-weight: 600;">2026 年 8 月</h1>
+                    <button type="button" title="下个月" style="width: 30px; height: 30px; display: grid; place-items: center; background: #fdfcf9; color: #5a493e; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 13px; cursor: pointer;">›</button>
+                  </div>
+                </div>
+                <a href="#02" style="display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px; background: #f7efe2; border-radius: 999px; font-size: 12px; color: #583d00;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #9b7225;"></span>1 条待确认</a>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" style="height: 28px; padding: 0 11px; display: inline-flex; align-items: center; gap: 7px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 12px; cursor: pointer;">全部类别 <span style="color: #73665d;">12</span> ⌄</button>
+                <span style="width: 1px; height: 18px; background: rgba(33,18,8,.12);"></span>
+                <span style="padding: 5px 10px; display: inline-flex; gap: 6px; align-items: center; background: #e6f2fd; border-radius: 999px; font-size: 12px; color: #15466a;"><span style="width: 12px; height: 12px; display: grid; place-items: center; background: #1f5f8f; border-radius: 4px; color: #fdfcf9; font-size: 9px;">✓</span>已经记好的</span>
+                <span style="padding: 5px 10px; display: inline-flex; gap: 6px; align-items: center; background: #e6f2fd; border-radius: 999px; font-size: 12px; color: #15466a;"><span style="width: 12px; height: 12px; display: grid; place-items: center; background: #1f5f8f; border-radius: 4px; color: #fdfcf9; font-size: 9px;">✓</span>还没确认的</span>
+                <span style="padding: 5px 10px; display: inline-flex; gap: 6px; align-items: center; border: 1px solid rgba(33,18,8,.14); border-radius: 999px; font-size: 12px; color: #73665d;"><span style="width: 12px; height: 12px; border: 1px solid rgba(33,18,8,.35); border-radius: 4px;"></span>我删掉的</span>
+                <span style="margin-left: auto; display: flex; gap: 12px; align-items: center;">
+                  <span style="display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #211208;"></span>记好了</span>
+                  <span style="display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 7px; height: 7px; border-radius: 50%; border: 2px solid #1d4e2b;"></span>收到的钱</span>
+                  <span style="display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #aca29c;"></span>还没确认</span>
+                </span>
+              </div>
+            </header>
+
+            <div style="margin-top: 16px; display: grid; gap: 18px;">
+            <div>
+              <div style="display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px;">
+                <span style="font-size: 13px; font-weight: 600; color: #5a493e;">8月8日 周六</span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #73665d;">这天 28.70</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">打车回家</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 240);"></span>交通</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">28.70</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #aca29c; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: #5a493e;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">微信红包</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: #aca29c;"></span>未分类</span><span style="flex: 0 0 auto; padding: 1px 7px; background: #f7efe2; border-radius: 999px; font-size: 11px; color: #583d00;">缺汇率 · 未计入</span></span>
+                <span style="padding: 2px 6px; background: repeating-linear-gradient(45deg, rgba(172,162,156,.28) 0 5px, transparent 5px 10px); font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600; color: #5a493e;">300.00 CNY</span>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px;">
+                <span style="font-size: 13px; font-weight: 600; color: #5a493e;">8月7日 周五</span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #73665d;">这天 32.00</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">市区吃饭（我先付的）</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span>吃饭</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">96.00</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; border: 2px solid #1d4e2b; background: #f7f5f1; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: #1d4e2b;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">同事转回来</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 150);"></span>人情</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600; color: #1d4e2b;">+64.00</span>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px;">
+                <span style="font-size: 13px; font-weight: 600; color: #5a493e;">8月5日 周三</span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #73665d;">这天 73.90</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Coles</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span>买菜</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">62.40</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">午饭三明治</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span>吃饭</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">11.50</span>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px;">
+                <span style="font-size: 13px; font-weight: 600; color: #5a493e;">8月4日 周二</span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #73665d;">这天 88.90</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">网费 8月</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 240);"></span>通讯</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">38.00</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">药店</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 195);"></span>医疗</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">27.80</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 14px 1fr auto; gap: 14px; align-items: center; padding: 11px 0; border-top: 1px solid rgba(196,183,156,.65);">
+                <span style="justify-self: center; border-radius: 50%; background: #211208; width: 7px; height: 7px;"></span>
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px;"><span style="flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">洗衣液、纸巾</span><span style="flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #73665d;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 285);"></span>日用</span></span>
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 15px; font-weight: 600;">23.10</span>
+              </div>
+            </div>
+            </div>
+          </section>
+
+          <aside style="padding: 22px 20px; display: grid; gap: 20px; align-content: start; overflow: hidden; background: #f0ede8; border-left: 1px solid rgba(33,18,8,.10);">
+            <div>
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">这个月花了</span>
+              <p style="margin: 8px 0 0; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 28px; font-weight: 600; line-height: 1.1;">955.50 <span style="font-size: 13px; color: #73665d;">AUD</span></p>
+              <p style="margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: #5a493e;"><span style="padding: 2px 7px; background: #e7f4e9; border-radius: 999px; color: #1d4e2b;">比上月这会儿少 8.3%</span>另有 1 笔 300.00 CNY 未计入</p>
+            </div>
+            <div style="display: grid; gap: 8px;">
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">这半个月每天</span>
+              <div style="display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; align-items: end;"><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 16px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 2px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 9px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 23px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 19px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 3px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 8px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 24px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 2px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 38px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 11px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 18px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: transparent;"><span style="display: block; width: 100%; height: 46px; background: #c4b79c;"></span></span><span style="display: flex; align-items: flex-end; height: 46px; background: rgba(169,198,232,.4);"><span style="display: block; width: 100%; height: 34px; background: #1f5f8f;"></span></span></div>
+              <div style="display: flex; justify-content: space-between; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #73665d;"><span>8/1</span><span>日均 68.25</span><span style="color: #15466a; font-weight: 600;">8/14</span></div>
+            </div>
+            <div style="display: grid; gap: 8px;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">花得最多的五类</span>
+                <a href="#05" style="font-size: 12px;">全部 12 类 ›</a>
+              </div>
+              <div style="display: grid; grid-template-columns: 40px 1fr 56px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">吃饭</span><span style="display: block; height: 14px; background: rgba(196,183,156,.45);"><span style="display: block; height: 14px; width: 100%; background: oklch(.58 .105 60);"></span></span><code style="font-size: 11px; text-align: right;">208.60</code></div>
+              <div style="display: grid; grid-template-columns: 40px 1fr 56px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">买菜</span><span style="display: block; height: 14px; background: rgba(196,183,156,.45);"><span style="display: block; height: 14px; width: 68%; background: oklch(.58 .105 150);"></span></span><code style="font-size: 11px; text-align: right;">142.30</code></div>
+              <div style="display: grid; grid-template-columns: 40px 1fr 56px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">住</span><span style="display: block; height: 14px; background: rgba(196,183,156,.45);"><span style="display: block; height: 14px; width: 63%; background: oklch(.58 .105 15);"></span></span><code style="font-size: 11px; text-align: right;">132.00</code></div>
+              <div style="display: grid; grid-template-columns: 40px 1fr 56px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">交通</span><span style="display: block; height: 14px; background: rgba(196,183,156,.45);"><span style="display: block; height: 14px; width: 50%; background: oklch(.58 .105 240);"></span></span><code style="font-size: 11px; text-align: right;">104.20</code></div>
+              <div style="display: grid; grid-template-columns: 40px 1fr 56px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">日用</span><span style="display: block; height: 14px; background: rgba(196,183,156,.45);"><span style="display: block; height: 14px; width: 41%; background: oklch(.58 .105 285);"></span></span><code style="font-size: 11px; text-align: right;">86.40</code></div>
+            </div>
+            <div style="display: grid; gap: 8px;">
+              <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">用的什么币</span>
+              <div style="display: grid; gap: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px; color: #5a493e;">
+                <div style="display: flex; justify-content: space-between;"><span>AUD 记账</span><span>955.50</span></div>
+                <div style="display: flex; justify-content: space-between;"><span>人民币待折算</span><span>300.00</span></div>
+                <div style="display: flex; justify-content: space-between; color: #73665d;"><span>汇率</span><span>待补</span></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+    </div>
+  </section>
+
+  <section id="05" data-screen-label="05 账目 · 统计" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">05</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">账目 · 统计</strong><span style="font-size: 12px; color: #5a493e;">主要动作：看这个月的形状 —— 折线、类别环、六个月走势、一周节奏</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <a href="#01" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">补记</a>
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">账目</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">按天排</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #15466a; font-weight: 600; background: rgba(169,198,232,.32);">看统计</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">按月看总数</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">改动记录</span>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <a href="#07" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">设置</a>
+        </nav>
+        <div style="flex: 1;"></div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <section style="padding: 22px 26px; display: grid; grid-template-rows: auto auto auto 1fr; gap: 14px; overflow: hidden; background: #f7f5f1;">
+          <header style="display: flex; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid #c4b79c;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button type="button" title="上个月" style="width: 30px; height: 30px; display: grid; place-items: center; background: #fdfcf9; color: #5a493e; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 13px; cursor: pointer;">‹</button>
+              <h1 style="margin: 0; font-family: 'Songti SC', 'STSong', serif; font-size: 25px; font-weight: 600;">2026 年 8 月</h1>
+              <button type="button" title="下个月" style="width: 30px; height: 30px; display: grid; place-items: center; background: #fdfcf9; color: #5a493e; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 13px; cursor: pointer;">›</button>
+              <span style="margin-left: 4px; font-size: 12px; color: #73665d;">截到今天 8月14日</span>
+            </div>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              <span style="padding: 5px 11px; background: #a9c6e8; border: 1px solid rgba(33,18,8,.16); border-radius: 6px; font-size: 12px; font-weight: 600;">月</span>
+              <span style="padding: 5px 11px; border-radius: 6px; font-size: 12px; color: #5a493e;">季</span>
+              <span style="padding: 5px 11px; border-radius: 6px; font-size: 12px; color: #5a493e;">年</span>
+              <span style="margin-left: 10px; display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 30px; height: 18px; padding: 2px; display: flex; justify-content: flex-end; background: #296a3b; border-radius: 999px;"><span style="display: block; width: 14px; height: 14px; background: #fdfcf9; border-radius: 50%;"></span></span>和上月比</span>
+            </div>
+          </header>
+
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+              <div style="padding: 13px 15px; display: grid; gap: 3px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">这个月花了</span>
+                <strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 23px; font-weight: 600; line-height: 1.15;">955.50 <span style="font-size: 12px; color: #73665d;">AUD</span></strong>
+                <span style="font-size: 12px; color: #1d4e2b;">上月同期 1042.30 · 少 8.3%</span>
+              </div>
+              <div style="padding: 13px 15px; display: grid; gap: 3px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">每天平均</span>
+                <strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 23px; font-weight: 600; line-height: 1.15;">68.25 <span style="font-size: 12px; color: #73665d;">AUD</span></strong>
+                <span style="font-size: 12px; color: #73665d;">按已经过去的 14 天算</span>
+              </div>
+              <div style="padding: 13px 15px; display: grid; gap: 3px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">记了几笔</span>
+                <strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 23px; font-weight: 600; line-height: 1.15;">42 <span style="font-size: 12px; color: #73665d;">笔</span></strong>
+                <span style="font-size: 12px; color: #583d00;">另有 1 笔待确认（未计入）</span>
+              </div>
+              <div style="padding: 13px 15px; display: grid; gap: 3px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #73665d;">最花钱的一天</span>
+                <strong style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 23px; font-weight: 600; line-height: 1.15;">176.20 <span style="font-size: 12px; color: #73665d;">8月13日</span></strong>
+                <span style="font-size: 12px; color: #73665d;">周四 · 交房租那天</span>
+              </div>
+          </div>
+
+          <div style="padding: 14px 16px 12px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+              <strong style="font-size: 13px; font-weight: 600;">每天花了多少</strong>
+              <div style="display: flex; gap: 14px; align-items: center; font-size: 11px; color: #73665d;">
+                <span style="display: inline-flex; gap: 5px; align-items: center;"><span style="width: 14px; height: 8px; background: rgba(196,183,156,.35);"></span>周末</span>
+                <span style="display: inline-flex; gap: 5px; align-items: center;"><span style="width: 14px; height: 0; border-top: 1px dashed #3e80b4;"></span>日均 68.25</span>
+                <span style="display: inline-flex; gap: 5px; align-items: center;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #1f5f8f;"></span>今天 128.90</span>
+              </div>
+            </div>
+            <div style="position: relative; margin-top: 10px;">
+              <svg viewBox="0 0 310 132" preserveAspectRatio="none" style="display: block; width: 100%; height: 132px; overflow: visible;">
+                <rect x="10" y="0" width="10" height="132" fill="rgba(196,183,156,.22)"></rect><rect x="20" y="0" width="10" height="132" fill="rgba(196,183,156,.22)"></rect><rect x="80" y="0" width="10" height="132" fill="rgba(196,183,156,.22)"></rect><rect x="90" y="0" width="10" height="132" fill="rgba(196,183,156,.22)"></rect><rect x="150" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect><rect x="160" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect><rect x="220" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect><rect x="230" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect><rect x="290" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect><rect x="300" y="0" width="10" height="132" fill="rgba(196,183,156,.12)"></rect>
+                <line x1="0" y1="82" x2="310" y2="82" stroke="#3e80b4" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"></line>
+                <line x1="135" y1="0" x2="135" y2="132" stroke="rgba(33,18,8,.18)" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+                <path d="M5,132 L5,86.2 L15,132 L25,106.9 L35,66.8 L45,77.8 L55,123.2 L65,108.5 L75,64.8 L85,132 L95,25.4 L105,101.5 L115,81.8 L125,2.8 L135,37.5 L135,132 Z" fill="rgba(196,183,156,.42)"></path>
+                <polyline points="5,86.2 15,132 25,106.9 35,66.8 45,77.8 55,123.2 65,108.5 75,64.8 85,132 95,25.4 105,101.5 115,81.8 125,2.8 135,37.5" fill="none" stroke="#4e2f1c" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+              </svg>
+                <span style="position: absolute; left: 1.613%; top: 86.2px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 4.839%; top: 132px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 8.065%; top: 106.9px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 11.290%; top: 66.8px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 14.516%; top: 77.8px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 17.742%; top: 123.2px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 20.968%; top: 108.5px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 24.194%; top: 64.8px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 27.419%; top: 132px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 30.645%; top: 25.4px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 33.871%; top: 101.5px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 37.097%; top: 81.8px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 40.323%; top: 2.8px; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fdfcf9; border: 1.4px solid #4e2f1c; box-sizing: border-box;"></span>
+                <span style="position: absolute; left: 43.548%; top: 37.5px; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: #1f5f8f; border: 1.4px solid #1f5f8f; box-sizing: border-box;"></span>
+              <div style="margin-top: 5px; display: grid; grid-template-columns: repeat(31, 1fr);"><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;">1</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;">5</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;">10</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #73665d; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #15466a; font-weight: 600;">14</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;">15</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;">20</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;">25</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;">30</span><span style="text-align: center; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 9px; color: #aca29c; font-weight: 400;"></span></div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 372px; gap: 14px; min-height: 0;">
+            <div style="padding: 14px 16px; display: grid; grid-template-columns: 190px 1fr; gap: 18px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+              <div style="display: grid; gap: 10px; align-content: start;">
+                <strong style="font-size: 13px; font-weight: 600;">花在哪了</strong>
+                <div style="position: relative; width: 164px; height: 164px; border-radius: 50%; background: conic-gradient(oklch(.58 .105 60) 0.0% 21.8%, oklch(.58 .105 150) 21.8% 36.7%, oklch(.58 .105 15) 36.7% 50.5%, oklch(.58 .105 240) 50.5% 61.4%, oklch(.58 .105 285) 61.4% 70.4%, oklch(.58 .105 330) 70.4% 78.4%, oklch(.58 .105 105) 78.4% 84.4%, oklch(.58 .105 195) 84.4% 89.4%, oklch(.72 .075 240) 89.4% 93.4%, oklch(.72 .075 150) 93.4% 96.4%, oklch(.72 .075 330) 96.4% 98.4%, #aca29c 98.4% 100.0%);">
+                  <div style="position: absolute; inset: 30px; display: grid; place-content: center; justify-items: center; gap: 2px; background: #fdfcf9; border-radius: 50%;">
+                    <code style="font-size: 16px; font-weight: 600;">955.50</code>
+                    <span style="font-size: 11px; color: #73665d;">12 类 · AUD</span>
+                  </div>
+                </div>
+                <div style="margin-top: 2px; display: grid; gap: 6px;">
+                  <span style="font-size: 12px; font-weight: 600;">最贵的三笔</span>
+                  <div style="display: grid; gap: 5px; font-size: 12px; color: #5a493e;">
+                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>房租（半月）</span><code>132.00</code></div>
+                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>市区吃饭</span><code>96.00</code></div>
+                    <div style="display: flex; justify-content: space-between; gap: 8px;"><span>网课续费</span><code>76.00</code></div>
+                  </div>
+                </div>
+              </div>
+              <div style="display: grid; align-content: start;">
+                <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; padding-bottom: 5px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #73665d;"><span></span><span>类别</span><span></span><span style="text-align: right;">金额</span><span style="text-align: right;">环比</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span><span style="font-size: 12px;">吃饭</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 100%; background: oklch(.58 .105 60);"></span></span><code style="font-size: 11px; text-align: right;">208.60</code><span style="text-align: right; font-size: 11px; color: #663028;">+12%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span><span style="font-size: 12px;">买菜</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 68%; background: oklch(.58 .105 150);"></span></span><code style="font-size: 11px; text-align: right;">142.30</code><span style="text-align: right; font-size: 11px; color: #1d4e2b;">-4%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 15);"></span><span style="font-size: 12px;">住</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 63%; background: oklch(.58 .105 15);"></span></span><code style="font-size: 11px; text-align: right;">132.00</code><span style="text-align: right; font-size: 11px; color: #73665d;">持平</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 240);"></span><span style="font-size: 12px;">交通</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 50%; background: oklch(.58 .105 240);"></span></span><code style="font-size: 11px; text-align: right;">104.20</code><span style="text-align: right; font-size: 11px; color: #663028;">+31%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 285);"></span><span style="font-size: 12px;">日用</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 41%; background: oklch(.58 .105 285);"></span></span><code style="font-size: 11px; text-align: right;">86.40</code><span style="text-align: right; font-size: 11px; color: #1d4e2b;">-18%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 330);"></span><span style="font-size: 12px;">学习</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 36%; background: oklch(.58 .105 330);"></span></span><code style="font-size: 11px; text-align: right;">76.00</code><span style="text-align: right; font-size: 11px; color: #663028;">+8%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 105);"></span><span style="font-size: 12px;">娱乐</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 27%; background: oklch(.58 .105 105);"></span></span><code style="font-size: 11px; text-align: right;">57.30</code><span style="text-align: right; font-size: 11px; color: #1d4e2b;">-22%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 195);"></span><span style="font-size: 12px;">医疗</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 23%; background: oklch(.58 .105 195);"></span></span><code style="font-size: 11px; text-align: right;">47.80</code><span style="text-align: right; font-size: 11px; color: #73665d;">新</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 240);"></span><span style="font-size: 12px;">通讯</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 18%; background: oklch(.72 .075 240);"></span></span><code style="font-size: 11px; text-align: right;">38.00</code><span style="text-align: right; font-size: 11px; color: #73665d;">持平</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 150);"></span><span style="font-size: 12px;">人情</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 14%; background: oklch(.72 .075 150);"></span></span><code style="font-size: 11px; text-align: right;">28.60</code><span style="text-align: right; font-size: 11px; color: #1d4e2b;">-40%</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 330);"></span><span style="font-size: 12px;">订阅</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 9%; background: oklch(.72 .075 330);"></span></span><code style="font-size: 11px; text-align: right;">19.10</code><span style="text-align: right; font-size: 11px; color: #73665d;">持平</span></div>
+                  <div style="display: grid; grid-template-columns: 10px 44px 1fr 52px 44px; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(196,183,156,.45);"><span style="width: 8px; height: 8px; border-radius: 2px; background: #aca29c;"></span><span style="font-size: 12px;">别的</span><span style="display: block; height: 10px; background: rgba(196,183,156,.40);"><span style="display: block; height: 10px; width: 7%; background: #aca29c;"></span></span><code style="font-size: 11px; text-align: right;">15.20</code><span style="text-align: right; font-size: 11px; color: #73665d;">—</span></div>
+                <p style="margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: #5a493e;">「交通」比上月多了 31%，都是打车。<a href="#07">分出「打车」一类 ›</a></p>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-rows: auto 1fr; gap: 14px; min-height: 0;">
+              <div style="padding: 14px 16px; display: grid; gap: 10px; align-content: start; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                  <strong style="font-size: 13px; font-weight: 600;">近六个月</strong>
+                  <span style="font-size: 11px; color: #73665d;">斜纹＝还没过完</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; align-items: end;"><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #73665d;">812</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 64px; background: #c4b79c;"></span></div><span style="font-size: 11px; color: #5a493e; font-weight: 400;">3月</span></div><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #73665d;">1043</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 82px; background: #c4b79c;"></span></div><span style="font-size: 11px; color: #5a493e; font-weight: 400;">4月</span></div><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #73665d;">969</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 76px; background: #c4b79c;"></span></div><span style="font-size: 11px; color: #5a493e; font-weight: 400;">5月</span></div><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #73665d;">1121</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 88px; background: #c4b79c;"></span></div><span style="font-size: 11px; color: #5a493e; font-weight: 400;">6月</span></div><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #73665d;">1042</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 82px; background: #c4b79c;"></span></div><span style="font-size: 11px; color: #5a493e; font-weight: 400;">7月</span></div><div style="display: grid; gap: 6px; justify-items: center;"><code style="font-size: 10px; color: #15466a;">956</code><div style="width: 100%; height: 88px; display: flex; align-items: flex-end;"><span style="display: block; width: 100%; height: 75px; background: repeating-linear-gradient(45deg, #1f5f8f 0 5px, #3e80b4 5px 10px);"></span></div><span style="font-size: 11px; color: #15466a; font-weight: 600;">8月</span></div></div>
+              </div>
+              <div style="padding: 14px 16px; display: grid; gap: 9px; align-content: start; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                  <strong style="font-size: 13px; font-weight: 600;">一周里哪天花得多</strong>
+                  <span style="font-size: 11px; color: #73665d;">今年至今日均</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周一</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 44%; background: #c4b79c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">52</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周二</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 32%; background: #c4b79c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">38</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周三</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 52%; background: #c4b79c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">61</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周四</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 38%; background: #c4b79c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">45</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周五</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 81%; background: #4e2f1c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">96</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周六</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 100%; background: #4e2f1c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">119</code></div>
+                <div style="display: grid; grid-template-columns: 34px 1fr 44px; gap: 8px; align-items: center;"><span style="font-size: 12px; color: #5a493e;">周日</span><span style="display: block; height: 12px; background: rgba(196,183,156,.40);"><span style="display: block; height: 12px; width: 56%; background: #c4b79c;"></span></span><code style="font-size: 11px; text-align: right; color: #5a493e;">67</code></div>
+              </div>
+            </div>
+          </div>
+        </section>
+    </div>
+  </section>
+
+  <section id="06" data-screen-label="06 事项 · 周视图" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #4e2f1c; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">06</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600; color: #4e2f1c;">事项 · 周视图</strong><span style="font-size: 12px; color: #5a493e;">计划与结果同屏但不重复画 · 截止、日期范围、不定时、小时格、未安排、待处理六区齐全</span></div>
+
+    <div class="db-frame">
+      <aside class="db-rail">
+        <div class="db-brand"><img src="../../assets/brand/icon.svg" alt="" /><div style="display:flex;align-items:baseline;gap:8px;"><strong>日簿</strong><small>DAYBOOK</small></div></div>
+        <nav class="db-nav">
+          <a href="#01">补记</a>
+          <a href="#04">账目</a>
+          <span class="nav-current" style="font-weight:600;">事项</span>
+          <span class="sub nav-sub-current" style="font-weight:600;">这一周</span>
+          <span class="sub">待处理 <code style="font-size:11px;color:#663028;">3</code></span>
+          <span class="sub">未安排 <code style="font-size:11px;color:#73665d;">3</code></span>
+          <span class="sub">完成记录</span>
+          <span class="sub">归档</span>
+          <a href="#07">设置</a>
+        </nav>
+        <div style="margin:8px 12px;padding:10px 11px;display:grid;gap:5px;background:#fdfcf9;border:1px solid rgba(78,47,28,.18);border-radius:8px;box-shadow:inset 3px 0 #4e2f1c;">
+          <span style="font-size:12px;font-weight:600;color:#4e2f1c;">4 条事项变更待确认</span>
+          <span style="font-size:10px;line-height:1.5;color:#73665d;">包含结果补记与一次目标选择</span>
+          <a href="#06b" style="font-size:11px;">去核对字段差异 ›</a>
+        </div>
+        <footer>
+          <span style="display:inline-flex;gap:7px;align-items:center;font-size:12px;color:#5a493e;"><span class="status-dot"></span>Claude Code 准备好了</span>
+          <span style="font:10px 'SFMono-Regular','Menlo',monospace;color:#8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+
+      <div class="week-layout">
+        <main class="week-main">
+          <header class="week-toolbar">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <button class="icon-button" type="button" title="上一周">‹</button>
+              <h1>8月10日 – 16日</h1>
+              <button class="icon-button" type="button" title="下一周">›</button>
+              <button class="secondary-button" type="button">今天</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;font-size:11px;color:#73665d;">
+              <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:13px;height:13px;display:grid;place-items:center;background:#4e2f1c;color:#fdfcf9;border-radius:4px;font-size:9px;">✓</span>显示已完成</span>
+              <span>今天 8月14日 周五 14:02</span>
+            </div>
+          </header>
+
+          <div class="week-columns">
+            <div style="border-right:1px solid #c4b79c;"></div>
+            <div class="day-heading"><span>周一</span><strong>10</strong><span>2 件</span></div>
+            <div class="day-heading"><span>周二</span><strong>11</strong><span>2 件</span></div>
+            <div class="day-heading"><span>周三</span><strong>12</strong><span>1 件</span></div>
+            <div class="day-heading"><span>周四</span><strong>13</strong><span>2 件</span></div>
+            <div class="day-heading today"><span>周五</span><strong>14</strong><span>5 件</span></div>
+            <div class="day-heading"><span>周六</span><strong>15</strong><span>2 件</span></div>
+            <div class="day-heading"><span>周日</span><strong>16</strong><span>1 件</span></div>
+          </div>
+
+          <div class="track">
+            <span class="track-label">截止</span>
+            <div class="track-item due" style="grid-column:6;"><span>提交报销 · 17:00 截止</span></div>
+          </div>
+          <div class="track">
+            <span class="track-label">日期范围</span>
+            <div class="track-item range" style="grid-column:2 / span 3;"><span>✓ 客户方案 · 结果 周一—周三</span></div>
+          </div>
+          <div class="track">
+            <span class="track-label">不定时</span>
+            <div class="track-item" style="grid-column:3;--item-accent:oklch(.58 .105 60);"><span>买药</span></div>
+            <div class="track-item" style="grid-column:6;--item-accent:oklch(.58 .105 150);"><span>妈妈生日</span></div>
+            <div class="track-item" style="grid-column:8;--item-accent:oklch(.58 .105 15);"><span>整理保险资料</span></div>
+          </div>
+
+          <div class="calendar-grid">
+            <div class="time-axis">
+              <span style="top:7px;">08:00</span><span style="top:42px;">09:00</span><span style="top:84px;">10:00</span><span style="top:126px;">11:00</span><span style="top:168px;">12:00</span><span style="top:210px;">13:00</span><span style="top:252px;">14:00</span><span style="top:294px;">15:00</span><span style="top:336px;">16:00</span><span style="top:378px;">17:00</span><span style="top:420px;">18:00</span><span style="top:462px;">19:00</span><span style="top:504px;">20:00</span><span style="top:546px;">21:00</span>
+            </div>
+            <div class="day-column">
+              <div class="event done" style="top:31px;height:29px;"><b>✓ 晨跑 5 公里</b><small>结果 08:45–09:22</small></div>
+              <div class="event" style="top:294px;height:63px;--item-bg:oklch(.72 .075 240 / .18);--item-accent:oklch(.58 .105 240);"><b>周会</b><small>计划 15:00–16:30</small></div>
+            </div>
+            <div class="day-column">
+              <div class="event done" style="top:84px;height:28px;"><b>✓ 交电费</b><small>结果沿用计划日期</small></div>
+              <div class="event" style="top:462px;height:63px;--item-bg:oklch(.72 .075 330 / .18);--item-accent:oklch(.58 .105 330);"><b>英语课</b><small>计划 19:00–20:30</small></div>
+            </div>
+            <div class="day-column">
+              <div class="event" style="top:42px;height:84px;--item-bg:oklch(.72 .075 240 / .18);--item-accent:oklch(.58 .105 240);"><b>方案讨论</b><small>计划 09:00–11:00</small></div>
+            </div>
+            <div class="day-column">
+              <div class="event" style="top:252px;height:84px;--item-bg:oklch(.72 .075 330 / .18);--item-accent:oklch(.58 .105 330);"><b>读《长日将尽》</b><small>计划 14:00–16:00</small></div>
+            </div>
+            <div class="day-column today">
+              <div class="event" style="top:63px;height:24px;--item-bg:oklch(.72 .075 60 / .18);--item-accent:oklch(.58 .105 60);"><b>寄快递</b><small>09:30 · 时间点</small></div>
+              <div class="event overlap-a" style="top:126px;height:63px;--item-bg:oklch(.72 .075 240 / .18);--item-accent:oklch(.58 .105 240);"><b>设计评审</b><small>11:00–12:30</small></div>
+              <div class="event overlap-b" style="top:147px;height:33px;--item-bg:oklch(.72 .075 15 / .18);--item-accent:oklch(.58 .105 15);"><b>客户同步</b><small>11:30–12:15 · 重叠</small></div>
+              <div class="event done" style="top:305px;height:63px;"><b>✓ 牙医</b><small>结果 15:15–16:45</small></div>
+              <div class="now-line" style="top:253px;"></div>
+            </div>
+            <div class="day-column">
+              <div class="event" style="top:84px;height:42px;--item-bg:oklch(.72 .075 60 / .18);--item-accent:oklch(.58 .105 60);"><b>换轮胎</b><small>10:00–11:00</small></div>
+            </div>
+            <div class="day-column">
+              <div class="event" style="top:420px;height:84px;--item-bg:oklch(.72 .075 60 / .18);--item-accent:oklch(.58 .105 60);"><b>家庭聚餐</b><small>18:00–20:00</small></div>
+            </div>
+          </div>
+        </main>
+
+        <aside class="items-side">
+          <section style="padding-bottom:9px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font:600 10px 'SFMono-Regular','Menlo',monospace;letter-spacing:.14em;text-transform:uppercase;color:#73665d;">清单</span><button class="ghost-button" type="button">管理</button></div>
+            <div style="margin-top:4px;display:grid;gap:1px;">
+              <div class="list-row active"><span class="list-swatch"></span><span>全部</span><code>26</code></div>
+              <div class="list-row" style="--item-accent:oklch(.58 .105 240);"><span class="list-swatch"></span><span>工作</span><code>8</code></div>
+              <div class="list-row" style="--item-accent:oklch(.58 .105 60);"><span class="list-swatch"></span><span>家务</span><code>6</code></div>
+              <div class="list-row" style="--item-accent:oklch(.58 .105 150);"><span class="list-swatch"></span><span>健康</span><code>4</code></div>
+            </div>
+          </section>
+
+          <section>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;"><h2 class="side-title">待处理 <code style="font-size:13px;color:#663028;">3</code></h2><span style="font-size:10px;color:#73665d;">系统只列出，不替你改期</span></div>
+            <div class="mini-list">
+              <div class="mini-card alarm"><strong>退掉那个订阅</strong><small>已逾期 · 截止周四 18:00</small></div>
+              <div class="mini-card warning"><strong>换驾照地址</strong><small>需要重新安排 · 原计划周二不定时</small></div>
+              <div class="mini-card warning"><strong>交房租</strong><small>即将截止 · 下周一</small></div>
+            </div>
+          </section>
+
+          <section style="border-bottom:0;">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;"><h2 class="side-title">未安排 <code style="font-size:13px;color:#73665d;">3</code></h2><span style="font-size:10px;color:#73665d;">可以有截止，但没有计划</span></div>
+            <div class="mini-list">
+              <div class="mini-card" style="--item-accent:oklch(.58 .105 150);"><strong>约体检</strong><small>健康 · 未分组也可以</small></div>
+              <div class="mini-card" style="--item-accent:#9b7225;"><strong>提交报销</strong><small>截止周五 17:00 · 仍未安排</small></div>
+              <div class="mini-card" style="--item-accent:oklch(.58 .105 60);"><strong>修阳台的灯</strong><small>家务</small></div>
+            </div>
+          </section>
+
+          <footer class="composer-compact">
+            <span style="font-size:10px;color:#73665d;">新建、改时间、补结果，都先生成待确认变更</span>
+            <div class="composer-shell row" style="padding:6px 6px 6px 9px;border-radius:8px;">
+              <input class="field-composer" placeholder="说一段：房租改周五，牙医看了90分钟…" style="min-width:0;height:28px;padding:0;font-size:11px;" />
+              <button class="primary-button" type="button">整理</button>
+            </div>
+          </footer>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="06b" data-screen-label="06b 事项 · 变更审核" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #4e2f1c; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">06b</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600; color: #4e2f1c;">事项 · 变更审核</strong><span style="font-size: 12px; color: #5a493e;">自然语言 create / update 都不直接改事实 · 目标、字段差异、原文证据与未匹配候选同屏</span></div>
+
+    <div class="db-frame">
+      <aside class="db-rail">
+        <div class="db-brand"><img src="../../assets/brand/icon.svg" alt="" /><div style="display:flex;align-items:baseline;gap:8px;"><strong>日簿</strong><small>DAYBOOK</small></div></div>
+        <nav class="db-nav">
+          <a href="#01">补记</a><a href="#04">账目</a><span class="nav-current" style="font-weight:600;">事项 <code style="font-size:11px;">4</code></span><span class="sub">这一周</span><span class="sub nav-sub-current" style="font-weight:600;">待确认变更 <code>4</code></span><a href="#07">设置</a>
+        </nav>
+        <div style="margin:10px 12px;padding:11px;background:#fdfcf9;border:1px solid rgba(78,47,28,.18);border-radius:8px;">
+          <strong style="display:block;font-size:12px;color:#4e2f1c;">为什么还要确认？</strong>
+          <p style="margin:5px 0 0;font-size:10px;line-height:1.6;color:#73665d;">自然语言包含目标匹配与时间解释。确认前，事项事实和周视图都不会变化。</p>
+        </div>
+        <footer><span style="display:inline-flex;gap:7px;align-items:center;font-size:12px;color:#5a493e;"><span class="status-dot"></span>Claude Code 准备好了</span><span style="font:10px 'SFMono-Regular','Menlo',monospace;color:#8f847c;">0.3 版 · 本机</span></footer>
+      </aside>
+
+      <div class="review-layout">
+        <section class="source-pane">
+          <header class="pane-header"><p>原始内容 · 不可改写</p><h2>今天 14:02 的补充</h2></header>
+          <div>
+            <div class="source-sheet"><blockquote>周六 10 点到 11 点换轮胎；牙医 3:15 才开始，看了 90 分钟；客户方案是周一到周三完成的；房租改到周五处理。</blockquote></div>
+            <p style="margin:0 22px;font-size:12px;line-height:1.7;color:#5a493e;">整段原文与全部拆分结果并排。agent 起草了 1 条 create 与 3 条 update，其中 1 条 update 没找到唯一目标。</p>
+            <div style="margin:14px 22px;padding:10px 11px;display:grid;gap:4px;background:#f1ebe8;border-left:3px solid #4e2f1c;color:#5a493e;font-size:11px;line-height:1.6;">
+              <strong style="color:#4e2f1c;">计划不是结果</strong>
+              <span>牙医只覆盖实际开始与用时；客户方案改成结果日期范围后，不再拼接原计划的具体时段。</span>
+            </div>
+          </div>
+          <footer style="padding:14px 22px 18px;display:grid;gap:7px;">
+            <span style="font-size:11px;color:#73665d;">还要补充？输入框支持 macOS 系统听写</span>
+            <div class="composer-shell" style="padding:10px 11px;border-radius:8px;"><textarea class="field-composer" rows="2" placeholder="再说一句，或补充更明确的目标…" style="font-size:13px;line-height:1.6;"></textarea></div>
+          </footer>
+        </section>
+
+        <section class="draft-pane">
+          <header class="pane-header" style="display:flex;align-items:end;justify-content:space-between;gap:12px;"><div><p>事项草稿 · create / update 混合</p><h2>4 条待确认变更</h2></div><span style="padding:4px 9px;background:#f7efe2;color:#583d00;border-radius:999px;font-size:11px;">1 条要选目标</span></header>
+          <div class="draft-list">
+            <article class="change-card">
+              <div class="change-top"><span class="picked">✓</span><div><strong style="font-size:13px;color:#211208;">更新 · 牙医</strong><div style="margin-top:2px;font-size:10px;color:#73665d;">已匹配「牙医复诊」· 健康 · 原计划周五 15:00–16:00</div></div><span style="font-size:10px;color:#15466a;">目标已确定</span></div>
+              <div class="diff-grid"><div class="diff-cell"><small style="color:#73665d;">计划层 · 事实中仍保留</small><strong>周五 15:00–16:00</strong><span>原计划不被结果覆盖</span></div><span style="display:grid;place-items:center;color:#4e2f1c;">＋</span><div class="diff-cell after"><small style="color:#73665d;">结果层 · 本次新增</small><strong>周五 15:15–16:45</strong><span>事项状态改为 done</span></div></div>
+              <span style="font-size:10px;color:#73665d;">周视图只画解析后的结果；计划继续留在事项事实与审计中。</span>
+              <span style="font:10px 'Songti SC','STSong',serif;color:#5a493e;">证据：“3:15 才开始，看了 90 分钟”</span>
+            </article>
+
+            <article class="change-card">
+              <div class="change-top"><span class="picked">✓</span><div><strong style="font-size:13px;color:#211208;">更新 · 客户方案</strong><div style="margin-top:2px;font-size:10px;color:#73665d;">已匹配「客户方案返稿」· 工作</div></div><span style="font-size:10px;color:#15466a;">目标已确定</span></div>
+              <div class="diff-grid"><div class="diff-cell"><small style="color:#73665d;">计划层 · 事实中仍保留</small><strong>周四 09:00–12:00</strong><span>原计划不被结果覆盖</span></div><span style="display:grid;place-items:center;color:#4e2f1c;">＋</span><div class="diff-cell after"><small style="color:#73665d;">结果层 · 本次新增</small><strong>周一—周三 · 日期范围</strong><span>done · 不展开成每日记录</span></div></div>
+              <span style="font:10px 'Songti SC','STSong',serif;color:#5a493e;">证据：“周一到周三完成的”</span>
+            </article>
+
+            <article class="change-card" style="padding-top:9px;padding-bottom:9px;">
+              <div class="change-top"><span class="picked">✓</span><div><label style="display:block;font-size:9px;color:#73665d;">新建 · 标题可行内修正</label><input class="field-inline" value="周六换轮胎" aria-label="新事项标题" style="width:180px;padding:2px 0;font-size:13px;font-weight:600;color:#211208;" /><div style="margin-top:2px;font-size:10px;color:#73665d;">计划 周六 10:00–11:00 · 家务 · 状态 scheduled</div></div><span style="font-size:10px;color:#15466a;">create</span></div>
+              <span style="font:10px 'Songti SC','STSong',serif;color:#5a493e;">证据：“周六 10 点到 11 点换轮胎”</span>
+            </article>
+
+            <article class="change-card unresolved">
+              <div class="change-top"><span style="width:16px;height:16px;border:1px solid rgba(33,18,8,.35);border-radius:6px;"></span><div><strong style="font-size:13px;color:#211208;">更新 · 房租</strong><div style="margin-top:2px;font-size:10px;color:#73665d;">原文要改到周五，但有两个候选</div></div><span style="font-size:10px;color:#583d00;">不可确认</span></div>
+              <div class="candidate-grid"><button class="candidate" type="button" aria-pressed="true" style="text-align:left;background:#f1ebe8;border:2px solid #4e2f1c;"><strong style="display:block;color:#211208;">交本月房租</strong><small style="color:#73665d;">scheduled · 下周一不定时 · 钱事</small></button><button class="candidate" type="button" aria-pressed="false" style="text-align:left;"><strong style="display:block;color:#211208;">向室友收房租</strong><small style="color:#73665d;">backlog · 无计划 · 钱事</small></button></div>
+              <div style="display:flex;align-items:center;gap:7px;"><button class="secondary-button" type="button" style="height:27px;font-size:11px;">选择「交本月房租」</button><button class="ghost-button" type="button">改为新建</button><button class="ghost-button" type="button" style="color:#663028;">忽略</button></div>
+              <span style="font:10px 'Songti SC','STSong',serif;color:#5a493e;">证据：“房租改到周五处理”</span>
+            </article>
+          </div>
+          <footer style="padding:12px 18px 14px;display:grid;grid-template-columns:auto 1fr;gap:7px 14px;align-items:center;background:#f0ede8;border-top:1px solid rgba(33,18,8,.10);"><div><strong style="display:block;font:600 18px 'SFMono-Regular','Menlo',monospace;">3</strong><span style="font-size:10px;color:#73665d;">条可确认</span></div><button class="primary-button" type="button" style="height:38px;font-size:13px;">确认 1 条新建 + 2 条更新 ⌘↩</button><span style="grid-column:2;font-size:10px;color:#583d00;">“房租”仍留在本条整理记录里，选定目标后无需再次调用 agent</span></footer>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section id="07" data-screen-label="07 设置" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;"><span style="padding: 3px 8px; background: #211208; color: #fdfcf9; border-radius: 999px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 11px; font-weight: 600;">07</span><strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 21px; font-weight: 600;">设置</strong><span style="font-size: 12px; color: #5a493e;">主要动作：改常用设定 · 账目 12 类、事项 5 个清单，都能改</span></div>
+
+    <div style="width: 1440px; height: 900px; overflow: hidden; background: #e8e4dd; box-shadow: 0 24px 60px rgba(33,18,8,.18); border-radius: 10px; display: grid; grid-template-columns: 232px 1fr;">
+      <aside style="display: flex; flex-direction: column; overflow: hidden; background: #f0ede8; border-right: 1px solid rgba(33,18,8,.10);">
+        <div style="padding: 15px 14px 12px; display: flex; align-items: center; gap: 9px;">
+          <img src="../../assets/brand/icon.svg" alt="" style="width: 24px; height: 24px; border-radius: 6px;" />
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <strong style="font-family: 'Songti SC', 'STSong', serif; font-size: 16px; font-weight: 600; letter-spacing: .06em; color: #4e2f1c;">日簿</strong>
+            <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; font-weight: 600; letter-spacing: .14em; color: #73665d;">DAYBOOK</span>
+          </div>
+        </div>
+        <nav style="padding: 4px 10px 12px; display: grid; gap: 2px;">
+            <a href="#01" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">补记</a>
+            <a href="#04" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">账目</a>
+            <a href="#06" style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; font-size: 13px; color: #5a493e;">事项</a>
+            <span style="padding: 8px 11px; display: flex; align-items: center; justify-content: space-between; background: #e6f2fd; border-radius: 6px; box-shadow: inset 3px 0 #1f5f8f; font-size: 13px; font-weight: 600;">设置</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #15466a; font-weight: 600; background: rgba(169,198,232,.32);">常用设定</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">类别与清单</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">解析与模型</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">数据与隐私</span>
+              <span style="padding: 5px 11px 5px 22px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; font-size: 12px; color: #5a493e;">关于</span>
+        </nav>
+        <div style="flex: 1;"></div>
+        <footer style="padding: 12px 14px; display: grid; gap: 8px; border-top: 1px solid rgba(33,18,8,.10);">
+          <span style="display: inline-flex; gap: 7px; align-items: center; font-size: 12px; color: #5a493e;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #488c58;"></span>Claude Code 准备好了</span>
+          <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 10px; color: #8f847c;">0.3 版 · 本机</span>
+        </footer>
+      </aside>
+        <section style="padding: 26px 34px; overflow: hidden; background: #f7f5f1;">
+          <div style="max-width: 1120px;">
+            <h1 style="margin: 0; font-family: 'Songti SC', 'STSong', serif; font-size: 26px; font-weight: 600;">常用设定</h1>
+            <p style="margin: 8px 0 0; font-size: 13px; color: #5a493e;">界面偏好立即生效；币种等整理规则只影响之后的内容，已写入记录不会被重算。</p>
+
+            <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start;">
+              <div>
+                <div style="padding: 16px 18px; display: grid; gap: 14px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <div style="display: grid; grid-template-columns: 1fr 180px; gap: 16px; align-items: center;">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">常用货币</strong><small style="font-size: 12px; color: #73665d;">别的币种按当时汇率换成这个</small></span>
+                    <input value="AUD" style="height: 32px; padding: 0 10px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 13px; font-weight: 600; letter-spacing: .08em;" />
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">丢进来就自动整理</strong><small style="font-size: 12px; color: #73665d;">开着 · 会用掉你的 Claude 订阅额度</small></span>
+                    <span style="width: 34px; height: 20px; padding: 2px; display: flex; justify-content: flex-end; background: #296a3b; border-radius: 999px;"><span style="display: block; width: 16px; height: 16px; background: #fdfcf9; border-radius: 50%;"></span></span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">语音使用 macOS 系统听写</strong><small style="font-size: 12px; color: #73665d;">在任一文字框中自行触发；音频不交给 Daybook</small></span>
+                    <span style="padding: 4px 8px; background: #f1ebe8; color: #4e2f1c; border-radius: 6px; font-size: 11px;">系统能力</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">一周从周一开始</strong><small style="font-size: 12px; color: #73665d;">开着 · 事项那一周跟着变</small></span>
+                    <span style="width: 34px; height: 20px; padding: 2px; display: flex; justify-content: flex-end; background: #296a3b; border-radius: 999px;"><span style="display: block; width: 16px; height: 16px; background: #fdfcf9; border-radius: 50%;"></span></span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">出问题时留详细日志</strong><small style="font-size: 12px; color: #73665d;">关着 · 日志可能包含完整提示词、金额与原文，14 天后自动删除</small></span>
+                    <span style="width: 34px; height: 20px; padding: 2px; display: flex; background: #c1b6a2; border-radius: 999px;"><span style="display: block; width: 16px; height: 16px; background: #fdfcf9; border-radius: 50%;"></span></span>
+                  </div>
+                </div>
+
+                <h2 style="margin: 22px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 20px; font-weight: 600;">账目类别 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 14px; color: #73665d;">12</span></h2>
+                <div style="margin-top: 12px; padding: 16px 18px; display: grid; gap: 12px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5a493e;">默认这 12 类，可以改名、换色、合并或删掉。颜色只在同一条色环上取，加多少类都不会花。</p>
+                  <div style="display: flex; flex-wrap: wrap; gap: 7px;">
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span>吃饭</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span>买菜</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 15);"></span>住</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 240);"></span>交通</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 285);"></span>日用</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 330);"></span>学习</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 105);"></span>娱乐</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 195);"></span>医疗</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 240);"></span>通讯</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 150);"></span>人情</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.72 .075 330);"></span>订阅</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: #aca29c;"></span>别的</span>
+                    <span style="padding: 5px 11px; background: #f0ede8; border: 1px dashed #c4b79c; border-radius: 999px; font-size: 13px; color: #73665d;">未分类</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 200px auto; gap: 8px;">
+                    <input placeholder="新类别的名字" style="min-width: 0; height: 32px; padding: 0 10px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px;" />
+                    <button type="button" style="height: 32px; padding: 0 14px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">加一类</button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h2 style="margin: 0; font-family: 'Songti SC', 'STSong', serif; font-size: 20px; font-weight: 600;">事项清单 <span style="font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 14px; color: #73665d;">5</span></h2>
+                <div style="margin-top: 12px; padding: 16px 18px; display: grid; gap: 12px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5a493e;">每个事项最多属于一个清单；没选就是「未分组」。清单只负责着色、筛选与浏览，不改变计划、结果或状态。</p>
+                  <div style="display: flex; flex-wrap: wrap; gap: 7px;">
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 240);"></span>工作</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 60);"></span>家务</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 150);"></span>健康</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 330);"></span>学习</span>
+                      <span style="padding: 5px 11px; display: inline-flex; align-items: center; gap: 7px; background: #f7f5f1; border: 1px solid #c4b79c; border-radius: 999px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: oklch(.58 .105 15);"></span>钱事</span>
+                    <span style="padding: 5px 11px; background: #f0ede8; border: 1px dashed #c4b79c; border-radius: 999px; font-size: 13px; color: #73665d;">未分组</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">有日期但没说具体时刻</strong><small style="font-size: 12px; color: #73665d;">显示为「不定时」，不称全天；完全没日期才进入未安排</small></span>
+                    <span style="padding: 4px 8px; background: #f1ebe8; color: #4e2f1c; border-radius: 6px; font-size: 11px;">固定规则</span>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; padding-top: 14px; border-top: 1px solid rgba(33,18,8,.10);">
+                    <span><strong style="display: block; font-size: 14px; font-weight: 600;">完成不自动生成结果时间</strong><small style="font-size: 12px; color: #73665d;">勾选只改状态；实际日期、开始与用时等你明确补充</small></span>
+                    <span style="padding: 4px 8px; background: #f1ebe8; color: #4e2f1c; border-radius: 6px; font-size: 11px;">固定规则</span>
+                  </div>
+                </div>
+
+                <h2 style="margin: 22px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 20px; font-weight: 600;">解析与模型</h2>
+                <div style="margin-top: 12px; padding: 16px 18px; display: grid; gap: 12px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+                    <span style="display: inline-flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #488c58;"></span>Claude Code · 已登录</span>
+                    <button type="button" style="height: 30px; padding: 0 12px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">重新检查</button>
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-family: 'SFMono-Regular', 'Menlo', monospace; font-size: 12px;">
+                    <div style="padding: 9px 10px; background: #f7f5f1; border-radius: 6px;"><span style="display: block; font-size: 11px; color: #73665d;">版本</span>2.1.4</div>
+                    <div style="padding: 9px 10px; background: #f7f5f1; border-radius: 6px;"><span style="display: block; font-size: 11px; color: #73665d;">上次检查</span>14:02</div>
+                    <div style="padding: 9px 10px; background: #f7f5f1; border-radius: 6px;"><span style="display: block; font-size: 11px; color: #73665d;">能不能用</span>可以</div>
+                  </div>
+                </div>
+
+                <h2 style="margin: 22px 0 0; font-family: 'Songti SC', 'STSong', serif; font-size: 20px; font-weight: 600;">数据与隐私</h2>
+                <div style="margin-top: 12px; padding: 16px 18px; display: grid; gap: 10px; background: #fdfcf9; border: 1px solid rgba(33,18,8,.10); border-radius: 10px;">
+                  <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5a493e;">账本、原始文件和日志都在这台 Mac，可在访达中查看或删除。整理时，截图和文字会由 Claude Code 发往其模型服务商，并使用你的订阅额度；日志开启后可能包含完整提示词、金额与原文。Daybook 没有账号或远程服务端，不代理解析流量，也不收集遥测。</p>
+                  <div style="display: flex; gap: 10px; align-items: center;">
+                    <button type="button" style="height: 30px; padding: 0 12px; background: #fdfcf9; color: #211208; border: 1px solid rgba(33,18,8,.24); border-radius: 6px; font-size: 13px; cursor: pointer;">在访达里打开</button>
+                    <span style="font-size: 13px; color: #15466a;">▸ 展开详细说明</span>
+                  </div>
+                  <code style="font-size: 11px; line-height: 1.5; color: #73665d; overflow-wrap: anywhere;">~/Library/Application Support/app.daybook.local</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}"></script>
+</body>
+</html>
