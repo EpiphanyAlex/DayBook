@@ -1,6 +1,6 @@
 # 审核与确认
 
-> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-08-13
+> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-08-24
 
 ## 一句话
 
@@ -46,12 +46,13 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 
 ## 已知边界与坑
 
-- M0 原件整体可见，但不做截图区域高亮、虚拟滚动与完整键盘流；这些属于后续里程碑。
-- M0 三栏界面是功能基线，不是批准后的设计稿；`src/styles.css` 里的 `:root` 变量不是 token design system。M1 开工前先确定设计稿与语义 token，再做视觉精修。
+- 原件整体可见，但没有截图区域高亮。2026-08-24 的 R1 产品链路 spike 证明 agent bbox 会误指相邻行，已决定**不**在 M1 增加伪精确高亮；当前完整原件 + `evidence_text` 并列就是截图来源的安全退路（[实测](../../docs/spikes/2026-08-24-r1-evidence-region.md)）。虚拟滚动与完整键盘流仍未实现。
+- 三栏界面是 M0 功能基线，尚未按已定稿的 [`design.md`](../../design.md) v0.5 重做；`src/styles.css` 的 `:root` 变量不是 token design system。
 - `evidence_text` 是 agent 的抽取声明，不是独立证据，所以截图或口述全文默认可见。
 - 当前界面是证据检查台，不是传统记账表单；金额汇总不在 React 内计算。
 - **改金额时不要再把本位币金额当独立输入**：v0.11 的 `edit_draft` 那样写，于是「把 AI 读错的 1680 改回 168」必然返回 `data.money_inconsistent`，而当时的验收测试改的是 `merchant`，门禁全绿。见 [03 §3.5](../../docs/prd/03-review.md)「本位币金额是导出值」。
 - 卡片上的汇率输入是主单位小数（`1 USD = 1.538462 AUD`），`parseRateInput` 转成 `rate_ppm` 整数后过 IPC；**除法只出现在 `formatRate` 里**。
+- 当前 `src/App.tsx::refreshSelected` 每次重取都会用全部草稿重建 `selectedDrafts`：用户取消一条后，编辑另一条触发刷新会把前者重新选中。当前又把所有来源的异步结果写进同一组 `drafts/evidence/check` state，快速切来源存在迟到响应覆盖风险；两条都是现实现边界，M1 的状态方案与验收见 [03 §3.8/§6](../../docs/prd/03-review.md)。
 
 ## 相关
 

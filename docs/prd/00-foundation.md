@@ -3,7 +3,7 @@ title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契�
 status: review
 owner: "@maintainer"
 date: 2026-08-24
-version: v0.19
+version: v0.20
 ---
 
 # 00 · 地基 Foundation
@@ -565,7 +565,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | R3 | 舍入规则选 half-even 尚未经真实对账验证——若某来源自身用 half-up，总额校验会系统性差几分 | 本文 §3.4、[03 审核与草稿区](./03-review.md) 的总额校验 | M2 处理真实 10 天数据时实测，**结果必须回流本文** |
 | R4 | 证据目录长期累积到 GB 级后的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.2、[02 导入](./02-ingest.md) | 真实使用出现容量问题时 |
 | R5 | 数据库 at-rest 加密——v1 不做（数据不出本机 + macOS FileVault 已提供一层）。若未来需要，`rusqlite` 的 `bundled-sqlcipher` 是路径 | 全产品安全姿态 | v1 明确不做，登记以免被沉默填掉 |
-| R6（**新增 2026-08-07**） | 证据区域坐标字段——[03 审核 §5](./03-review.md) R1 若结论是「能稳定定位」，`draft_transactions` 需加坐标列 | 本文 §3.6 | M1 开工前随 03 R1 一并决；**只前进迁移，届时加 `0002_*.sql` 即可**，不阻塞 M0 |
+| ~~R6~~ **已关闭（2026-08-24）** | 证据区域坐标字段——[03 审核 §5](./03-review.md) R1 若结论是「能稳定定位」，`draft_transactions` 需加坐标列 | 本文 §3.6 | **结论：不加。** 产品密封链路与模型对照均未达到危险误定位 / 相邻行侵入门槛；错误高亮比无高亮更危险。M1 不创建 `0002_*` 坐标迁移、不改 `draft_transaction` 工具形状；完整原件 + `evidence_text` 继续作为安全退路。见 [spike 记录](../spikes/2026-08-24-r1-evidence-region.md) |
 | R7（**新增 2026-08-10**） | **一次尝试多条合计**——账单常同时印「本期消费合计」与「本期收入合计」，甚至再加期初/期末余额。§3.6 现在只登记一条（取消费合计），另一条丢弃 | 本文 §3.6 `reported_total_*`、[03 审核 §3.3](./03-review.md) | M2 拿到真实月结单后决。**候选是把四列拆成 `reconciliation_claims` 子表**（一来源多行，各带 kind/金额/币种/原文）。M0/M1 不做——单条已覆盖交易列表类截图，而那是 M0 的主要来源类型 |
 | R10（**新增 2026-08-10**） | **模型报不准 span 时的退路**——§3.6「span 用哪套坐标」要求 agent 直接报 code point 区间。若实测发现它经常算错，退路是改成 `evidence_text` + `evidence_occurrence`（第几次出现），由 Rust 算 span | 本文 §3.6、[01 §3.2](./01-agent-runtime.md) 工具参数 | **M0 第一轮 eval 后决**——这是工具形态变更，需要真实数据支撑。在此之前不做 |
 | R11（**新增 2026-08-10**） | **M3 的 ordinal 跨表唯一**——同一段口述会同时产出 `draft_transactions` 与 `draft_items`，两张表**各自**的 `UNIQUE(attempt_id, source_ordinal)` **保证不了跨表唯一**：交易第 2 条和事项第 2 条会同时存在，而 [07 评测](./07-eval.md) 的对齐按 ordinal 配对 | 本文 §3.6、[05 事项](./05-items.md)、[07 评测 §3.2](./07-eval.md) | **M3 开工前决**，两条候选：① domain 在同一事务里跨表检查；② 引入一张公共的位置占用表。**不阻塞 M0**（`draft_items` 是 M3 的表），登记以免被沉默填掉 |
@@ -641,6 +641,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-24（M1 前置） | **R6 随 [03 审核 §5](./03-review.md) R1 一并关闭为「不加截图坐标列」。** 产品密封链路的受控合成图仍出现危险误定位与相邻行侵入；同一 CLI 的 Sonnet 对照进一步说明该能力不具备跨模型稳定性。既然代码无法独立验证模型是否指到正确行，可空 bbox 也保护不了「有值但值错」；因此不做原计划的 `0002_*` 迁移，也不改 M0 五工具 | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[03 审核 §3.2/§5](./03-review.md) |
 | 2026-08-22（跨文档同步） | **权威错误码表新增 `agent.not_ready`。** [01 §3.5](./01-agent-runtime.md) 的状态矩阵把「已发现合格 CLI、尚未探测或探测中」定为 `error_code` 空的**非错误**态，但同一条规格又要求这一档 fail closed——用户显式发起解析时命令层必须返回一个码，而矩阵里没有。复用 `agent.backend_unavailable` 会把 v0.16 刚拆开的「安装资格 / 解析就绪度」两层重新合上，所以登记新码，只用于 probe 未开始 / 进行中 | 01 的 M0 修正实施计划（2026-08-22 获批）；[01 §3.5](./01-agent-runtime.md) 状态矩阵与 §6 `agent::readiness_blocks_attempt_and_task` |
 | 2026-08-17（跨文档同步） | 权威错误码表把 `agent.backend_unavailable` 从含糊的「`probe()` 失败」收窄为安装资格失败（未找到、不可执行、版本不可读取）；完整 readiness probe 的认证、密封与其他失败继续使用各自错误码。`agent.tool_surface_unsealed` 同步改准为「无法证明完整 manifest 与预期严格相等」，不再只写“多出工具”；错误码集合不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13 | **验收选择器按真实职责对齐。** 口述落盘/幂等归 `ingest`，span 工具边界与 attempt 生命周期归 `agent`，确认完整性/溯源归 `review`；原来的 `foundation::*` 名称会让 `cargo test <filter>` 在 0 个测试时仍 exit 0，制造假绿。行为判据不变，只把选择器改到实际执行它的测试 | M0 验收清单逐条与 `cargo test -- --list` 对照 |
@@ -667,6 +668,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.20 | 2026-08-24 | **关闭 R6，`status` 仍为 `review`。** [03 审核](./03-review.md) R1 spike 未达到证据高亮的安全门槛，因此不新增截图 bbox 列、不创建 `0002_*` 迁移、不改 `draft_transaction`；M0 六表五工具与已实现 schema 一字未动 |
 | v0.19 | 2026-08-24 | **跟随 [04 §3.3](./04-transactions.md) v0.9，`status` 仍为 `review`（M2 表，M0 实现不受影响）。** `categories.name` 的注释由「默认值统一四个汉字」改为「两个汉字」，并注明唯一性只在同一 `scope` 内。**`UNIQUE(scope, normalized_name)` 这条约束本来就是对的、一个字没改**——变的是它从此**真的被用到**：四字命名下没有任何两条默认分类同名，`scope` 那一列在种入路径上从未被行使过；两字命名后「礼金」与「其他」两侧各一条，**种子数据本身就会去撞这个索引**。这一行存在的意义是提醒实现者别在种入时按 `name` 去查重 |
 | v0.18 | 2026-08-23 | **补 M2 分类实体与迁移边界，`status` 仍为 `review`。** v1 终态表清单新增 `categories`；明确 M0/M1 已实现的 `category TEXT` 不变，M2 才迁为稳定 `category_id`。补分类表最小列、方向 / 停用 / 合并引用约束、默认只种一次、旧文本无损迁移、迁移前只读预检、`audit_log.batch_id` 与完整批次前状态撤销；结构化分类操作的表 / 工具形状及诊断修复入口登记为 M2 `ready` 前待决，不自行发明、不改变当前 M0 六表五工具 |
 | v0.17 | 2026-08-22 | **§3.7 新增错误码 `agent.not_ready`，`status` 仍为 `review`。** 合格 CLI 已发现但完整 readiness probe 未开始或进行中时，用户显式发起解析由命令层返回该码并拒绝创建 `parse_attempts`；`BackendStatus` 上这一档仍是 `error_code` 空（UI 显示「正在检查」）。probe 跑完但失败仍用各自的码。错误码集合由 29 条增至 30 条，其余不变 |

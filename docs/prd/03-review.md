@@ -2,8 +2,8 @@
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
 status: review
 owner: "@maintainer"
-date: 2026-08-23
-version: v0.16
+date: 2026-08-24
+version: v0.17
 ---
 
 # 03 · 审核与草稿区
@@ -83,8 +83,8 @@ M0 首屏同时呈现当前本位币选择；修改只影响之后的新解析�
 
 - 每条草稿必带 `source_id` + `evidence_text`（数据层非空，见 [00 地基 §3.6](./00-foundation.md)）
 - **审核界面必须让来源原件本身可见**：截图渲染出来、`utterance` 的转写文本原样显示。**不是「点开看大图」，是默认可见**
-- **M0 就要有原件**（2026-08-10 改）：此前 [`docs/PRD.md` §9.2](../PRD.md) 把「证据图面板」整体推到 M1，M0 只渲染 `evidence_text` 那一列——那样 M0 验的是「模型抄得像不像」，验不出「模型读得对不对」，而后者正是 M0 存在的理由。**M0 的最小形态是「原图缩略图 + 点击看原图 + `evidence_text` 同屏」**，一个 `<img>` 的成本。**M1 推迟的是区域高亮，不是原件本身**
-- 点任一条 → 证据面板高亮该条对应的原图区域；**若无法定位到区域，至少把 `evidence_text` 与原件并列**（区域定位是加分项，§5 R1）
+- **M0 就要有原件**（2026-08-10 改）：此前 [`docs/PRD.md` §9.2](../PRD.md) 把「证据图面板」整体推到 M1，M0 只渲染 `evidence_text` 那一列——那样 M0 验的是「模型抄得像不像」，验不出「模型读得对不对」，而后者正是 M0 存在的理由。**M0 的最小形态是「原图缩略图 + 点击看原图 + `evidence_text` 同屏」**，一个 `<img>` 的成本。M0 当时只把区域高亮留给 R1 spike，**不是推迟原件本身**；该 spike 的最终结论见下一条
+- **截图不做伪精确的区域高亮**（2026-08-24，§5 R1 已关闭）：实测 agent 坐标会漂到相邻行，错误高亮比没有高亮更危险。点任一条时保持来源原件与该条 `evidence_text`（抽取声明）并列；`utterance` 仍用可逐字验证的 code-point span 高亮转写原文
 - **无证据的草稿不得入库**——确认动作在服务端再校验一次，不依赖 UI
 
 ### 3.3 总额交叉校验
@@ -326,6 +326,41 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - 单次审核可能有数百条 → **虚拟滚动**
 - 证据图按需加载，不一次性把整批原图读进内存
 
+### 3.8 前端状态管理（2026-08-24 定案）
+
+**决定：M1 引入 TanStack Query v5 管理 Tauri IPC 返回的权威快照；React `useReducer` / 局部 `useState` 管理审核屏的瞬时交互。不引入 Zustand。** [`docs/architecture.md` §8](../architecture.md) A4 与本文 §5 R3 同步关闭。
+
+依据：TanStack Query 的[定向失效](https://tanstack.com/query/latest/docs/framework/react/guides/query-invalidation)与[从 mutation 触发失效](https://tanstack.com/query/latest/docs/framework/react/guides/invalidations-from-mutations)正好表达「前端缓存可丢、Rust 真值重取」；React reducer 适合组织屏幕交互状态，但 Context 的 Provider value 改变会更新全部消费者（[React `useContext`](https://react.dev/reference/react/useContext)），不拿它承载数百行权威快照。Zustand 的 selector 适合细粒度 UI 订阅，却不提供 query key、陈旧响应隔离与失效语义，因此当前没有引入它的收益。
+
+状态边界按「谁是真值」划，不按「哪个组件要用」划：
+
+| 状态 | 归属 | 例子 |
+|---|---|---|
+| Rust / SQLite 的可重取投影 | **TanStack Query cache** | 来源列表、按 `source_id` 的草稿与原件、按 `attempt_id` 的总额校验、agent 状态与日志 |
+| 用户尚未提交的界面意图 | **screen reducer / 局部 state** | 当前来源、焦点行、编辑模式与输入缓冲、键盘流、用户明确取消选择的草稿 ID |
+| 业务判定 | **仍只在 Rust domain** | 能否批量确认、总额状态、来源状态机、三元组自洽 |
+
+Query cache 是**可失效、可重取的只读投影缓存**，不是第二份业务状态。确认、丢弃、编辑等 mutation 成功后只按 query key 定向失效并从 Rust 重取；不在前端乐观编造 `consumed` / `reviewed` / 对账结果。M1 的最小 query key：
+
+```text
+['review-sources']
+['review-drafts', sourceId]
+['review-evidence', sourceId]
+['review-total', sourceId, attemptId]
+['agent-status']
+['agent-logs']
+```
+
+本地 IPC 不是网络请求，默认项必须显式覆盖：`staleTime: Infinity`、`retry: false`、`refetchOnWindowFocus: false`、`refetchOnReconnect: false`；只有 mutation、Tauri event 或明确用户动作触发失效。Tauri `invoke` 目前不能用 `AbortSignal` 终止 Rust command，但 query key 能保证来源 A 的迟到结果留在 A 的缓存里，**不能覆盖已经切到的来源 B**。
+
+**默认全选保存为「排除集合」，不能每次重取都重新全选。** 当前 M0 `refreshSelected()` 每次刷新都用全部草稿重建选择集；用户取消一条后只要改了另一条，刷新就会把被排除项重新选中。M1 reducer 按 `(source_id, attempt_id)` 保存用户明确排除的 ID；首次加载与之后新增草稿默认选中，重取不得抹掉人的排除意图。
+
+否决另外三种组合：
+
+- 只用 `useState` / `useReducer` + Context 管全部状态：仍要自己写异步去重、迟到响应隔离与 mutation 失效，且 Context 没有行级 selector；
+- 用 Zustand 管 IPC 数据：它擅长细粒度 UI 订阅，但不提供 query key、陈旧响应治理与失效语义，会诱导把 Rust 真值复制成前端业务 store；
+- TanStack Query + Zustand 同时引入：当前 screen reducer 足以承载选择、焦点与编辑，M1 没有证据支持两套第三方状态模型。只有 profiler 证明 reducer 传播造成可见行无关重渲染时，才另行评估一个**只存 UI 状态、无 persist、无业务 mutation** 的 Zustand store。
+
 ## 4. 否决的替代方案
 
 | 方案 | 否决原因 |
@@ -343,9 +378,9 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | # | 事项 | 影响 | 谁来决 / 何时 |
 |---|---|---|---|
-| R1 | 证据区域定位（在原图上高亮对应行）技术上能否稳定做到——取决于 agent 能否可靠回报坐标 | 本文 §3.2 | M1 开工前 spike；做不到就退到「只显示原文片段」，**结果回流本文** |
+| ~~R1~~ **已关闭（2026-08-24）** | 证据区域定位（在原图上高亮对应行）技术上能否稳定做到 | 本文 §3.2 | **结论：当前不可稳定定位，不进生产 schema。** 产品密封链路 156 个 bbox 中出现 1 个危险误定位、9 个相邻行侵入，vertical IoU 中位数 0.704，三轮 y 中心跨度 p95 达 0.54 个行高；同一 CLI 的 Sonnet 对照正确行中心命中仅 69.53%。M1 不加坐标列，不按 ordinal 猜等高行，继续显示完整原件 + `evidence_text`。实测与复现见 [spike 记录](../spikes/2026-08-24-r1-evidence-region.md) |
 | R2 | 舍入规则若与来源自身不一致，总额校验会系统性失败（[00 地基 §5](./00-foundation.md) R3） | 本文 §3.3 | M2 实测真实对账数据 |
-| R3 | 前端状态管理选型（[`docs/architecture.md` §8](../architecture.md) 未决 A4） | 本文全部 UI | M1 开工前，产品决定 |
+| ~~R3~~ **已关闭（2026-08-24）** | 前端状态管理选型（[`docs/architecture.md` §8](../architecture.md) A4 同步关闭） | 本文全部 UI | **结论：TanStack Query v5 管 Rust/Tauri 权威快照，screen reducer / 局部 state 管瞬时 UI；不引入 Zustand。** 边界、默认项与 query key 见 §3.8 |
 | ~~R4~~ | ~~「40 笔 30 秒」如何客观测量~~ **已关闭（2026-08-24）**：协议写进 §6「40 笔 30 秒怎么测」——应用自埋计时、夹具固定数据、脚本固定操作、`pointerdown` 计数判「不碰鼠标」、7 轮丢首轮取中位数，通过判据含 **IQR ≤ 中位数 20%** 这条给协议自身的自检 | 本文 §6 人工验收 | ~~M1 开工前~~ **已定** |
 | R5 | 低置信标注依赖 agent 自评，而模型的自评校准度未知 | 本文 §3.4 排序第 4 档 | M1 实测；不可靠则降权或去掉该维度。字段 `draft_transactions.confidence` 已在 [00 地基 §3.6](./00-foundation.md) 留好且可空，**不阻塞 M0** |
 | R7（**新增 2026-08-10**） | **`file` 来源的「适用性」信号**——§3.3 现在保守判：`file` + 没报合计 ⇒ `unavailable`，因为 `reported_total_* IS NULL` 分不清「结构性没有」「agent 漏读」「截图裁掉了」。真要支持 `file` 的 `not_applicable`，需要一个**独立于字段为空**的适用性信号（来源画像，或 agent 显式声明「这版式里不存在合计行」并附证据） | 本文 §3.3、[00 地基 §3.6](./00-foundation.md) | M2 拿到真实单笔小票样本后决。**M0/M1 保守判**——误判的代价是一整类漏读变得不可见 |
@@ -414,6 +449,8 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 - [ ] `npm test -- review/sorting` 通过——异常前置的六级排序按 §3.4 优先级
 - [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
+- [ ] `npm test -- review/query-race` 通过——来源 A 的 IPC 晚于来源 B 返回时，A 的结果只进入 A 的 query cache，不覆盖当前来源 B
+- [ ] `npm test -- review/selection-intent` 通过——用户取消选择一条后，编辑另一条触发失效重取；被取消项仍不选中，新出现草稿默认选中（§3.8「排除集合」）
 - [ ] **40 笔真实草稿，从打开审核界面到全部入库，不碰鼠标，≤ 30 秒**——**测量协议见下方「40 笔 30 秒怎么测」**（2026-08-24 定，R4 关闭）
 
 ##### 40 笔 30 秒怎么测
@@ -462,6 +499,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-24（M1 前置） | **R1 与 R3 关闭。** R1 的产品密封链路探针在受控合成图上仍出现危险误定位与相邻行侵入，且同一 CLI 的 Sonnet 对照大幅退化；错误高亮属于证据闸门风险，因此 M1 不加坐标列，安全退回「完整原件 + `evidence_text`」。R3 定为 **TanStack Query v5 + screen reducer / local state**：Query 只缓存 Rust 可重取投影，用户选择/焦点/编辑留在 reducer；明确修复当前迟到响应覆盖与刷新后重新全选两类风险，不引入 Zustand | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[`docs/architecture.md` §8](../architecture.md) A4；当前 `src/App.tsx::refreshSelected` 实现审查 |
 | 2026-08-17（跨文档同步） | **[05 事项](./05-items.md) v0.8 将自然语言回溯从「只新建事项」扩为「可修改已有事项」**，因此本文 §3.6 增加 M3 create/update 共用审核闸门、目标消歧、mixed batch 与字段差异契约。该扩展只影响尚未实现的 M3；M0/M1 已验收的交易闸门、状态与 `status: review` 均未被证伪 | [`docs/PRD.md` §5.2](../PRD.md) v0.21；[05 事项 §3.4](./05-items.md) |
 | 2026-08-13（人工验收） | **§6 的 M0 人工验收六条全部实测通过**，`status` 由 `in-progress` 回到 `review`。做法：本机真实 Claude Code CLI，两张截图 + 一段口述。① 原件同屏——截图渲染成图、口述显示整段转写；② `evidence_text` 与解析结果同屏无需点击；③ 声明合计与原文片段（「TOTAL SPENT 147.65」）与批量确认按钮**始终同屏**——`.reconciliation` 在 `.draft-stack` 这个滚动容器之外，条目再多也不会把它滚走；④ 一张无声明合计的截图落在 `unavailable` + `single_only`，提示可见、批量按钮禁用；⑤ 一段口述拆出 4 条、一次批量确认入库，整段原文与全部条目及条数同屏；⑥ **缺三元组的草稿当场补齐并确认**——补 `AUD` + `0.21` 后 `base_amount_minor` 由 3800 CNY 导出为 798 AUD（§3.5「本位币金额是导出值」），随即单条确认入库，`drafted_json` 里 `baseAmountMinor` 仍为 `null` | 人工验收实测（2026-08-13）：`transactions` 9 行、`audit_log` 28 行，含 `human/update` 与 `human/confirm` 各自的 before/after |
 | 2026-08-13（人工验收） | **桌面应用当天根本起不来，而 `node scripts/verify-m0.mjs`（不带 `--skip-live`）全绿。** 两个独立缺陷：① `src-tauri` 自 MCP helper 拆出第二个 bin 后一直缺 `default-run`，`npm run tauri dev` / `tauri build` 停在「could not determine which binary to run」；② `icons/icon.png` 是 **16 位/通道** RGBA，`tauri-build` 按 8 字节/像素编进二进制，运行时 tauri 按 4 字节/像素反推像素数，判定图标无效后在 `did_finish_launching` 里 abort。**根因是同一条：M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有任何一条会启动桌面壳。** 两条都已修复并各加一条 `cargo test` 断言（见 §6）。**本节记它是因为 §6 的人工验收是全仓库唯一需要启动应用的验收，被它挡住的是这一节** | 人工验收实测（2026-08-13）：`npm run tauri dev` 两次 abort 的真实输出 |
@@ -490,6 +528,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.17 | 2026-08-24 | **关闭 M1 前置 R1 / R3，`status` 仍为 `review`。** R1 实测结论为「agent 截图坐标不够稳定」：不加 bbox schema/迁移，M1 保留完整原件 + `evidence_text` 的安全退路；R3 选定 TanStack Query v5 管 IPC 权威快照、screen reducer / 局部 state 管瞬时交互，不引入 Zustand。§3.8 固定 query key、桌面 IPC 默认项、mutation 失效边界与「排除集合」选择语义；§6 新增迟到响应与选择意图两条 M1 验收；规格不变式新增「不得把 M0 推迟区域高亮写成 M1 必做」防回退规则 |
 | v0.16 | 2026-08-24 | **关闭 R4 与 R8，`status` 仍为 `review`。** ① §6 新增「**40 笔 30 秒怎么测**」——R4 提的方差问题是真的，所以协议的每一条都在砍一个方差来源：应用自埋 `performance.now()` 计时（人的反应时间不进区间、界面响应时间全进）、夹具固定数据且**必须含异常项**（异常项的处理成本才是这一屏的真实成本）、按键脚本固定操作以剔除执行者判断速度、`pointerdown` 计数**由代码判**「不碰鼠标」、7 轮丢首轮取中位数。通过判据两条，第二条 **IQR ≤ 中位数 20%** 是给协议自身的自检——方差比效应还大时不许宣布通过。② R8 关闭：设计事实源定为 [`design.md`](../../design.md) v0.5，已接进 [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) §10–§11。③ §3.4 的记忆冲突例子随 [04 §3.3](./04-transactions.md) 两字分类改名（食品杂货 / 日用家居 → 买菜 / 日用） |
 | v0.15 | 2026-08-23 | **新增 M2 分类体系操作审核契约，`status` 仍为 `review`。** M0/M1 自由文本编辑保持不变；M2 方向变化明确清空不兼容分类、停用目标阻止新确认。对话只生成待确认操作，影响数量由代码重算；M2 覆盖分类 / 事实 / 活跃交易草稿，M3 再纳入规则。合并规则随同一确认卡重定向，拆分 / 历史重分类才逐组另问；有条件整批撤销恢复完整批次前状态，任一冲突零写入。M3 明确商户规则指令一次确认即可生效，默认不回写历史 |
 | v0.14 | 2026-08-17 | **新增 M3 事项 update 审核契约，`status` 仍为 `review`。** `draft_items` 以 operation 与 resolution_state 区分 create、ready update、needs_target update；非确认态持久化有界候选并计入完成条数，目标由人选择后才可确认。tri-state patch 明确 set/clear/unspecified，确认界面显示 before/patch/after；同一口述可 mixed batch。直接拖拽属于人的确定性事实修改，写审计并可撤销。M0/M1 交易审核契约与已通过验收不变 |

@@ -124,7 +124,7 @@ const KEYMAP = {
 <Row><Amount /><EvidenceText />{/* 指向原件的哪一段 */}</Row>
 ```
 
-**M0 就要有原件**（一个 `<img>` 的成本），M1 才做区域高亮（[`docs/prd/03-review.md` §3.2](../../docs/prd/03-review.md)）。
+**M0 就要有原件**（一个 `<img>` 的成本）。**截图区域高亮已被 M1 前置 R1 spike 否决**：agent 坐标会漂到相邻行，错误高亮比无高亮更危险；继续用完整原件 + `evidence_text` 并列，`utterance` 的可验证文本 span 不受影响（[实测记录](../../docs/spikes/2026-08-24-r1-evidence-region.md)）。
 
 ### 5.2 总额校验有四种状态，不是三种
 
@@ -262,7 +262,34 @@ const loading = true                              // 布尔名不像布尔
 3. **草稿不许有颜色。** AI 写入 / 未确认一律 `ink.400` + 45° 斜纹——**机器写的东西不配拥有颜色**，这是约束 3 在 token 层的形状。给草稿行上意图色，等于在视觉上把它冒充成事实
 4. **最小字号 11px**（`{typography.label}`），低于 11px 一律不允许；`fg.faint` 未过 AA（3.4 / 3.1），**只许用于占位符与分隔符**，不许承载信息
 
-## 12. 门禁
+## 12. 状态管理：Query 是 Rust 投影，不是第二份业务状态
+
+> 依据 [`docs/prd/03-review.md` §3.8](../../docs/prd/03-review.md)（2026-08-24，R3 关闭）。
+
+M1 使用 **TanStack Query v5 + screen reducer / 局部 state**，不引入 Zustand：
+
+```typescript
+// ✅ Rust/Tauri 权威快照按实体键缓存；来源切换后，旧结果只回自己的 key
+useQuery({ queryKey: ['review-drafts', sourceId], queryFn: () => call('list_active_drafts', { sourceId }) })
+useQuery({ queryKey: ['review-total', sourceId, attemptId], queryFn: () => call('check_source_total', { attemptId }) })
+
+// ✅ 人尚未提交的意图留在 reducer/local state
+// focusedDraftId · editBuffer · excludedDraftIdsByAttempt
+
+// ❌ 错误 —— 把 Rust 业务状态复制进长期前端 store，再自己维护两份真值
+const reviewStore = create(() => ({ drafts: [], reconciliationStatus: 'passed', sourceState: 'parsed' }))
+```
+
+四条实现约束：
+
+1. Query 默认项固定为 `staleTime: Infinity`、`retry: false`、`refetchOnWindowFocus: false`、`refetchOnReconnect: false`；本地 IPC 只由 mutation、Tauri event 或用户明确动作触发失效
+2. 确认 / 丢弃 / 编辑成功后**定向 invalidate 并从 Rust 重取**；不乐观编造 `consumed`、`reviewed`、对账结果或确认策略
+3. 默认全选用按 `(sourceId, attemptId)` 保存的 **`excludedDraftIds` 排除集合**：刷新不能重新选中用户明确排除的行，新出现草稿仍默认选中
+4. Tauri `invoke` 不能用 `AbortSignal` 终止 Rust command；query key 的职责是隔离迟到结果，不把「前端不再观察」冒充成「后端已经取消」。长任务仍走专用 `cancel_parsing`
+
+只有 profiler 证明 reducer 传播造成虚拟列表可见行的无关重渲染时，才重新评估 Zustand；即便引入，也只存 UI 状态、不得 `persist`、不得保存完整 IPC 响应或编排业务 mutation。
+
+## 13. 门禁
 
 改完前端代码，四条都要绿（[`CLAUDE.md`](../../CLAUDE.md) 约束 16）：
 
