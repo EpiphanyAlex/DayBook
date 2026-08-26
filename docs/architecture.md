@@ -2,15 +2,15 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-23
-version: v0.11
+date: 2026-08-24
+version: v0.12
 ---
 
 # 系统架构基线
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：M0 实现处于 review 阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 的修正已实现，其 §6 的 5 条人工验收于 2026-08-23 全部实测执行完毕，当前文档 v0.26、`review`；[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核](./prd/03-review.md) v0.15 同为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
+> **当前状态：M0 实现处于 review 阶段。** `src/` 与 `src-tauri/` 已按本文边界落地；[01 Agent 运行时](./prd/01-agent-runtime.md) 的修正已实现，其 §6 的 5 条人工验收于 2026-08-23 全部实测执行完毕，当前文档 v0.26、`review`；[00 地基](./prd/00-foundation.md) v0.20、[02 导入](./prd/02-ingest.md) v0.16、[03 审核](./prd/03-review.md) v0.17 同为 `review`。维护者 review 与 [`docs/PRD.md` §9.4](./PRD.md) 的真实样本 go/no-go 尚未完成。
 
 ---
 
@@ -130,6 +130,7 @@ version: v0.11
 - **IPC 上的金额是「最小单位整数的十进制字符串」**——不是格式化字符串（`"1,234.50"`）、不是 JSON 数字（`JSON.parse` 会静默舍入超 `2^53` 的值）。解析与范围校验只在桥接层做一次（[`docs/prd/00-foundation.md` §3.4](./prd/00-foundation.md)「金额怎么过 IPC」）。
 - 错误走**统一错误契约**（形状与错误码集由 [`docs/prd/00-foundation.md`](./prd/00-foundation.md) 定义），前端不解析错误文案做分支。
 - 前端不含业务规则——总额校验、状态机、确认条件全在 Rust 侧。
+- **M1 状态边界**（2026-08-24，A4 关闭）：TanStack Query v5 只缓存可从 Rust/Tauri 重取的权威投影，screen reducer / 局部 state 只存选择、焦点、编辑缓冲等瞬时 UI 意图；mutation 成功后定向失效重取，不把来源状态、草稿事实或对账结果复制成前端业务 store。详细 query key 与桌面 IPC 默认项见 [03 审核 §3.8](./prd/03-review.md)
 
 ## 7. Agent 运行时边界
 
@@ -149,7 +150,7 @@ version: v0.11
 | A1 | 长截图的子 agent 上下文隔离怎么切——按图切还是按解析结果条数切 | [`docs/prd/02-ingest.md`](./prd/02-ingest.md) | M2 批量解析时，实测决定 |
 | ~~A2~~ **已关闭（2026-08-07）** | agent 解析失败/超时的重试策略放在 launcher 还是 domain | [`docs/prd/01-agent-runtime.md`](./prd/01-agent-runtime.md) | **结论：domain，且 v1 不做自动重试**——launcher 只管「起进程、看着它、超时就杀」，不知道失败是否值得重试；自动重试会在用户不知情时二次消耗 AI 额度。`failed` 的来源显式列在 UI 上由用户一键重试。见 [01 §5](./prd/01-agent-runtime.md) R2 |
 | ~~A3~~ **已关闭（2026-08-08）** | 记忆规则在解析前注入 agent 上下文，还是在起草后由 domain 应用 | [`docs/prd/06-memory.md`](./prd/06-memory.md) | **结论：两个原选项都不采纳。** agent 解析出商户后**自己调 `query_memory` 批量查**，工具只按键回答、不提供「列出全部规则」。「起草后由 domain 改写」被否是因为它让代码做分类，违反 [`CLAUDE.md`](../CLAUDE.md) 约束 15 与 [ADR-0006](./adr/0006-smart-agent-dumb-tools.md)。domain 侧仍读规则表，但**只为标记冲突、不覆盖分类**。见 [06 记忆 §3.4](./prd/06-memory.md) |
-| A4 | 前端状态管理选型（是否引入状态库） | 全部 UI 模块 | M1 审核界面开工前 |
+| ~~A4~~ **已关闭（2026-08-24）** | 前端状态管理选型（是否引入状态库） | 全部 UI 模块 | **结论：TanStack Query v5 + screen reducer / 局部 state，不引入 Zustand。** Query cache 只装 Rust 可重取投影，用户交互意图留在 reducer；禁止把业务判定复制进前端 store。见 [03 审核 §3.8](./prd/03-review.md) 与 [§5 R3](./prd/03-review.md) |
 
 ---
 
@@ -157,6 +158,7 @@ version: v0.11
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.12 | 2026-08-24 | **关闭 A4。** M1 前端采用 TanStack Query v5 管 Tauri IPC 权威快照、screen reducer / 局部 state 管瞬时交互；不引入 Zustand。§6 补「Query cache 不是第二份业务状态」与 mutation 定向失效边界；两条写入路径与 Rust 业务真值边界不变 |
 | v0.11 | 2026-08-23 | **同步 M0 当前状态：[01 Agent 运行时](./prd/01-agent-runtime.md) §6 的后两条人工验收实测执行完毕（→ v0.26），五条至此全部跑完，`status` 仍为 `review`。** 「手工拆密封」通过——在 `PATH` 上放一个追加内置工具的 `claude` 同名包装即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、新来源导入成功而任务不下发，与 §4 的 fail-closed 边界一致。「真实解析中看子进程日志」只在解析结束后成立——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。**架构边界一字未改** |
 | v0.10 | 2026-08-23 | **同步 M0 当前状态：[01 Agent 运行时](./prd/01-agent-runtime.md) 的 3 条人工验收实测通过，回到 `review`，M0 四份现在都是 `review`。** 当天修掉一个只有真机才暴露的实现缺陷——「已装未登录」报的是 `agent.spawn_failed`（失败分类器只读 stderr，而真实 CLI 未登录时 stderr 为空、原因在 stdout 的 stream-json 里），已改为两个流合成一段信号判定。**架构边界与两条物理隔离写入路径未变** |
 | v0.9 | 2026-08-23 | **同步分类体系的 AI-native 写入边界。** 分类对话只产生待确认操作，影响范围由 domain 重算，人确认后经 Tauri command 执行；domain 只校验记忆查询覆盖、标记冲突并执行确认后的确定性生命周期操作，不按规则覆盖 agent 分类。审核纠正、明确商户规则指令与分类合并 / 拆分批量审计三者不再混称「每次修改都进记忆」。同时更新 M0 sub-PRD 当前状态摘要；两条物理隔离写入路径未变 |

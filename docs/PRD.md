@@ -2,8 +2,8 @@
 title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑地图
 status: ready
 owner: "@maintainer"
-date: 2026-08-23
-version: v0.24
+date: 2026-08-24
+version: v0.25
 ---
 
 # Daybook 总 PRD
@@ -217,7 +217,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 | [`00-foundation`](./prd/00-foundation.md) | SQLite 打开 + 迁移运行器 + `sources` / **`parse_attempts`** / `draft_transactions` / `transactions` / **`accounts`（骨架）** / `audit_log` **六张表** + 错误契约 + 币种 exponent + 金额过 IPC 的字符串约定 | 完整 schema、`accounts` 的字段与 UI（M2）、事项相关表、记忆表 |
 | [`01-agent-runtime`](./prd/01-agent-runtime.md) | 起 MCP server（stdio）+ **以密封配置** spawn `claude -p` + **有效工具集探测**（[01 §3.7](./prd/01-agent-runtime.md)）+ **五个工具**：`list_pending_sources` · `read_source` · `draft_transaction` · `report_source_total` · **`complete_source`**（清单见 [01 §3.2](./prd/01-agent-runtime.md)） | `draft_item` / `query_memory`（目标表 M0 未建，推 M3）、可插拔后端的第二个实现、子 agent 上下文隔离 |
 | [`02-ingest`](./prd/02-ingest.md) | 拖入单张 PNG/JPEG 截图 → 落 `sources` + 证据文件 → 触发一次解析。**外加 `kind = utterance` 来源**：一段口述/文字 → agent 拆成 N 条交易草稿 | HEIC / PDF（推 M2）、多图批量、跨图去重、文件监听 |
-| [`03-review`](./prd/03-review.md) | 一个能**看到来源原件**、看到每条的 `evidence_text` 与声明合计、并逐条/批量确认入库的最朴素列表；四道闸门全部生效 | 证据图的**区域高亮**、键盘流、异常前置排序、虚拟滚动 |
+| [`03-review`](./prd/03-review.md) | 一个能**看到来源原件**、看到每条的 `evidence_text` 与声明合计、并逐条/批量确认入库的最朴素列表；四道闸门全部生效 | 键盘流、异常前置排序、虚拟滚动。证据图区域高亮原属待 spike 项，已于 2026-08-24 实测否决（[03 §5](./prd/03-review.md) R1） |
 
 > **M0 的语音只记交易。** `draft_items` / `items` 是 M3 的表（[00 地基 §3.6](./prd/00-foundation.md)），所以 M0 里 agent 听到「明天交房租」这类**事项**内容时**必须明确回一句「这条我现在还记不了」**，不得静默丢弃。把事项表提前到 M0 会显著扩大 M0，明确不做。
 >
@@ -228,7 +228,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 >
 > **`complete_source` 为什么在 M0**（2026-08-10 加入）：没有它，「解析完成」的唯一判据是子进程退出码——而 agent 读了 12 笔里的 9 笔再正常收工，退出码同样是 0。**静默漏读是这类模型最典型的失败模式，而它恰好是 M0 要撞的两个未知数之一**；总额校验也挡不住（漏读的那几笔如果连合计也没读到，结果只是「无法校验」）。见 [01 §3.2](./prd/01-agent-runtime.md)。
 >
-> **`03` 的「原件可见」M0 就要有**（2026-08-10 收紧）：M0 只渲染 `evidence_text` 那一列是不够的——它和被核对的金额**出自同一次模型输出**，模型把 168 读成 1680 时也会把它写成「1680」，用户核对的是模型和它自己。**M0 的最小形态是「原图缩略图 + 点击看原图 + `evidence_text` 同屏」**，一个 `<img>` 的成本。**M0 推迟的是区域高亮**（[03 §5](./prd/03-review.md) R1 的 spike 对象），**不是原件本身**。
+> **`03` 的「原件可见」M0 就要有**（2026-08-10 收紧）：M0 只渲染 `evidence_text` 那一列是不够的——它和被核对的金额**出自同一次模型输出**，模型把 168 读成 1680 时也会把它写成「1680」，用户核对的是模型和它自己。**M0 的最小形态是「原图缩略图 + 点击看原图 + `evidence_text` 同屏」**，一个 `<img>` 的成本。M0 当时只把区域高亮留给 [03 §5](./prd/03-review.md) R1 spike，**不是推迟原件本身**；该 spike 已于 2026-08-24 证明 agent 坐标会误指相邻行，因此 M1 也不加伪精确高亮，继续使用完整原件 + `evidence_text` 的安全退路（[实测](./spikes/2026-08-24-r1-evidence-region.md)）。
 
 ### 9.3 M0 的端到端判定：`scripts/verify-m0.mjs`
 
@@ -262,7 +262,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 
 第 9 步用固定文本而非真实语音：转写由 macOS 系统听写完成、音频不出本机、应用零代码（[ADR-0005 §1](./adr/0005-voice-and-system-integration.md)），所以脚本的被测对象是「文本 → 多笔草稿」这一段，转写本身不在测试范围。
 
-**实施状态**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，**其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕**，01 当前文档 v0.26、回到 `review`。[00 地基](./prd/00-foundation.md) v0.18、[02 导入](./prd/02-ingest.md) v0.15、[03 审核与草稿区](./prd/03-review.md) v0.15 同为 `review`。**那轮人工验收当场抓到一个自动门禁抓不到的实现缺陷**：「已装未登录」报的是 `agent.spawn_failed` 而非 `agent.not_authenticated`——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr；当天修复并补了一条以真实输出为样本的自动验收（[01 §7](./prd/01-agent-runtime.md)）。**同日跑完的后两条**：「手工拆密封」通过（放开一个内置工具即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、任务不下发）；「真实解析中看子进程日志」**只在解析结束后成立**——会话日志随任务结果一次性落盘，进行中看不到，与「解析入口无禁用态视觉」一并记为未修、留 M1。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线，设计稿和 token design system 在 M1 开工前确定。
+**实施状态**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，**其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕**，01 当前文档 v0.26、回到 `review`。[00 地基](./prd/00-foundation.md) v0.20、[02 导入](./prd/02-ingest.md) v0.16、[03 审核与草稿区](./prd/03-review.md) v0.17 同为 `review`。**那轮人工验收当场抓到一个自动门禁抓不到的实现缺陷**：「已装未登录」报的是 `agent.spawn_failed` 而非 `agent.not_authenticated`——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr；当天修复并补了一条以真实输出为样本的自动验收（[01 §7](./prd/01-agent-runtime.md)）。**同日跑完的后两条**：「手工拆密封」通过（放开一个内置工具即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、任务不下发）；「真实解析中看子进程日志」**只在解析结束后成立**——会话日志随任务结果一次性落盘，进行中看不到，与「解析入口无禁用态视觉」一并记为未修、留 M1。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线。M1 开工前的 token design system、证据区域定位退路与前端状态管理已于 2026-08-24 定案：[`design.md`](../design.md) v0.5；截图不加 bbox；TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互（[03 §3.8/§5](./prd/03-review.md)）。参考设计稿本身仍待按已回流规格重画。
 
 ### 9.4 M0 的 go / no-go（2026-08-10 新增）
 
@@ -399,6 +399,7 @@ v1 只需保证数据形状（一条时间轴 + 两个实体）不挡住这条�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.25 | 2026-08-24 | **M1 前置 R1 / R3 决定同步，产品范围不变。** [03 审核](./prd/03-review.md) v0.17 实测否决截图 bbox：错误高亮会误导证据核对，M1 保留完整原件 + `evidence_text`；前端状态选 TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互，不引入 Zustand。§9.2 与实施状态不再把区域高亮写成必然的 M1 实现项 |
 | v0.24 | 2026-08-23 | **同步 M0 当前状态，产品范围不变。** [01 Agent 运行时](./prd/01-agent-runtime.md) → v0.26 `review`：§6 的后两条人工验收实测执行完毕，五条至此全部跑完。「手工拆密封」通过；「真实解析中看子进程日志」只在解析结束后成立（会话日志一次性落盘），记为未修、留 M1。**§9.4 的真实样本 go / no-go 仍未做，M0 仍不得称 done** |
 | v0.23 | 2026-08-23 | **同步 M0 当前状态，产品范围不变。** [01 Agent 运行时](./prd/01-agent-runtime.md) → v0.25 `review`：3 条人工验收实测通过，M0 四份 sub-PRD 现在都是 `review`。当天修掉「已装未登录报错码不对」这一只有真机才暴露的实现缺陷。**§9.4 的真实样本 go / no-go 仍未做，M0 仍不得称 done** |
 | v0.22 | 2026-08-23 | **同步当前 M0 修正状态与里程碑依赖，产品范围不变。** 01 的 readiness 修正已在 v0.23 实现批次落地，当前文档 v0.24、`in-progress`，还差 3 条人工验收；00 v0.18、02 v0.15、03 v0.15 保持 `review`。M2 的涉及范围补全为 00/01/02/03/04，M3 补全为 00/01/03/05/06，避免分类 schema、工具权限与确认闸门在实施计划中被漏掉 |
