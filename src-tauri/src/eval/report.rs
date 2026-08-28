@@ -13,7 +13,10 @@ use super::{
     join::{DegradedMatch, OrdinalJoin},
     live::TrialDiagnostics,
     manifest::Pool,
-    metrics::{compute_pool, overall_verdict, CaseOutcome, PoolReport},
+    metrics::{
+        compute_control_pool, compute_decision_metrics, compute_pool, overall_verdict, CaseOutcome,
+        Metric, PoolReport, UsageCounts,
+    },
     replay::CallResult,
 };
 
@@ -56,6 +59,15 @@ pub struct CaseReport {
     pub trial_diagnostics: Option<TrialDiagnostics>,
     /// `evidence_text` 不是转写文本真子串的草稿 id（只对 `kind = utterance` 有意义）。
     pub substring_violations: Vec<String>,
+    /// 与 §9.4「干净来源」同口径；正式诊断据此取首轮失败集合。
+    pub case_passed: bool,
+    /// 单 case 的模型输出 / 完成协议质量失败。基础设施错误不会生成半份 case report。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_error: Option<String>,
+    /// 指标 9：只记录，不进 verdict。重放为 `None`。
+    pub duration_ms: Option<i64>,
+    /// 指标 10：只记录整数 usage；拿不到就 `null`，不得伪装成 0。
+    pub usage: Option<UsageCounts>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +81,8 @@ pub struct Report {
     pub thresholds_source: &'static str,
     pub cases: Vec<CaseReport>,
     pub pools: Vec<PoolReport>,
+    /// 指标 4–8 在截图池 + 口述池的正式集合上聚合；不在两池各造一套判定。
+    pub decision_metrics: Vec<Metric>,
     /// `go` / `conditional_go` / `no_go`（§9.4「判定」）。**对照栏不参与。**
     pub verdict: &'static str,
 }
@@ -85,23 +99,35 @@ impl Report {
         outcomes: &[CaseOutcome],
     ) -> Self {
         let mut pools = Vec::new();
-        for pool in [Pool::Screenshot, Pool::Utterance, Pool::Control] {
+        for pool in [Pool::Screenshot, Pool::Utterance] {
             let subset: Vec<&CaseOutcome> = outcomes
                 .iter()
                 .filter(|outcome| outcome.pool == pool)
                 .collect();
-            if subset.is_empty() {
-                continue;
+            if !subset.is_empty() {
+                pools.push(compute_pool(pool, &subset));
             }
-            pools.push(compute_pool(pool, &subset));
         }
-        let verdict = overall_verdict(&pools);
+        let control: Vec<&CaseOutcome> = outcomes
+            .iter()
+            .filter(|outcome| outcome.pool == Pool::Control)
+            .collect();
+        if !control.is_empty() {
+            pools.push(compute_control_pool(&control));
+        }
+        let judged: Vec<&CaseOutcome> = outcomes
+            .iter()
+            .filter(|outcome| outcome.pool.is_judged())
+            .collect();
+        let decision_metrics = compute_decision_metrics(&judged, None);
+        let verdict = overall_verdict(&pools, &decision_metrics);
         Self {
             mode,
             trials,
             thresholds_source: "docs/PRD.md §9.4",
             cases,
             pools,
+            decision_metrics,
             verdict,
         }
     }
@@ -131,6 +157,8 @@ mod eval {
             confirmation_policy: "reconciled_batch".to_owned(),
             unparsed_note: String::new(),
             stated_item_count: 1,
+            duration_ms: None,
+            usage: None,
         }
     }
 

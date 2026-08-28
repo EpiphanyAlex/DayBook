@@ -2,8 +2,8 @@
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
 status: in-progress
 owner: "@maintainer"
-date: 2026-08-17
-version: v0.12
+date: 2026-08-24
+version: v0.13
 ---
 
 # 07 · 评测 Eval
@@ -171,6 +171,10 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 
 **用例清单是一份显式的 manifest，不是每次临时从库里挑**（2026-08-10 补）：`fixtures/manifest.json` 逐条列出 case id、来源目录、期望集合路径、启用状态与加入日期。**每次跑动态从数据库挑 20 条，跑出来的两轮数字就不可比**——而 §3.5 的整套判定方式建立在「逐条对比上一轮」上。改 manifest 是一次显式的、进 git 的动作。
 
+manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层 `profile` 标识用途（M0 正式判定使用 `m0_go_no_go`），每例 `sample` 标识来源类型、版式与口述长度分层。可选是为了让既有 CI 夹具、普通 `--dry-run` / `--replay` 与 ad-hoc live 向后兼容；**只有 `--m0-go-no-go` 强制这些字段**，并同时强制：manifest 与全部启用 case 都在 `fixtures/local/`、截图 / 口述 / 对照栏数量符合下表、截图至少两种币种与两种版式、口述长度分布符合下表、对照栏是非 beachhead 来源、case ID 只能使用 `m0-screenshot-NNN` / `m0-utterance-NNN` / `m0-control-NNN` 这类中性编号。真实机构名、账户名与真实输入绝对路径不得写进 ID 或正式报告。
+
+`node scripts/init-m0-eval.mjs --out <fixtures/local/...>` 是正式清单初始化器：Node 只负责起进程，`daybook-eval init-m0` 生成 `version: 1` 的中性 manifest 骨架与 case 目录。它**不加载 backend、不调用 agent、不复制或写入任何真实输入路径**，并在输出指向 `fixtures/ci/` 或 `fixtures/local/` 之外时拒绝；用户随后在本机把原件、`expected.json` 与 `env.json` 放进对应目录。
+
 **不追求覆盖率指标。** 20 个用例覆盖不了长尾，也不该假装能。它的作用是**回归探针**，不是质量证书。
 
 #### M0 go / no-go 的样本构成（2026-08-16 采样前冻结）
@@ -205,9 +209,10 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 | §9.4 的口径 | 评分器要做的事 |
 |---|---|
 | 指标 1–3 按截图池与口述池分开算 | diff 表两栏并列、各自判定；`fixtures/manifest.json` 每条用例带分池标记，**缺标记即拒绝跑**——分池是判定口径的一部分，不是展示选项 |
+| 指标 4–8 聚合正式判定集合 | 只聚合截图池 + 口述池，不把对照栏混入；其中 4 只取 `kind = file`，5 的分母取两池全部实际 `failed` 对账来源，6 只取 `kind = utterance`，7–8 取两池全部正式 case。不得为 4–8 各造一份截图判定和口述判定 |
 | 指标 7 的「需要改」与第 8 项同口径 | 纠正判定只比四个硬字段（`amount_minor` / `currency` / `occurred_on` / `direction`）与漏读多读；`category` / `channel` / `merchant` 文案的差异不进分子 |
-| 每条 1 轮出正式数 | `--trials` 的默认值是 1；`--trials 3` 的产物进诊断栏，**不覆盖正式数**（与 §3.4「关键用例跑多轮」同一套输出，用途不同） |
-| 指标 4 的分母只含 `kind = file` | 求可获得率的那条查询按 `sources.kind = 'file'` 过滤；口述来源不走机器对账（[03 审核 §3.3](./03-review.md)） |
+| 每条 1 轮出正式数 | ad-hoc live 的 `--trials` 仍只进诊断栏；M0 正式流程由 `--m0-diagnose <首轮报告>` 对「首轮失败 ∪ 预标 flaky」的并集**追加 3 轮**，单写诊断报告，绝不覆盖首轮 |
+| 指标 9–10 只记录 | 单来源耗时与可取得的 usage 整数计数逐 case 保存，不进入 verdict；拿不到 usage 时如实写 `null`，不得伪装成 0 |
 
 **每个比率一律连原始计数一起报**，写成 `0.967 (58/60)`。小分母上的比率是量化的——60 条上 `≥ 0.98` 实际等于「最多漏 1 条」，漏 2 条直接掉到 0.967。判定仍机械按阈值走，但报告必须让「差一条」和「差五条」一眼可辨，否则事后没人说得清那个数是怎么来的。
 
@@ -216,7 +221,8 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 **agent 是非确定性的，跑一次的结果不是一个数，是一次采样。** 同一张图连跑三次可能两次对一次错——单轮 eval 会把它记成「对」或「错」，取决于运气，而 §3.5 的逐条 diff 会因此**每轮都在报变化**，很快没人看。
 
 - **默认每个用例 1 轮**（额度是真实约束，§3.1）
-- **标记为 `flaky` 或**「曾经出过错」的用例跑 **3 轮**，报告 **3 轮全过 / 部分过 / 全不过**，而不是取平均
+- ad-hoc live 保留 `--trials 3` 兼容入口；M0 正式流程不用它重写首轮，而由 `--m0-diagnose <首轮报告>` 对「首轮未达到干净口径」与预标 `flaky` 的并集**各追加 3 轮**
+- 诊断报告写成独立文件，报告 **3 轮全过 / 部分过 / 全不过**，而不是取平均；首轮报告与正式指标永久不动
 - **`部分过` 本身就是结论**：它说明这条用例在当前模型下不稳定，比一个 66% 的分数有信息量得多
 
 #### 记忆开关对照（M3 起）
@@ -232,6 +238,17 @@ Anthropic 的建议是「20–50 个来自真实失败的用例是很好的起�
 **决定：逐条对比上一轮结果。任何一条从「过」变「不过」都必须人看一眼**，不自动放行也不自动拦截。eval 脚本输出的是一张 diff 表（哪条变了、变成什么），不是一个分数。
 
 同时输出模型标识与后端标识——否则无法区分模型退步与提示词变更导致的回归。
+
+#### M0 的正式 verdict 是单独契约（2026-08-24 新增）
+
+`node scripts/eval.mjs` 不带参数的 ad-hoc live 已有人使用，继续保留；它不是 [`docs/PRD.md` §9.4](../PRD.md) 的正式判定。**只有 `--m0-go-no-go --manifest <fixtures/local/.../manifest.json>` 能产出正式 verdict**，且有四条额外纪律：
+
+1. 首轮每例恰好 1 轮，首轮报告以 create-new 方式永久保存；已有路径不得覆盖
+2. 指标 5 若有 `reconciliation_status = failed` 的来源，首轮把这些中性 case ID 写进独立 `adjudications` 模板，报告状态为 `incomplete`、退出码 2。`--m0-finalize <首轮报告>` 只读这两份本机 JSON，零额度算出假警报率，另写 final 报告，**不改首轮、不重跑 agent**
+3. `--m0-diagnose <首轮报告>` 只跑「首轮失败 ∪ 预标 flaky」并各追加 3 轮，另写 diagnosis 报告。诊断结果不回填首轮，也不改变 final verdict
+4. 不自动重试。模型输出 / 完成协议等单 case 质量失败写进该 case 的正式结果并继续；后端 readiness、认证、额度、spawn、本地读写等运行或基础设施错误可以中止整轮
+
+正式退出码固定为 `0 = go / conditional-go`、`1 = 运行或基础设施错误`、`2 = incomplete`、`3 = no-go`。`--replay` 的 no-go 仍只是合成错读夹具的分数，不使用这套正式退出码。
 
 ### 3.6 夹具与重放：把 eval 与回归拆成两种成本
 
@@ -363,6 +380,18 @@ fixtures/local/<date>-<slug>/
 - [x] `cargo test eval::flaky_case_reports_mixed_not_an_average` 通过——同一条用例三轮里对两次错一次，报「部分过」而**不是 0.667**（§3.4）
 - [x] `cargo test eval::trial_summary_has_three_outcomes_and_no_average` 通过——多轮汇总只有「全过 / 部分过 / 全不过」三个取值，结构上没有「比例」这种东西
 - [x] `cargo test eval::case_without_tool_calls_is_valid_but_not_replayable` 通过——一条还没跑过的用例没有工具调用可录，`--dry-run` 不该因此拒绝它（§6 那条只点名输入、期望集合与 `env.json`）
+- [x] `cargo test eval::formal_manifest_enforces_m0_composition_only_in_formal_mode` 通过——`version: 1` 的旧 manifest 仍可 dry-run / replay；只有正式 profile 强制 20–25 张 beachhead 截图、20 段口述及其长度分层、3–5 张对照、至少两种币种与两种版式
+- [x] `cargo test eval::formal_manifest_rejects_committed_fixtures_and_non_neutral_ids` 通过——正式 manifest / case 只能在 `fixtures/local/`，拒绝 `fixtures/ci/`、目录逃逸与非 `m0-<pool>-NNN` 的 case ID
+- [x] `cargo test eval::formal_metrics_use_frozen_scopes` 通过——1–3 分截图 / 口述；4–8 聚合正式集合且 4 只含 file、5 含全部实际 failed 来源、6 只含 utterance；control 与 9–10 只记录
+- [x] `cargo test eval::formal_report_redacts_unparsed_note_content` 通过——正式报告只保留 `unparsed_note` 是否存在，不把可能复述真实原文的内容写进报告
+- [x] `cargo test formal_first_rejects_existing_output_before_backend` 通过——首轮 report / adjudications 目标已存在时在加载 backend 前拒绝，既不覆盖也不白烧额度
+- [x] `cargo test eval::pending_manual_is_incomplete_and_exit_two` 通过——指标 5 待裁定时首轮报告仍保存，正式状态是 incomplete、退出码 2，不把未知分子当 0
+- [x] `cargo test eval::finalize_uses_adjudications_without_agent` 通过——独立裁定文件补齐后零额度生成 final 报告，首轮字节不变，且 finalize 模块结构上不可达 agent
+- [x] `cargo test eval::diagnosis_targets_first_failures_union_flaky_and_keeps_official_values` 通过——诊断目标是首轮失败与预标 flaky 的并集，每例追加 3 轮，独立报告不覆盖首轮正式值
+- [x] `cargo test eval::case_quality_failure_is_recorded_and_next_case_runs` · `cargo test eval::formal_error_classes_are_frozen` 通过——单 case 协议 / 输出质量失败计入正式结果并继续，且不发生自动重试；后端 / 认证 / 额度 / spawn / timeout / 本地读写仍属中止类
+- [x] `cargo test eval::infrastructure_error_aborts_formal_run` 通过——运行 / 基础设施错误中止正式运行，不碰下一 case，并走退出码 1
+- [x] `cargo test formal_cli_uses_fixed_exit_codes` 通过——正式 CLI 的 complete / incomplete / no-go / 运行错误分别退出 0 / 2 / 3 / 1
+- [x] `cargo test m0_initializer_creates_neutral_local_manifest_without_inputs` · `cargo test m0_initializer_refuses_committed_set` · `cargo test initializer_cli_needs_no_backend_and_writes_no_input_path` 通过——Node 薄壳接 Rust 子命令，零 backend，只建中性骨架，不复制、不记录真实输入路径，拒绝 `fixtures/ci/`
 
 ### 烧额度（2026-08-17 落地，**不进 CI**）
 
@@ -382,6 +411,10 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-08-24 · M0 正式 verdict 流程在真实样本运行前冻结**（§3.4、§3.5、§6；[`docs/PRD.md` §9.4](../PRD.md)）。
+  现有不带参数 live 是 ad-hoc 兼容入口，不能再由它顺手承担 M0 判定；正式入口固定为 `--m0-go-no-go`。指标 5 的人工性由两阶段协议兑现：首轮报告永久保存，PendingManual 时 incomplete / exit 2；独立 adjudications 经 `--m0-finalize` 零额度产出 final，不重跑 agent。三轮诊断拆成 `--m0-diagnose` 独立报告，目标为「首轮失败 ∪ 预标 flaky」，每例追加 3 轮而不覆盖首轮。同步冻结 1–8 的聚合作用域、0/1/2/3 正式退出码、case 质量失败继续 / 基础设施错误中止、manifest v1 的可选 profile/sample 元数据与仅正式模式启用的 local / 样本构成 / 中性 ID 门禁。
+  初始化器决定为 Node 薄壳 + `daybook-eval init-m0`：零 backend，拒绝 `fixtures/ci/`，只建中性目录与 manifest 骨架，不复制也不记录真实输入路径。**阈值数字、beachhead 与样本数量区间一个未动，`status` 保持 `in-progress`。**
 
 - **2026-08-17（第三批）· 真跑 agent 的 eval 轮次落地**（§3.1、§3.4、§6）。
   `node scripts/eval.mjs`（不带参数）现在真起用户自己的 agent CLI 跑一轮，产出与 `--replay` 同形的 diff 表。至此 §3.6 成本表的两列都有了实现。
@@ -447,6 +480,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.13 | 2026-08-24 | **M0 正式 verdict 协议冻结并落地，`status` 保持 `in-progress`（真实样本尚未运行）。** 只有 `--m0-go-no-go` 产正式 verdict；指标 5 走首轮 immutable report + 独立 adjudications + 零额度 `--m0-finalize`；`--m0-diagnose` 对「首轮失败 ∪ flaky」各追加 3 轮并单写报告。补聚合作用域、正式退出码 0/1/2/3、case 质量失败继续 / 基础设施错误中止、manifest v1 可选 profile/sample 与正式 local / 构成 / 中性 ID 门禁，以及零 backend 的 `init-m0` 初始化器。阈值与样本构成未动 |
 | v0.12 | 2026-08-17 | **真跑 agent 的 eval 轮次落地——§3.6 成本表的两列现在都有实现。** 新增 `src-tauri/src/eval/live.rs` 与 `daybook-eval run`；`node scripts/eval.mjs` 不带参数即真跑一轮，`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数、其余进诊断栏，`--keep-runs <dir>`（规格外新增）让一次跑砸的轮次能直接变成回归夹具。**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录，要求它有等于逼人先烧一轮额度才能加用例。§6 重排为「零额度」「烧额度」「待建」三块，待建只剩 `--no-memory`（M3）与一条人工核对。**烧额度那一路不进 CI。** |
 | v0.11 | 2026-08-17 | **夹具导出器落地。** 新增 `src-tauri/src/eval/export.rs`、`daybook-eval export-fixture` 子命令、`scripts/export-fixture.mjs` 与 `src-tauri/tests/eval_export_cli.rs`。§6 把导出器那条从「待建」挪进「已落地」并拆成 6 条带真实选择器的验收。**新增一道规格里没有、但不设就是缺陷的闸门**：导出的 `expected.json` 带 `annotated: false`，评分器在人工核对前拒绝——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧，直接跑分等于模型给自己判卷（§3.2）。**真跑 agent 的 eval 轮次仍未做，`status` 保持 `in-progress`。** |
 | v0.10 | 2026-08-17 | **零额度那一半的评测工具链落地，`status` 由 `ready` 转 `in-progress`。** 新增 `src-tauri/src/eval/`（manifest 校验 · 真值解析 · ordinal full outer join · 指标计数 · 夹具重放 · 报告）、`src-tauri/src/bin/daybook-eval.rs`、`scripts/eval.mjs`（`--dry-run` / `--replay`）、`fixtures/manifest.json` 与一条合成夹具 `fixtures/ci/2026-08-17-misread-amount/`（「把 16.80 读成 168.00」）。§6 重排为「零额度那一半（已落地）」与「真实轮次与导出器（待建）」两块，26 条已达成、6 条待建；两条此前写成散文的口径回归补上真实 `cargo test` 选择器。§7 记四处偏离：评分器落 Rust（`f32\|f64` 门禁倒逼，且正合「比率必带原始计数」）、`replay_does_not_invoke_agent` 判据改写（后端 trait 上没有 `spawn`）、结构断言独立成条、口径回归的「反向必须变红」做进用例本身。**阈值数字与十项指标口径一个未动。** |

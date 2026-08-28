@@ -16,13 +16,14 @@
 //! - **检测不到可用后端就非零退出**（§6）。探测放在跑任何一条用例**之前**，
 //!   既是 fail closed，也省得烧了一半额度才发现没登录。
 
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::Instant};
 
 use serde::Serialize;
 
 use super::{
     expected::ExpectedSet,
     join::{degraded_set_match, ordinal_full_outer_join, OrdinalJoin},
+    metrics::UsageCounts,
     replay::{predictions_from_drafted_json, utterance_substring_violations, FixtureEnv},
     EvalError, EvalResult,
 };
@@ -41,6 +42,9 @@ pub struct TrialOutcome {
     pub join: OrdinalJoin,
     pub check: TotalCheck,
     pub substring_violations: Vec<String>,
+    pub execution_error: Option<String>,
+    pub duration_ms: i64,
+    pub usage: Option<UsageCounts>,
 }
 
 impl TrialOutcome {
@@ -125,23 +129,134 @@ pub async fn run_trial(
         }
     };
 
-    let summary = runtime
+    let started = Instant::now();
+    let parsed = runtime
         .parse_source(Arc::clone(&database), imported.source_id.clone())
-        .await?;
+        .await;
+    let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
 
-    let predicted = predictions_from_drafted_json(&database, &summary.attempt_id)?;
+    let (attempt_id, execution_error) = match parsed {
+        Ok(summary) => (summary.attempt_id, None),
+        Err(error) if is_case_quality_error(&error.code) => {
+            // case 质量失败仍是这批正式样本的一部分：把它记成「全部期望条目漏读」并继续，
+            // 不能因一条协议失败丢掉整份首轮报告。parse_source 在创建 attempt 前发生的错误
+            // 没有 latest_attempt_id，那类属于基础设施 / 前置条件错误，照常中止。
+            let attempt_id: Option<String> = database.read(|connection| {
+                connection.query_row(
+                    "SELECT latest_attempt_id FROM sources WHERE id = ?1",
+                    [&imported.source_id],
+                    |row| row.get(0),
+                )
+            })?;
+            let Some(attempt_id) = attempt_id else {
+                return Err(EvalError::App(error));
+            };
+            (attempt_id, Some(error.code))
+        }
+        Err(error) => return Err(EvalError::App(error)),
+    };
+
+    let predicted = predictions_from_drafted_json(&database, &attempt_id)?;
     let join = ordinal_full_outer_join(&expected.items, &predicted);
-    let check = confirm::total_check(&database, &summary.attempt_id)?;
-    let substring_violations = utterance_substring_violations(&database, &summary.attempt_id)?;
+    let (check, substring_violations) = if execution_error.is_some() {
+        (
+            TotalCheck {
+                attempt_id: attempt_id.clone(),
+                source_id: imported.source_id.clone(),
+                source_kind: expected.source_kind.clone(),
+                reconciliation_status: "error".to_owned(),
+                confirmation_policy: "single_only".to_owned(),
+                reported_total_minor: None,
+                calculated_total_minor: None,
+                reported_total_currency: None,
+                reported_total_kind: None,
+                reported_total_evidence_text: None,
+                unavailable_draft_ids: Vec::new(),
+                outcome: Some("case_quality_failure".to_owned()),
+                unparsed_note: None,
+            },
+            Vec::new(),
+        )
+    } else {
+        (
+            confirm::total_check(&database, &attempt_id)?,
+            utterance_substring_violations(&database, &attempt_id)?,
+        )
+    };
+    let usage = usage_counts(&database, &attempt_id)?;
 
     Ok(TrialOutcome {
-        attempt_id: summary.attempt_id,
+        attempt_id,
         source_id: imported.source_id,
         database,
         join,
         check,
         substring_violations,
+        execution_error,
+        duration_ms,
+        usage,
     })
+}
+
+/// 模型输出 / 完成协议错误属于单 case 质量失败；正式运行记录并继续。
+/// 认证、额度、spawn、timeout、存储等其余错误属于运行 / 基础设施错误，由调用方中止。
+pub fn is_case_quality_error(code: &str) -> bool {
+    matches!(
+        code,
+        "agent.protocol_violation"
+            | "agent.completion_mismatch"
+            | "agent.unexplained_gap"
+            | "agent.tool_rejected"
+    )
+}
+
+/// 从本轮本机 debug 日志只取整数 token 计数。拿不到时返回 `None`，不伪装成 0。
+fn usage_counts(database: &Database, attempt_id: &str) -> EvalResult<Option<UsageCounts>> {
+    let session: String = database.read(|connection| {
+        connection.query_row(
+            "SELECT agent_session_id FROM parse_attempts WHERE id = ?1",
+            [attempt_id],
+            |row| row.get(0),
+        )
+    })?;
+    let path = database
+        .root()
+        .join("logs")
+        .join(format!("{session}.debug.jsonl"));
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let stdout = raw.lines().find_map(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|event| {
+                event
+                    .get("stdout")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
+    });
+    let Some(stdout) = stdout else {
+        return Ok(None);
+    };
+    for line in stdout.lines().rev() {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(usage) = event.get("usage") else {
+            continue;
+        };
+        let count = |name: &str| usage.get(name).and_then(serde_json::Value::as_i64);
+        return Ok(Some(UsageCounts {
+            input_tokens: count("input_tokens"),
+            output_tokens: count("output_tokens"),
+            cache_creation_input_tokens: count("cache_creation_input_tokens"),
+            cache_read_input_tokens: count("cache_read_input_tokens"),
+        }));
+    }
+    Ok(None)
 }
 
 /// 诊断栏：第 2 轮起的产物。**不覆盖正式数**（§9.4 口径③）。
@@ -277,6 +392,31 @@ mod eval {
                 trace_events: store.trace_events(),
                 debug_events: store.debug_events(),
             })
+        }
+    }
+
+    #[test]
+    fn formal_error_classes_are_frozen() {
+        for code in [
+            "agent.protocol_violation",
+            "agent.completion_mismatch",
+            "agent.unexplained_gap",
+            "agent.tool_rejected",
+        ] {
+            assert!(is_case_quality_error(code), "{code} 应记入单 case 并继续");
+        }
+        for code in [
+            "agent.backend_unavailable",
+            "agent.unauthorized",
+            "agent.quota_exhausted",
+            "agent.spawn_failed",
+            "agent.timeout",
+            "storage.io",
+        ] {
+            assert!(
+                !is_case_quality_error(code),
+                "{code} 应作为运行 / 基础设施错误中止"
+            );
         }
     }
 

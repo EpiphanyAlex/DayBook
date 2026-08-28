@@ -39,7 +39,7 @@ pub const CORRECTION_MAX_PERMILLE: i64 = 200;
 /// 指标 8 干净来源率 ≥ 0.60
 pub const CLEAN_SOURCE_MIN_PERMILLE: i64 = 600;
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Threshold {
     AtLeast(i64),
@@ -142,6 +142,15 @@ impl Metric {
 }
 
 /// 一条用例跑完之后、进聚合之前的样子。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCounts {
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_creation_input_tokens: Option<i64>,
+    pub cache_read_input_tokens: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CaseOutcome {
     pub id: String,
@@ -155,6 +164,10 @@ pub struct CaseOutcome {
     pub unparsed_note: String,
     /// 口述原文里说了几笔（指标 6 的基准）。
     pub stated_item_count: i64,
+    /// 指标 9：只记录，不参与 verdict。重放路径为 `None`。
+    pub duration_ms: Option<i64>,
+    /// 指标 10：只记录整数 usage；后端没提供时为 `None`，不伪装成 0。
+    pub usage: Option<UsageCounts>,
 }
 
 impl CaseOutcome {
@@ -183,10 +196,11 @@ pub struct PoolReport {
     pub degraded: DegradedMatch,
 }
 
-/// 按一池的用例算全部指标。
+/// 按一池算指标 1–3。
 ///
-/// **指标 1–3 按池分开算，两池各自过阈值**（§9.4 口径①）：合成一个池子，其中一个的
-/// 失败会被另一个的成绩盖住，而 M0 存在的理由正是分别撞那两个未知数。
+/// **只有指标 1–3 分池**（§9.4 口径①）。指标 4–8 由
+/// [`compute_decision_metrics`] 在截图池 + 口述池的正式判定集合上聚合；把 4–8 也在
+/// 两池各算一遍会制造规格里不存在的两套判定。
 pub fn compute_pool(pool: Pool, cases: &[&CaseOutcome]) -> PoolReport {
     let matched: i64 = cases.iter().map(|case| case.join.matched_count()).sum();
     let missed: i64 = cases.iter().map(|case| case.join.missed_count()).sum();
@@ -239,6 +253,50 @@ pub fn compute_pool(pool: Pool, cases: &[&CaseOutcome]) -> PoolReport {
             Ratio::new(field_correct(HardField::OccurredOn), matched),
             Threshold::AtLeast(FIELD_MIN_PERMILLE),
         ),
+    ];
+    if !pool.is_judged() {
+        // 对照栏「只如实报数」。留着数字、去掉判定——一栏带着 pass / fail 的数字，
+        // 迟早会有人把它当结论看。
+        for metric in &mut metrics {
+            metric.verdict = Verdict::RecordOnly;
+        }
+    }
+
+    PoolReport {
+        pool: pool.as_str(),
+        judged: pool.is_judged(),
+        case_count: cases.len() as i64,
+        metrics,
+        degraded: DegradedMatch {
+            label: "诊断用".to_owned(),
+            matched: cases.iter().map(|case| case.degraded.matched).sum(),
+            expected_only: cases.iter().map(|case| case.degraded.expected_only).sum(),
+            predicted_only: cases.iter().map(|case| case.degraded.predicted_only).sum(),
+        },
+    }
+}
+
+/// 指标 4–8 的唯一正式聚合。
+///
+/// `cases` 必须只含截图池 + 口述池；对照栏由调用方排除。指标 5 的分子在首轮为 `None`
+/// （需要人工裁定），finalize 后传 `Some(false_alarm_count)`。
+pub fn compute_decision_metrics(
+    cases: &[&CaseOutcome],
+    false_alarm_count: Option<i64>,
+) -> Vec<Metric> {
+    let failed = cases
+        .iter()
+        .filter(|case| case.reconciliation_status == "failed")
+        .count() as i64;
+    let false_alarm = if failed == 0 {
+        Ratio::new(0, 0)
+    } else {
+        false_alarm_count.map_or_else(
+            || Ratio::pending_manual(failed),
+            |num| Ratio::new(num, failed),
+        )
+    };
+    vec![
         Metric::new(
             4,
             "reported_total_availability",
@@ -249,19 +307,14 @@ pub fn compute_pool(pool: Pool, cases: &[&CaseOutcome]) -> PoolReport {
         Metric::new(
             5,
             "false_alarm_rate",
-            "总额校验假警报率（分子需人工核对）",
-            Ratio::pending_manual(
-                cases
-                    .iter()
-                    .filter(|case| case.reconciliation_status == "failed")
-                    .count() as i64,
-            ),
+            "总额校验假警报率（分母 = 全部实际 failed 来源）",
+            false_alarm,
             Threshold::AtMost(FALSE_ALARM_MAX_PERMILLE),
         ),
         Metric::new(
             6,
             "silent_omission_rate",
-            "口述静默遗漏率",
+            "口述静默遗漏率（只含 kind = utterance）",
             silent_omission(cases),
             Threshold::AtMost(SILENT_OMISSION_MAX_PERMILLE),
         ),
@@ -285,27 +338,18 @@ pub fn compute_pool(pool: Pool, cases: &[&CaseOutcome]) -> PoolReport {
             ),
             Threshold::AtLeast(CLEAN_SOURCE_MIN_PERMILLE),
         ),
-    ];
-    if !pool.is_judged() {
-        // 对照栏「只如实报数」。留着数字、去掉判定——一栏带着 pass / fail 的数字，
-        // 迟早会有人把它当结论看。
-        for metric in &mut metrics {
-            metric.verdict = Verdict::RecordOnly;
-        }
-    }
+    ]
+}
 
-    PoolReport {
-        pool: pool.as_str(),
-        judged: pool.is_judged(),
-        case_count: cases.len() as i64,
-        metrics,
-        degraded: DegradedMatch {
-            label: "诊断用".to_owned(),
-            matched: cases.iter().map(|case| case.degraded.matched).sum(),
-            expected_only: cases.iter().map(|case| case.degraded.expected_only).sum(),
-            predicted_only: cases.iter().map(|case| case.degraded.predicted_only).sum(),
-        },
+/// 对照栏只记录：保留 1–8 的原始计数，但把判定全部改成 `record_only`。
+pub fn compute_control_pool(cases: &[&CaseOutcome]) -> PoolReport {
+    let mut report = compute_pool(Pool::Control, cases);
+    report.metrics.extend(compute_decision_metrics(cases, None));
+    for metric in &mut report.metrics {
+        metric.verdict = Verdict::RecordOnly;
+        metric.threshold = Threshold::RecordOnly;
     }
+    report
 }
 
 /// 指标 4 的分母**只含 `kind = file`**（§9.4 口径④）。
@@ -359,21 +403,20 @@ pub fn correction_rate(cases: &[&CaseOutcome], fields: &[HardField]) -> Ratio {
 /// - **9–10 只记录**
 ///
 /// **对照栏不参与。**
-pub fn overall_verdict(pools: &[PoolReport]) -> &'static str {
-    let judged = pools.iter().filter(|report| report.judged);
-    let mut conditional = false;
-    for report in judged {
-        for metric in &report.metrics {
-            if metric.verdict != Verdict::Fail {
-                continue;
-            }
-            if metric.is_floor() {
-                return "no_go";
-            }
-            conditional = true;
+pub fn overall_verdict(pools: &[PoolReport], decision_metrics: &[Metric]) -> &'static str {
+    for report in pools.iter().filter(|report| report.judged) {
+        if report
+            .metrics
+            .iter()
+            .any(|metric| metric.is_floor() && metric.verdict == Verdict::Fail)
+        {
+            return "no_go";
         }
     }
-    if conditional {
+    if decision_metrics
+        .iter()
+        .any(|metric| metric.verdict == Verdict::Fail)
+    {
         "conditional_go"
     } else {
         "go"
@@ -408,6 +451,8 @@ mod eval {
             reconciliation_status: status.to_owned(),
             confirmation_policy: "single_only".to_owned(),
             unparsed_note: String::new(),
+            duration_ms: None,
+            usage: None,
         }
     }
 
@@ -517,7 +562,7 @@ mod eval {
             .find(|metric| metric.key == "item_recall")
             .unwrap();
         assert_eq!(recall.verdict, Verdict::Fail, "1/2 远低于 0.98");
-        assert_eq!(overall_verdict(&[report]), "no_go");
+        assert_eq!(overall_verdict(&[report], &[]), "no_go");
     }
 
     #[test]
@@ -529,7 +574,8 @@ mod eval {
         };
         let outcome = case("a", "file", join, "unavailable");
         let report = compute_pool(Pool::Screenshot, &[&outcome]);
-        assert_eq!(overall_verdict(&[report]), "conditional_go");
+        let decision = compute_decision_metrics(&[&outcome], Some(0));
+        assert_eq!(overall_verdict(&[report], &decision), "conditional_go");
     }
 
     /// 07 §3.4：对照栏「只如实报数」，不计入判定池的任何指标。
@@ -544,7 +590,7 @@ mod eval {
             pool: Pool::Control,
             ..case("receipt", "file", terrible, "unavailable")
         };
-        let report = compute_pool(Pool::Control, &[&outcome]);
+        let report = compute_control_pool(&[&outcome]);
         assert!(!report.judged);
         assert!(
             report
@@ -554,12 +600,12 @@ mod eval {
             "对照栏的数字带着 pass / fail 迟早会被当成结论"
         );
         assert_eq!(
-            overall_verdict(&[report]),
+            overall_verdict(&[report], &[]),
             "go",
             "对照栏再差也不该影响 go / no-go"
         );
         // 但数字仍然在——「如实报数」的那一半。
-        let report = compute_pool(Pool::Control, &[&outcome]);
+        let report = compute_control_pool(&[&outcome]);
         let recall = report
             .metrics
             .iter()
@@ -590,9 +636,8 @@ mod eval {
             ..OrdinalJoin::default()
         };
         let outcome = case("a", "file", join, "failed");
-        let report = compute_pool(Pool::Screenshot, &[&outcome]);
-        let metric = report
-            .metrics
+        let metrics = compute_decision_metrics(&[&outcome], None);
+        let metric = metrics
             .iter()
             .find(|metric| metric.key == "false_alarm_rate")
             .unwrap();
@@ -640,6 +685,83 @@ mod eval {
             .unwrap();
         assert_eq!(amount.ratio.num, Some(1));
         assert_eq!(amount.ratio.den, 2, "分母是 2 条匹配，不是 5 条期望");
+    }
+
+    /// 2026-08-24 冻结的正式作用域：1–3 分池；4–8 聚合两池，4=file、5=全部实际
+    /// failed、6=utterance；control 与 9–10 只记录。
+    #[test]
+    fn formal_metrics_use_frozen_scopes() {
+        let screenshot = case(
+            "shot",
+            "file",
+            OrdinalJoin {
+                matched: vec![clean_pair(1)],
+                ..OrdinalJoin::default()
+            },
+            "failed",
+        );
+        let mut utterance = case(
+            "said",
+            "utterance",
+            OrdinalJoin {
+                matched: vec![clean_pair(1)],
+                ..OrdinalJoin::default()
+            },
+            "failed",
+        );
+        utterance.stated_item_count = 2;
+        let control = CaseOutcome {
+            pool: Pool::Control,
+            ..case(
+                "control",
+                "file",
+                OrdinalJoin {
+                    missed: vec![1, 2, 3],
+                    ..OrdinalJoin::default()
+                },
+                "unavailable",
+            )
+        };
+
+        let screenshot_metrics = compute_pool(Pool::Screenshot, &[&screenshot]);
+        let utterance_metrics = compute_pool(Pool::Utterance, &[&utterance]);
+        assert!(screenshot_metrics
+            .metrics
+            .iter()
+            .all(|metric| metric.index <= 3));
+        assert!(utterance_metrics
+            .metrics
+            .iter()
+            .all(|metric| metric.index <= 3));
+
+        let decision = compute_decision_metrics(&[&screenshot, &utterance], None);
+        let metric = |key: &str| decision.iter().find(|metric| metric.key == key).unwrap();
+        assert_eq!(
+            metric("reported_total_availability").ratio.den,
+            1,
+            "指标 4 只含 file"
+        );
+        assert_eq!(
+            metric("false_alarm_rate").ratio.den,
+            2,
+            "指标 5 含两池全部实际 failed"
+        );
+        assert_eq!(
+            metric("silent_omission_rate").ratio.den,
+            1,
+            "指标 6 只含 utterance"
+        );
+
+        let control = compute_control_pool(&[&control]);
+        assert!(control
+            .metrics
+            .iter()
+            .all(|metric| metric.verdict == Verdict::RecordOnly));
+        assert!(control
+            .metrics
+            .iter()
+            .all(|metric| metric.threshold == Threshold::RecordOnly));
+        assert!(screenshot.duration_ms.is_none() && screenshot.usage.is_none());
     }
 
     /// `PredictedItem` 参与聚合时不该被这里悄悄读到——留一条编译期锚点，

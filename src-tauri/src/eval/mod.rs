@@ -25,8 +25,11 @@
 
 pub mod expected;
 pub mod export;
+pub mod formal;
+pub mod init;
 pub mod join;
 pub mod live;
+pub mod m0;
 pub mod manifest;
 pub mod metrics;
 pub mod replay;
@@ -132,6 +135,26 @@ mod eval_guards {
             assert!(
                 !source.contains(needle),
                 "重放路径不得引用 `{needle}`——夹具重放测的是「agent 读错时闸门有没有拦住」，不是模型"
+            );
+        }
+    }
+
+    /// M0 finalize / 初始化器必须零 backend。模型调用只在 `formal.rs`；纯报告协议的
+    /// `m0.rs` 若能引用 runtime / backend / 进程 API，`--m0-finalize` 的零额度承诺就没有
+    /// 结构保证。
+    #[test]
+    fn m0_finalize_path_cannot_reach_the_agent() {
+        let source = format!("{}\n{}", include_str!("m0.rs"), include_str!("init.rs"));
+        for needle in [
+            concat!("Agent", "Runtime"),
+            concat!("Agent", "Backend"),
+            concat!("run_", "trial"),
+            concat!("Command", "::new"),
+            concat!("std::", "process"),
+        ] {
+            assert!(
+                !source.contains(needle),
+                "M0 finalize 模块不得引用 `{needle}`——它必须零额度且不重跑 agent"
             );
         }
     }

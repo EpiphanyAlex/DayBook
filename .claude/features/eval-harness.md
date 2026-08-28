@@ -1,14 +1,14 @@
 # 评测与夹具重放
 
-> 规格：[docs/prd/07-eval.md](../../docs/prd/07-eval.md) · 阈值与口径：[docs/PRD.md §9.4](../../docs/PRD.md) · 最后更新：2026-08-17
+> 规格：[docs/prd/07-eval.md](../../docs/prd/07-eval.md) · 阈值与口径：[docs/PRD.md §9.4](../../docs/PRD.md) · 最后更新：2026-08-24
 
 ## 一句话
 
 把「agent 那次读出来的东西」和「人工标注的真值」按 `source_ordinal` 连起来算分，并把录下来的工具调用重放回同一套工具面，检查**agent 读错时代码闸门有没有拦住**。
 
-## 现在实现了哪一半
+## 现在实现了什么
 
-07 §3.6 把两件事按成本拆开，**只有零额度那一列落地了**：
+07 §3.6 把两件事按成本拆开，两列都已落地；M0 另有一套正式判定协议：
 
 | | 测什么 | 怎么跑 | 成本 | 进 CI | 现状 |
 |---|---|---|---|---|---|
@@ -17,9 +17,9 @@
 
 **夹具导出器已落地**（2026-08-17）：`node scripts/export-fixture.mjs <agent_session_id>` 把一次真实解析打包成可重放的夹具目录。它不调 agent，读的是已经落盘的日志与库。
 
-**`node scripts/eval.mjs`（不带参数）会烧订阅额度**——它真起用户自己的 agent CLI，一条用例 ≈ 一次真实导入。零额度的是 `--dry-run` 与 `--replay`。
+**`node scripts/eval.mjs`（不带参数）会烧订阅额度**——它真起用户自己的 agent CLI，一条用例 ≈ 一次真实导入；这是保留兼容的 ad-hoc live，**不是** [`docs/PRD.md` §9.4](../../docs/PRD.md) 的正式 verdict。零额度的是 `--dry-run`、`--replay` 与 `--m0-finalize <首轮报告>`。
 
-`node scripts/eval.mjs`（不带参数）会**非零退出并明说真实轮次没做**，不静默返回成功。
+正式首轮只能用 `--m0-go-no-go --manifest <fixtures/local/.../manifest.json>`；指标 5 待人工裁定时报告仍永久保存、状态为 incomplete / exit 2。裁定写进独立 sidecar，再由 `--m0-finalize` 零额度生成 final。`--m0-diagnose <首轮报告>` 会烧额度，只对「首轮失败 ∪ 预标 flaky」每例追加 3 轮，并写独立诊断报告，不覆盖首轮。
 
 ## 数据流
 
@@ -41,12 +41,28 @@ node scripts/export-fixture.mjs <agent_session_id>
       ├ load_drafted → expected.json（annotated: false）    ← **只是预填，不是真值**
       └ env.json（版本三元组取自那次尝试自己的记录）
 
-node scripts/eval.mjs                 ← **烧额度**：真起 agent CLI
+node scripts/eval.mjs                 ← **烧额度**：兼容的 ad-hoc live，不是 M0 verdict
   → daybook-eval run
-  → src-tauri/src/eval/live.rs::ensure_backend_ready   ← 跑任何用例之前，探测不出就非零退出
+  → src-tauri/src/eval/live.rs::ensure_backend_ready
   → src-tauri/src/eval/live.rs::run_trial × (flaky ? --trials : 1)
-      └ 与 --replay 之后完全同一条打分路径
-  → 第 1 轮出正式数；其余进 TrialDiagnostics（全过 / 部分过 / 全不过，不取平均）
+
+node scripts/eval.mjs --m0-go-no-go --manifest fixtures/local/.../manifest.json
+  → daybook-eval m0-go-no-go
+  → 正式 manifest 门禁：profile / 样本构成 / local 路径 / 中性 ID
+  → 每例恰好 1 轮；case 质量失败记录并继续，基础设施错误中止
+  → first report create-new 永久保存
+  → 有 failed 对账：独立 adjudications 模板 + incomplete / exit 2
+  → 无待裁定：go / conditional-go exit 0，no-go exit 3
+
+node scripts/eval.mjs --m0-finalize <first-report>       ← 零额度
+  → daybook-eval m0-finalize
+  → 只读 immutable first report + 独立 adjudications
+  → 另写 final report，不加载 backend、不重跑 agent
+
+node scripts/eval.mjs --m0-diagnose <first-report>       ← **烧额度**
+  → daybook-eval m0-diagnose
+  → 首轮失败 ∪ flaky；每例追加 3 轮
+  → 独立 diagnosis report，不改正式值
 
 node scripts/eval.mjs --replay
   → daybook-eval replay-score
@@ -67,20 +83,24 @@ node scripts/eval.mjs --replay
 
 | 文件 | 职责 |
 |---|---|
-| `src-tauri/src/eval/manifest.rs` | `fixtures/manifest.json` 解析与校验；`Pool::{Screenshot,Utterance,Control}` |
+| `src-tauri/src/eval/manifest.rs` | manifest v1 解析；普通兼容校验与 M0 正式 local / 构成 / 中性 ID 门禁 |
 | `src-tauri/src/eval/expected.rs` | `expected.json`（唯一真值）解析；ordinal 唯一、金额必须是整数字符串 |
 | `src-tauri/src/eval/join.rs` | ordinal full outer join；`HARD_FIELDS`；降级集合匹配（诊断用） |
-| `src-tauri/src/eval/metrics.rs` | 十项阈值常量、`Ratio{num,den}`、`compute_pool`、`overall_verdict` |
+| `src-tauri/src/eval/metrics.rs` | 十项阈值常量、整数对；1–3 分池、4–8 聚合正式集合、9–10 只记录 |
 | `src-tauri/src/eval/replay.rs` | `FixtureEnv`、`replay_fixture`、`predictions_from_drafted_json`、口述子串检查 |
-| `src-tauri/src/eval/live.rs` | 真跑轮次；后端探测 fail-closed；多轮汇总（不取平均） |
+| `src-tauri/src/eval/live.rs` | 真跑单轮；后端探测 fail-closed；case 质量 / 基础设施错误分类；ad-hoc 多轮汇总 |
+| `src-tauri/src/eval/formal.rs` | M0 正式首轮与三轮诊断执行器；首轮无 retry loop |
+| `src-tauri/src/eval/m0.rs` | immutable first / final / diagnosis 报告、adjudications、退出码与不可覆盖写入 |
+| `src-tauri/src/eval/init.rs` | M0 中性 manifest 骨架初始化；只准 `fixtures/local/`，不写真实输入路径 |
 | `src-tauri/src/eval/export.rs` | 夹具导出器；CI 集拒写；`annotated: false` 预填；debug 日志缺失时的解释 |
-| `src-tauri/src/eval/report.rs` | 报告结构；分池成栏；归因（backend / model / prompt_hash） |
-| `src-tauri/src/eval/mod.rs` | `EvalError`；两条结构断言（`eval_guards`） |
-| `src-tauri/src/bin/daybook-eval.rs` | `version` / `validate` / `replay-score` / `export-fixture` / `run` 五个子命令，手搓参数解析 |
+| `src-tauri/src/eval/report.rs` | 报告结构；分池 / 聚合栏；归因（backend / model / prompt_hash） |
+| `src-tauri/src/eval/mod.rs` | `EvalError`；零 agent 路径等结构断言（`eval_guards`） |
+| `src-tauri/src/bin/daybook-eval.rs` | 普通 eval、`init-m0` 与三个 `m0-*` 正式子命令；手搓参数解析 |
 | `scripts/export-fixture.mjs` | 导出器薄壳；默认输出 `fixtures/local/<date>-<slug>/` |
 | `src-tauri/tests/eval_export_cli.rs` | 子命令级验收（只有集成测试拿得到 `CARGO_BIN_EXE_*`） |
-| `scripts/eval.mjs` | 薄壳：起进程 + 渲染 diff 表；比率格式化只在这里 |
-| `fixtures/manifest.json` | 用例清单（进 git 的显式清单） |
+| `scripts/eval.mjs` | 薄壳：模式选择、起进程、渲染；正式报告默认写入 ignored 的 `output/m0-eval/` |
+| `scripts/init-m0-eval.mjs` | 初始化器薄壳；不读写真实输入，只转发给 Rust |
+| `fixtures/manifest.json` | 用例清单（进 git 的显式清单）；正式真实样本使用 `fixtures/local/` 下的独立 manifest |
 | `fixtures/ci/2026-08-17-misread-amount/` | 合成夹具：`input.png` · `tool-calls.json` · `expected.json` · `env.json` |
 
 ## 数据结构
@@ -94,7 +114,7 @@ node scripts/eval.mjs --replay
 - **预测侧只能读 `drafted_json`，不能读草稿行当前值。** 行内编辑会就地改掉当前值——用户把 1680 改回 168 之后，读当前值算出来的错误率恒为零。`eval::prediction_uses_drafted_json_not_current_row` 守着；实测把查询改成读当前行，该用例立刻变红。
 - **Rust 侧不出比率，只出 `{num, den}`。** `scripts/verify-m0.mjs` 禁止 `src-tauri/src` 下出现 `f32|f64`，而这恰好正合 §9.4「每个比率一律连原始计数一起报」。阈值判定用交叉相乘 `num * 1000 >= permille * den`。
 - **`pool` 缺失是硬错误，不是缺省。** 分池是判定口径的一部分（§9.4 口径①），缺了 `--dry-run` 直接非零退出。三个值把「分池」与「对照栏」合成一个字段，于是「screenshot 且 control」这种状态表达不出来。
-- **对照栏的指标全部标成 `record_only`。** 数字照报，判定去掉——一栏带着 pass/fail 的数字迟早会被当成结论。
+- **指标作用域不是排版。** 1–3 按截图 / 口述分开；4–8 只在两池正式集合上聚合（4=file，5=全部实际 failed，6=utterance）；control 与 9–10 都是 `record_only`。把 4–8 各算两遍会得到仓库规格里不存在的判定。
 - **合成夹具必须是 `kind = file`。** `utterance` 的确认策略恒为 `user_attested_batch`，批量确认会照常放行（[03 §3.3](../../docs/prd/03-review.md)），那条夹具就断言不到「批量被拒」。
 - **版本三元组先查再动库。** `FixtureEnv::ensure_current` 在 `Database::open` 之前跑，所以「夹具过期」永远是第一个出现的错误，而不是重放到一半报个别的错。用 `daybook-eval version` 取当前值。
 - **`evidence_span` 是字符下标，不是字节偏移**（`draft_span_must_match_text`）。写口述夹具时用 `chars().count()` 算，别用 `len()`。
@@ -110,7 +130,10 @@ node scripts/eval.mjs --replay
 - **指标 5（假警报率）的分子要人工裁定**，报告里是 `null` + `pending_manual`，不会显示成 0。
 - **指标 9 / 10（耗时、额度）在重放路径上没有意义**，要等真实轮次。
 - **`verify-m0.mjs` 现在会扫 `docs/prd/07-eval.md` §6 的 `cargo test` 选择器**，改测试名而不改文档就会红。
-- **`--trials N` 只对标 `flaky` 的用例生效**，且第 1 轮出正式数、其余只进诊断栏。多跑几轮挑一个好看的写进报告，与看完答卷再改阈值是同一种作弊。
+- **`--trials N` 只属于 ad-hoc 兼容入口**，且只对标 `flaky` 的用例生效。M0 正式首轮永远 1 次；诊断只经 `--m0-diagnose` 对「首轮失败 ∪ flaky」追加 3 轮，独立保存。多跑几轮挑一个好看的回填，与看完答卷再改阈值是同一种作弊。
+- **指标 5 不准缺省成 0。** 有 failed 对账但裁定未完成时 first report = incomplete / exit 2；独立 adjudications 补齐后 finalize，且 first report 字节不变。
+- **正式 manifest 仍是 version 1。** `profile` / `sample` 对普通模式可选；只有正式模式强制构成、`fixtures/local/`、中性 ID 与目录边界，因此既有 CI 夹具不需要迁移。
+- **单 case 质量失败与基础设施错误不同。** 前者记为该 case 失败并继续，后者中止整轮；两类都不自动重试。
 - **`tool-calls.json` 不是必需的。** 有就可重放（零额度回归），没有就只能真跑——一条还没跑过的用例本来就没有工具调用可录。按文件在不在推断，不另设开关。
 - **`--keep-runs <dir>` 是闭环的那一步。** 不给它，eval 每轮的数据目录跑完即删，一次跑砸的轮次就没法用 `export-fixture --data-dir <那一轮>` 变成回归夹具。默认仍是删——那里面是真实解析产物。
 - **导出器与日志保留期赛跑。** `tool-calls.json` 的原料是 `<数据目录>/logs/<agent_session_id>.debug.jsonl` 里的 `kind: "tool_call"` 记录，而 `cleanup_expired_logs` 每次应用启动会删 14 天前的 `*.jsonl`；`.debug.jsonl` 还只在 debug 开关打开时才写（发布构建默认关）。想留证据就趁早导。
