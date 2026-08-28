@@ -1,7 +1,7 @@
 //! `daybook-eval` —— 评测评分器的命令行入口（`docs/prd/07-eval.md`）。
 //!
-//! **只做零额度的那一半**：校验用例清单、重放夹具、算计数、吐一份结构化 JSON。
-//! `scripts/eval.mjs` 是它的薄壳，负责渲染 diff 表（比率的格式化在那边——见
+//! 算分、正式 manifest 门禁、首轮 / finalize / diagnosis 报告协议都在这里；
+//! `scripts/eval.mjs` 只是模式选择与渲染的薄壳（比率格式化在 Node 侧——见
 //! `daybook_lib::eval::report` 的说明）。
 //!
 //! ```text
@@ -10,9 +10,13 @@
 //! daybook-eval replay-score   --manifest fixtures/manifest.json [--root <repo>] [--out <file>]
 //! daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--slug <name>]
 //! daybook-eval run            --manifest fixtures/manifest.json [--trials N] [--keep-runs <dir>]
+//! daybook-eval init-m0        --root <repo> --out fixtures/local/<set>
+//! daybook-eval m0-go-no-go    --manifest fixtures/local/<set>/manifest.json --out <first.json>
+//! daybook-eval m0-finalize    --report <first.json>
+//! daybook-eval m0-diagnose    --report <first.json> --root <repo>
 //! ```
 //!
-//! **`run` 是唯一烧订阅额度的子命令**——它真起用户自己的 agent CLI。其余三个是零额度的。
+//! `run`、`m0-go-no-go` 与 `m0-diagnose` 会起用户自己的 agent CLI；其余子命令零额度。
 //!
 //! 参数是手搓的：仓库现在没有 CLI 解析依赖，为几个子命令引一个会连带动
 //! `Cargo.lock`，而 CI 的每一步 cargo 都带 `--offline`。
@@ -30,10 +34,11 @@ use daybook_lib::{
     domain::confirm,
     eval::{
         expected::ExpectedSet,
-        export,
+        export, formal,
+        init::{self, InitOptions},
         join::{degraded_set_match, ordinal_full_outer_join},
-        live,
-        manifest::{Manifest, ValidatedCase},
+        live, m0,
+        manifest::{ensure_m0_manifest_location, Manifest, ValidatedCase},
         metrics::CaseOutcome,
         replay::{
             predictions_from_drafted_json, replay_fixture, scratch_root,
@@ -46,7 +51,7 @@ use daybook_lib::{
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code),
         Err(error) => {
             eprintln!("[eval] {error}");
             ExitCode::FAILURE
@@ -63,13 +68,18 @@ struct Options {
     out: Option<PathBuf>,
 }
 
-fn run() -> EvalResult<()> {
+fn run() -> EvalResult<u8> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let Some(command) = arguments.first() else {
         return Err(usage());
     };
+    if matches!(command.as_str(), "help" | "--help" | "-h") {
+        println!("{USAGE}");
+        return Ok(0);
+    }
     if command == "version" {
-        return print_version();
+        print_version()?;
+        return Ok(0);
     }
     let flags = parse_flags(&arguments[1..])?;
     match command.as_str() {
@@ -77,10 +87,17 @@ fn run() -> EvalResult<()> {
         "replay-score" => replay_score(&manifest_options(&flags)?),
         "export-fixture" => export(&flags),
         "run" => live_run(&flags),
-        other => Err(EvalError::Usage(format!(
-            "不认识的子命令 `{other}`。\n{USAGE}"
-        ))),
-    }
+        "init-m0" => init_m0(&flags),
+        "m0-go-no-go" => return m0_go_no_go(&flags),
+        "m0-finalize" => return m0_finalize(&flags),
+        "m0-diagnose" => return m0_diagnose(&flags),
+        other => {
+            return Err(EvalError::Usage(format!(
+                "不认识的子命令 `{other}`。\n{USAGE}"
+            )))
+        }
+    }?;
+    Ok(0)
 }
 
 const USAGE: &str = "用法：\n  \
@@ -88,9 +105,14 @@ const USAGE: &str = "用法：\n  \
     daybook-eval validate       --manifest <path> [--root <path>]\n  \
     daybook-eval replay-score   --manifest <path> [--root <path>] [--out <path>]\n  \
     daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--root <path>] [--slug <name>] [--out <path>]\n  \
-    daybook-eval run            --manifest <path> [--root <path>] [--trials <n>] [--keep-runs <dir>] [--out <path>]\n\
+    daybook-eval run            --manifest <path> [--root <path>] [--trials <n>] [--keep-runs <dir>] [--out <path>]\n  \
+    daybook-eval init-m0        --root <repo> --out <fixtures/local/...> [--screenshots <n>] [--controls <n>]\n  \
+    daybook-eval m0-go-no-go    --manifest <fixtures/local/.../manifest.json> --root <repo> --out <first.json>\n  \
+    daybook-eval m0-finalize    --report <first.json> [--out <final.json>]\n  \
+    daybook-eval m0-diagnose    --report <first.json> --root <repo> [--out <diagnosis.json>]\n\
 \n  \
-    只有 `run` 会烧订阅额度（它真起 agent CLI）。";
+    `run` 与 `m0-go-no-go` / `m0-diagnose` 会烧订阅额度；validate、replay-score、\n  \
+    export-fixture、init-m0、m0-finalize 都是零额度。";
 
 /// 打印当前的版本三元组。
 ///
@@ -198,6 +220,187 @@ fn today() -> EvalResult<String> {
     OffsetDateTime::now_utc()
         .format(&format_description!("[year]-[month]-[day]"))
         .map_err(|error| EvalError::Usage(format!("时间格式化失败：{error}")))
+}
+
+fn timestamp() -> EvalResult<String> {
+    OffsetDateTime::now_utc()
+        .format(&format_description!(
+            "[year][month][day]-[hour][minute][second]"
+        ))
+        .map_err(|error| EvalError::Usage(format!("时间格式化失败：{error}")))
+}
+
+/// 零 backend 的 M0 清单初始化器。只建中性 manifest / 空目录，不写真实输入路径。
+fn init_m0(flags: &Flags) -> EvalResult<()> {
+    let root = flags
+        .get("root")
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let out = flags
+        .get("out")
+        .map(PathBuf::from)
+        .ok_or_else(|| EvalError::Usage(format!("缺 --out。\n{USAGE}")))?;
+    let value = |name: &str, default: usize| -> EvalResult<usize> {
+        flags.get(name).map_or(Ok(default), |raw| {
+            raw.parse()
+                .map_err(|_| EvalError::Usage(format!("--{name} 必须是正整数，收到 `{raw}`")))
+        })
+    };
+    let options = InitOptions {
+        screenshot_count: value("screenshots", 22)?,
+        control_count: value("controls", 4)?,
+        utterance_single: value("single", 4)?,
+        utterance_two_to_three: value("two-to-three", 9)?,
+        utterance_four_plus: value("four-plus", 7)?,
+        added_on: today()?,
+    };
+    let manifest = init::initialize(&root, &out, &options)?;
+    println!(
+        "✓ M0 正式清单骨架已创建：{}\n  未复制、未记录任何真实 input 路径；请只在本机补齐各 case 的 input.* / expected.json / env.json 与中性 layout 标签。",
+        manifest.display()
+    );
+    Ok(())
+}
+
+/// 唯一能产生 docs/PRD.md §9.4 正式 verdict 的首轮入口。
+fn m0_go_no_go(flags: &Flags) -> EvalResult<u8> {
+    if flags.contains_key("trials") || flags.contains_key("keep-runs") {
+        return Err(EvalError::Usage(
+            "M0 正式首轮每 case 恰好 1 轮；不得传 --trials / --keep-runs。三轮只经 --m0-diagnose"
+                .to_owned(),
+        ));
+    }
+    let options = manifest_options(flags)?;
+    let output = options
+        .out
+        .as_ref()
+        .ok_or_else(|| EvalError::Usage("M0 正式首轮缺 --out（报告必须永久保存）".to_owned()))?;
+    let sidecar = m0::adjudications_path(output);
+    if output.exists() || sidecar.exists() {
+        return Err(EvalError::Usage(format!(
+            "M0 正式首轮拒绝覆盖已有 report / adjudications：{} / {}",
+            output.display(),
+            sidecar.display()
+        )));
+    }
+    ensure_m0_manifest_location(&options.root, &options.manifest)?;
+    let manifest_bytes = std::fs::read(&options.manifest)?;
+    let manifest = Manifest::load(&options.manifest)?;
+    let cases = manifest.validate_m0(&options.root, &options.manifest)?;
+    let async_runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
+    let report = async_runtime.block_on(async {
+        let agent = AgentRuntime::claude_default();
+        formal::run_first(&agent, &cases).await
+    })?;
+    if std::fs::read(&options.manifest)? != manifest_bytes {
+        return Err(EvalError::Manifest(
+            "正式运行期间 manifest 发生变化，拒绝保存混合样本报告".to_owned(),
+        ));
+    }
+    let written = m0::save_first(
+        &report,
+        &options.root,
+        &options.manifest,
+        &manifest_bytes,
+        output,
+    )?;
+    println!("✓ M0 首轮报告已永久保存：{}", written.report_path.display());
+    if let Some(path) = &written.adjudications_path {
+        println!(
+            "? 指标 5 待人工裁定：{}\n  填完后运行 --m0-finalize；首轮报告不会被改写。",
+            path.display()
+        );
+    }
+    Ok(written.exit.code())
+}
+
+/// 零额度 finalize：不加载 backend，只读首轮报告与相邻 adjudications。
+fn m0_finalize(flags: &Flags) -> EvalResult<u8> {
+    let report = flags
+        .get("report")
+        .map(PathBuf::from)
+        .ok_or_else(|| EvalError::Usage(format!("缺 --report。\n{USAGE}")))?;
+    let output = flags
+        .get("out")
+        .map_or_else(|| m0::final_report_path(&report), PathBuf::from);
+    match m0::finalize(&report, &output)? {
+        m0::FinalizeResult::Complete {
+            report_path,
+            envelope,
+            exit,
+        } => {
+            println!(
+                "✓ M0 final 报告已生成：{}\n  verdict: {}",
+                report_path.display(),
+                envelope.verdict
+            );
+            Ok(exit.code())
+        }
+        m0::FinalizeResult::Incomplete {
+            missing_case_ids,
+            adjudications_path,
+        } => {
+            eprintln!(
+                "[eval] incomplete：{} 仍有 {} 条未裁定：{}",
+                adjudications_path.display(),
+                missing_case_ids.len(),
+                missing_case_ids.join(", ")
+            );
+            Ok(m0::FormalExit::Incomplete.code())
+        }
+    }
+}
+
+/// 对首轮失败与预标 flaky case 的并集各追加 3 轮，单写诊断报告。
+fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
+    let first_path = flags
+        .get("report")
+        .map(PathBuf::from)
+        .ok_or_else(|| EvalError::Usage(format!("缺 --report。\n{USAGE}")))?;
+    let root = flags
+        .get("root")
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let first_bytes = std::fs::read(&first_path)?;
+    let first = m0::read_first(&first_path)?;
+    let targets = m0::diagnosis_targets(&first);
+    if targets.is_empty() {
+        return Err(EvalError::Usage(
+            "首轮没有失败或预标 flaky case，无需启动三轮诊断".to_owned(),
+        ));
+    }
+    let output = match flags.get("out") {
+        Some(path) => PathBuf::from(path),
+        None => m0::diagnosis_report_path(&first_path, &timestamp()?),
+    };
+    if output.exists() {
+        return Err(EvalError::Usage(format!(
+            "M0 诊断报告拒绝覆盖已有文件：{}",
+            output.display()
+        )));
+    }
+    ensure_m0_manifest_location(&root, &root.join(&first.manifest_path))?;
+    let manifest_path = m0::ensure_manifest_unchanged(&root, &first)?;
+    let manifest = Manifest::load(&manifest_path)?;
+    let cases = manifest.validate_m0(&root, &manifest_path)?;
+    let async_runtime = tokio::runtime::Runtime::new()
+        .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
+    let diagnosis = async_runtime.block_on(async {
+        let agent = AgentRuntime::claude_default();
+        formal::run_diagnosis(&agent, &cases, &targets, &first.report_id).await
+    })?;
+    m0::ensure_manifest_unchanged(&root, &first)?;
+    m0::write_diagnosis_new(&output, &diagnosis)?;
+    if std::fs::read(&first_path)? != first_bytes {
+        return Err(EvalError::Fixture(
+            "诊断检测到首轮报告被改写，拒绝接受".to_owned(),
+        ));
+    }
+    println!(
+        "✓ M0 三轮诊断已保存：{}（{} 个目标 × 追加 3 轮；不覆盖首轮）",
+        output.display(),
+        targets.len()
+    );
+    Ok(0)
 }
 
 /// **真跑 agent 的 eval 轮次**（07 §3.1）。走生产同一条路径：起 MCP server、spawn 用户
@@ -308,6 +511,8 @@ async fn run_case(
         confirmation_policy: outcome.check.confirmation_policy.clone(),
         unparsed_note: unparsed_note.clone(),
         stated_item_count: expected.stated_item_count(),
+        duration_ms: Some(outcome.duration_ms),
+        usage: outcome.usage.clone(),
     };
     let report = CaseReport {
         id: case.id.clone(),
@@ -326,6 +531,10 @@ async fn run_case(
         degraded,
         calls: Vec::new(),
         substring_violations: outcome.substring_violations.clone(),
+        case_passed: outcome.passed(),
+        execution_error: outcome.execution_error.clone(),
+        duration_ms: Some(outcome.duration_ms),
+        usage: outcome.usage.clone(),
         trial_diagnostics: (passes.len() > 1)
             .then(|| live::TrialDiagnostics::new(passes))
             .flatten(),
@@ -451,6 +660,7 @@ fn score_in_scratch(
     })?;
 
     let unparsed_note = check.unparsed_note.clone().unwrap_or_default();
+    let case_passed = join.is_clean_source();
     let outcome = CaseOutcome {
         id: case.id.clone(),
         pool: case.pool,
@@ -461,6 +671,8 @@ fn score_in_scratch(
         confirmation_policy: check.confirmation_policy.clone(),
         unparsed_note: unparsed_note.clone(),
         stated_item_count: expected.stated_item_count(),
+        duration_ms: None,
+        usage: None,
     };
     let report = CaseReport {
         id: case.id.clone(),
@@ -479,6 +691,10 @@ fn score_in_scratch(
         degraded,
         calls: replayed.calls.clone(),
         substring_violations,
+        case_passed,
+        execution_error: None,
+        duration_ms: None,
+        usage: None,
         trial_diagnostics: None,
     };
     Ok((report, outcome))
