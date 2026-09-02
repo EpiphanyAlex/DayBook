@@ -1,9 +1,9 @@
 ---
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
-status: in-progress
+status: draft
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.13
+date: 2026-08-30
+version: v0.14
 ---
 
 # 07 · 评测 Eval
@@ -60,6 +60,8 @@ version: v0.13
 一份**人工确认过的、以来源为单位的**条目清单（`fixtures/*/expected.json`，§3.6）。**它是唯一的 ground truth。** `transactions` 里的行只是它的一个常见素材来源——**因为用户丢弃掉的多读条目不在 `transactions` 里，而它必须计入错误**。
 
 每个期望条目除字段值外，还带一个**位置标识**：`source_ordinal`（1 起，原件上自上而下 / 口述中出现的先后），`utterance` 另带文本 span。建 eval 用例时人工标注——M0 手工数行号即可，20–30 张的量级不构成负担。
+
+**口述 formal 真值的 ordinal 定义于 2026-08-30 收紧为「实际交易首次出现顺序」。** 先出现一个组总额、随后才展开组内交易时，组总额不是交易，不占 ordinal；各交易按其第一处可识别交易陈述的 code-point `evidenceSpanStart` 升序编号。新的正式 `expected.json` 对每条 `utterance` 期望项强制 `evidenceSpanStart` / `evidenceSpanEnd`，且 ordinals 必须恰为 `1..N`、span start 严格递增并在原始未 normalize 文本内合法。这个门禁会在加载 backend 前拒绝标注错误；**评分仍只按 ordinal full outer join，算法与四硬字段不改。** 第一次样本 `m0-utterance-017` 与此定义冲突，但旧真值和第一次 no-go 不回写；修正后的标注只进新的 ignored 样本集。
 
 #### 预测侧的位置也要有，而且只能由 agent 报（2026-08-10 修正）
 
@@ -181,7 +183,7 @@ manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层
 
 [`docs/PRD.md` §9.4](../PRD.md) 的四步流程第 1 步要求**先定 beachhead 来源类型与样本构成，再去采样**。本节是那一步的产物，**在拿到任何样本之前写定**。它同时关闭 §5 的 R8（来源类型的 beachhead 未定）。
 
-**beachhead 定为「交易列表类截图」**——银行流水或支付软件的记录列表截图。理由三条：合计语义单一（一条 `expense_total`，[00 地基 §3.6](./00-foundation.md) 的 `parse_attempts.reported_total_*` 单条字段刚好够）；它是补记场景里最常截的那种；月结单的多条合计需要 [00 地基 §5](./00-foundation.md) R7 的 `reconciliation_claims` 子表，M0 schema 里没有。
+**beachhead 定为「交易列表类截图」**——银行流水或支付软件的记录列表截图。它是补记场景里最常截的来源类型，决定不因第一次 no-go 改变；但第一次正式样本已经证伪「交易列表的合计语义天然单一」：任意 viewport 中仍可能出现月度、分页、按日或子组合计。M0 单条 `reported_total_*` 只承载恰好一条 current-source 全覆盖 claim；其余不报告，多 claim 仍留 [00 地基 §5](./00-foundation.md) R7 到 M2。
 
 **样本分两栏，只有一栏参与判定**：
 
@@ -209,12 +211,45 @@ manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层
 | §9.4 的口径 | 评分器要做的事 |
 |---|---|
 | 指标 1–3 按截图池与口述池分开算 | diff 表两栏并列、各自判定；`fixtures/manifest.json` 每条用例带分池标记，**缺标记即拒绝跑**——分池是判定口径的一部分，不是展示选项 |
-| 指标 4–8 聚合正式判定集合 | 只聚合截图池 + 口述池，不把对照栏混入；其中 4 只取 `kind = file`，5 的分母取两池全部实际 `failed` 对账来源，6 只取 `kind = utterance`，7–8 取两池全部正式 case。不得为 4–8 各造一份截图判定和口述判定 |
+| 指标 4–8 聚合正式判定集合 | 只聚合截图池 + 口述池，不把对照栏混入；其中 4 的**分母仍是全部 `kind = file`**、分子只承认 scope-valid 且实际得到 `passed` / `failed` 的来源，阈值仍为 `≥ 0.70`；5 的分母取两池全部实际 `failed` 对账来源，6 只取 `kind = utterance`，7–8 取两池全部正式 case。不得为 4–8 各造一份截图判定和口述判定 |
 | 指标 7 的「需要改」与第 8 项同口径 | 纠正判定只比四个硬字段（`amount_minor` / `currency` / `occurred_on` / `direction`）与漏读多读；`category` / `channel` / `merchant` 文案的差异不进分子 |
 | 每条 1 轮出正式数 | ad-hoc live 的 `--trials` 仍只进诊断栏；M0 正式流程由 `--m0-diagnose <首轮报告>` 对「首轮失败 ∪ 预标 flaky」的并集**追加 3 轮**，单写诊断报告，绝不覆盖首轮 |
 | 指标 9–10 只记录 | 单来源耗时与可取得的 usage 整数计数逐 case 保存，不进入 verdict；拿不到 usage 时如实写 `null`，不得伪装成 0 |
 
 **每个比率一律连原始计数一起报**，写成 `0.967 (58/60)`。小分母上的比率是量化的——60 条上 `≥ 0.98` 实际等于「最多漏 1 条」，漏 2 条直接掉到 0.967。判定仍机械按阈值走，但报告必须让「差一条」和「差五条」一眼可辨，否则事后没人说得清那个数是怎么来的。
+
+#### 合计范围真值与 scope-invalid = 0（2026-08-30 新增）
+
+新的 M0 正式 `expected.json` 在来源级强制一组**评测元数据**（不是生产 schema）：
+
+```jsonc
+{
+  "reconciliationScope": {
+    "status": "eligible | scope_invalid | absent",
+    "reason": "current_source_all_applicable | outside_viewport | pagination | day_group | category_group | single_item | subset | multiple_claims | no_claim",
+    "expectedClaim": {
+      "amountMinor": "12345",
+      "currency": "AUD",
+      "kind": "expense_total"
+    },
+    "candidateClaims": [{
+      "amountMinor": "12345",
+      "currency": "AUD",
+      "kind": "expense_total",
+      "scope": "valid | invalid",
+      "reason": "current_source_all_applicable | outside_viewport | pagination | day_group | category_group | single_item | subset"
+    }]
+  }
+}
+```
+
+`candidateClaims` 是人工真值里的**评测元数据**，不是生产多 claim schema；最多 16 条并覆盖来源中每一条可辨认的合计候选。正式 loader 用它在 backend 前验证以下状态，不从图像自动 OCR。
+
+- `eligible`：当前不可变来源中恰有一条**可支持的** claim，且覆盖该 claim 类型的全部适用交易；其他明显的局部小计可以存在，但它们的 amount/currency/kind 三元组不得与有效 claim 相同，也不得报告。`reason` 只能是 `current_source_all_applicable`，`expectedClaim` 必填并用十进制字符串金额、ISO 4217 货币与既有三种 `kind` 固定它的可比较身份；该三元组必须在 `candidateClaims` 全部候选中唯一，且列表中恰有一条 `scope = valid` 与它相等。
+- `scope_invalid`：所有合计候选都覆盖 viewport 外 / 其他分页，或只按日 / 分类 / 单笔语义 / 子组；又或者多条候选里无法唯一确定一条 current-source 全覆盖 claim。即使语义上有一条有效 claim，只要另一个 invalid decoy 具有相同 amount/currency/kind、formal 无法只凭现有四列审计 agent 选中了哪条，也归 `reason = multiple_claims`、`expectedClaim = null`。其他无效原因取对应枚举；`candidateClaims` 非空。
+- `absent`：来源没有合计候选；`reason = no_claim`，`expectedClaim = null`，`candidateClaims = []`。
+
+正式评分新增一个**不属于十项阈值**的 transcript 计数 `scopeInvalidTotalReports`。成功写入 `reported_total_*` 且满足以下任一条件的 case 计入：① `status != eligible`；② `status = eligible`，但 agent 报告的 amount/currency/kind 与 `expectedClaim` 不逐字段相等。这样「一条有效总计 + 一个无效 decoy 小计」里错报 decoy 也不能借来源级 `eligible` 漏过。该计数必须精确等于 0；大于 0 直接 `no_go`，即使局部数字碰巧与草稿和相等也不豁免。指标 4 的分母和 `≥ 0.70` 阈值不动；分子只计 `eligible`、报告与 `expectedClaim` 相等且实际得到 `passed` / `failed`。普通 `--dry-run` / `--replay` 的旧夹具可不带该元数据；正式模式缺失、`eligible` 缺 `expectedClaim`，或 `candidateClaims` 证明 expected 三元组不唯一时，均须在 backend 前拒绝该 `eligible` 标注并要求改为 `scope_invalid / multiple_claims`。
 
 #### 关键用例跑多轮（2026-08-10 新增）
 
@@ -241,14 +276,53 @@ manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层
 
 #### M0 的正式 verdict 是单独契约（2026-08-24 新增）
 
-`node scripts/eval.mjs` 不带参数的 ad-hoc live 已有人使用，继续保留；它不是 [`docs/PRD.md` §9.4](../PRD.md) 的正式判定。**只有 `--m0-go-no-go --manifest <fixtures/local/.../manifest.json>` 能产出正式 verdict**，且有四条额外纪律：
+`node scripts/eval.mjs` 不带参数的 ad-hoc live 已有人使用，继续保留；它不是 [`docs/PRD.md` §9.4](../PRD.md) 的正式判定。**只有 `--m0-go-no-go --manifest <fixtures/local/.../manifest.json>` 能产出正式 verdict**，且有八条额外纪律：
 
 1. 首轮每例恰好 1 轮，首轮报告以 create-new 方式永久保存；已有路径不得覆盖
 2. 指标 5 若有 `reconciliation_status = failed` 的来源，首轮把这些中性 case ID 写进独立 `adjudications` 模板，报告状态为 `incomplete`、退出码 2。`--m0-finalize <首轮报告>` 只读这两份本机 JSON，零额度算出假警报率，另写 final 报告，**不改首轮、不重跑 agent**
 3. `--m0-diagnose <首轮报告>` 只跑「首轮失败 ∪ 预标 flaky」并各追加 3 轮，另写 diagnosis 报告。诊断结果不回填首轮，也不改变 final verdict
 4. 不自动重试。模型输出 / 完成协议等单 case 质量失败写进该 case 的正式结果并继续；后端 readiness、认证、额度、spawn、本地读写等运行或基础设施错误可以中止整轮
+5. 首轮 snapshot 在 backend 启动前计算 **`fixtureSetSha256`**：集合恰为 manifest 本身，以及每个启用 case 的 `expected.json`、`env.json` 与 `env.source.input` 指向的原始输入。路径统一为仓库相对、`/` 分隔的 UTF-8，按路径字节升序；每项向 SHA-256 顺序写入 `pathByteLength` 的 ASCII 十进制、`:`、路径字节、`contentByteLength` 的 ASCII 十进制、`:`、原始文件字节。报告同时保存 `fixtureFileCount`。首轮保存前重新计算并逐字节比较；诊断校验完整 set，final 从首轮继承，不回填第一次旧报告
+6. 每个 case 的 `hardFieldDiffs` 只保存错误 / 漏读 / 多读项，但每项必须含 pairing 状态、ordinal，以及 expected / predicted 两侧各自的 `amountMinor`、`currency`、`occurredOn`、`direction`（缺侧为 `null`）。正式 ordinal full outer join 与四硬字段集合不变，只补此前报告丢掉的值
+7. 每个 case 的 `reconciliationEvidence` 保存人工范围真值、agent 报告的 amount/currency/kind、代码计算值与差额；`reportedTotalEvidenceText` 最多保存前 **160 个 Unicode code point**，并带 `originalCodePointLength` 与 `truncated`。不得把整张图、整段口述或完整 `unparsed_note` 内联进报告
+8. **持久化**的真实输入与上述 bounded 摘录只能落在 Git 已忽略的 `fixtures/local/` / `output/`；运行时 scratch 必须在结束后删除，不能成为第三个持久样本库。仓库内测试使用合成数据。`manifestSha256` 可保留作兼容，但不能冒充完整 fixture-set 指纹
 
-正式退出码固定为 `0 = go / conditional-go`、`1 = 运行或基础设施错误`、`2 = incomplete`、`3 = no-go`。`--replay` 的 no-go 仍只是合成错读夹具的分数，不使用这套正式退出码。
+报告边界形状固定为：
+
+```jsonc
+{
+  "hardFieldDiffs": [{
+    "sourceOrdinal": 1,
+    "pairing": "matched | expected_only | predicted_only",
+    "expected": { "amountMinor": "...", "currency": "...", "occurredOn": "...", "direction": "..." },
+    "predicted": { "amountMinor": "...", "currency": "...", "occurredOn": "...", "direction": "..." },
+    "wrongFields": ["amount_minor"]
+  }],
+  "reconciliationEvidence": {
+    "expectedScope": {
+      "status": "eligible", "reason": "current_source_all_applicable",
+      "expectedClaim": { "amountMinor": "12345", "currency": "AUD", "kind": "expense_total" },
+      "candidateClaims": [
+        { "amountMinor": "12345", "currency": "AUD", "kind": "expense_total", "scope": "valid", "reason": "current_source_all_applicable" }
+      ]
+    },
+    "reportedClaimMatchesExpected": true,
+    "scopeViolation": false,
+    "reported": {
+      "amountMinor": "...", "currency": "...", "kind": "expense_total",
+      "evidenceExcerpt": { "text": "...", "originalCodePointLength": 42, "truncated": false }
+    },
+    "computedMinor": "...",
+    "deltaMinor": "..."
+  }
+}
+```
+
+`expected` / `predicted` 缺侧时为 `null`；`reported`、`computedMinor`、`deltaMinor` 不可得时为 `null`。没有报告时 `reportedClaimMatchesExpected = null`；有报告时按上面的 exact 三字段身份取布尔值，非 `eligible` 一律为 `false`。`scopeViolation = reported != null && reportedClaimMatchesExpected != true`。`deltaMinor = computedMinor - reported.amountMinor`，金额始终是十进制字符串。`hardFieldDiffs` 只含非干净项，避免把 200 条全对记录重复膨胀进报告；它不能替代正式 join 计数。
+
+新写出的正式 envelope 升为 `formatVersion = 2`，因为 `fixtureSetSha256`、bounded 对账证据与硬字段两侧值是新的持久契约；第一次 no-go 的 v1 first / adjudications / final 不迁移、不回填。v1 仍可作为只读历史报告与 challenge 证据打开，但不能冒充具备 v2 的完整证据。
+
+正式退出码固定为 `0 = go / conditional-go`、`1 = 运行或基础设施错误`、`2 = incomplete`、`3 = no-go`。`--replay` 的 no-go 仍只是合成错读夹具的分数，不使用这套正式退出码。`scopeInvalidTotalReports > 0` 与指标 1–3 地板一样直接 no-go；它不是可被指标 4–8 条件 go 吸收的第十一项百分比指标。
 
 ### 3.6 夹具与重放：把 eval 与回归拆成两种成本
 
@@ -290,13 +364,24 @@ fixtures/local/<date>-<slug>/
 
 **写测试这一步不自动化**（见 §4）。导出器的产物是可重放的夹具；基于夹具写 `cargo test` 交给 agent 做。
 
+#### 第一次 no-go 的合成 CI 回归（2026-08-30 新增）
+
+新建 `fixtures/ci/2026-08-30-total-scope/`（待建）作为**完全合成**的零额度回归，不从 `fixtures/local/m0-2026-08-24` 复制截图、文本、金额、ID 或人工备注。至少覆盖四条：
+
+1. 一个带月度 / 分页 / 子组合计候选、但没有 current-source 全覆盖 claim 的合成来源；夹具故意重放一次错误的 `report_source_total`，formal scorer 必须得到 `scopeInvalidTotalReports = 1` 与 `no_go`，即使数字碰巧等于草稿和也一样；
+2. 一个含合计关键词但不报告局部 claim、正常 `complete_source` 的合成口述；重放后 `reported_total_*` 全空且协议完成，证明关键词不再是强制工具调用；
+3. 一个同时有有效来源级总计和**不同三元组**无效 decoy 小计的合成来源；报告正确总计时 `reportedClaimMatchesExpected = true`，改成 decoy 时必须计入 `scopeInvalidTotalReports` 并硬失败；
+4. 一个有效来源级总计与无效按日小计恰好具有**相同 amount/currency/kind** 三元组的来源；真值必须为 `scope_invalid / multiple_claims`、`expectedClaim = null`，任何报告都触发硬失败，证明相等数值不能冒充 claim identity。
+
+生产提示词另用源码断言覆盖月度 viewport 外 / 分页 / 按日 / 分类 / 单笔语义 / 子组反例。CI 夹具测的是**合同和代码闸门**，不声称能测真实模型是否听提示词；后者只在未来明确授权的独立正式样本复测中验证。
+
 ### 3.7 本机数据与 CI 数据必须分离
 
 夹具与 eval 集里是**真实截图和真实金额**。
 
-- **本机集**：随自用积累而增长，**不进 git**
-- **CI 集**：手工**脱敏或合成**的一小撮，进仓库，只用于重放回归
-- **两套不得混用。** 任何让真实账目进入 git 的路径都是缺陷
+- **本机集**：随自用积累而增长，**不进 git**。第一次正式集固定为 `fixtures/local/m0-2026-08-24`；修正后的真实真值只进入另一个新目录，不原地改旧集
+- **CI 集**：手工**合成**的一小撮，进仓库，只用于重放回归。第一次 no-go 的 scope 回归不得从真实集脱敏复制，避免金额、文本、版式或备注残留
+- **两套不得混用。** 任何让真实账目进入 git 的路径都是缺陷；`output/m0-eval/` 同样必须保持 ignored
 
 **分离靠目录，不靠自觉**——两套数据放同一个目录、指望提交时挑，迟早会漏。`.gitignore` 里的对应物：
 
@@ -332,15 +417,14 @@ fixtures/local/<date>-<slug>/
 | R5 | 脱敏 CI 集怎么造——手工改数字容易造出不自洽的样本（合计对不上） | 本文 §3.7 | 建 CI 集时决；倾向用**合成**而非脱敏真实样本 |
 | R6 | 低置信标注（`draft_transactions.confidence`）依赖 agent 自评，其校准度未知（同 [03 审核 §5](./03-review.md) R5）。若不可靠，eval 无法用它做分层分析 | 本文 §3.3 | M1 实测 |
 | R7（**新增 2026-08-10**） | **怎么自动判定「声明合计是抄的还是算的」**——§3.3 原有的评分器方向写反了（校验通过反被判为可疑），已删除。唯一可靠的判法是反事实（改掉图上某一笔金额重跑，看合计跟不跟着变），但那要造伪图 + 重跑真实 agent | 本文 §3.3、[01 §3.2](./01-agent-runtime.md) | **v1 不做自动判定**，靠人工抽查 `reported_total_evidence_text` 是否真在原件上。真要做则在 M2 造 2–3 张合成反事实图，进 eval 集而非回归集 |
-| R9（**新增 2026-08-10**） | **agent 报 `source_ordinal` 报得准不准**——整套 join 建立在它上面，而它是自报的。度量是「诊断用集合匹配显示内容对得上、而 ordinal join 报了漏读+多读」的频率（§3.2） | 本文 §3.2、[01 §3.2](./01-agent-runtime.md) | M0 第一轮 eval 后看降级率。若高，对策在提示词侧或改用「一次报完整清单」的工具形态，**结果回流本文与 [01](./01-agent-runtime.md)** |
+| R9（**2026-08-30 第一次 formal 后部分关闭**） | **agent 与真值的 `source_ordinal` 是否可靠**——整套 join 建立在它上面。第一次样本的 `m0-utterance-017` 不是 agent 单侧问题：expected ordinal 自己就与口述中交易首次出现顺序冲突 | 本文 §3.2、[01 §3.2](./01-agent-runtime.md) | **真值侧已定案**：新 formal 口述项必须带第一处交易 span，ordinal 为 `1..N` 且随 span start 严格递增，backend 前校验；旧样本不改。**预测侧仍开放**：继续看「内容对得上而 ordinal join 不对」的诊断率；若高，再在提示词或工具形态处理，不改 full outer join |
 | ~~R8~~（2026-08-10 提出，**2026-08-16 已决**） | **来源类型的 beachhead 未定**——四类来源（交易列表截图 / 月结单 / 支付 App 账单 / 纸质小票）的**合计语义完全不同**（[00 地基 §5](./00-foundation.md) R7），eval 集按什么比例配无从谈起 | 本文 §3.4、[`docs/PRD.md` §9.4](../PRD.md) | **已决：beachhead = 交易列表类截图**，非 beachhead 来源采 3–5 张进对照栏、不参与判定。构成与理由见 §3.4「M0 go / no-go 的样本构成」，同步回流 [`docs/PRD.md` §9.4](../PRD.md)。月结单的多条合计仍推 M2 与 [00 地基 §5](./00-foundation.md) R7 一并 |
 
 ## 6. 验收标准
 
-**分两块，因为它们的成本不同**（§3.6 的成本表）：零额度、确定性、进 CI 的那一批已全部落地；
-真跑 agent 的轮次也已落地，但它**烧订阅额度、不进 CI**，只能在本机手动跑。
+**分两块，因为它们的成本不同**（§3.6 的成本表）：2026-08-17 的零额度与 live 基线已落地；第一次 formal no-go 新增的 scope、报告证据与 fixture-set 指纹验收尚待实现，因此本文退回 `draft`。真跑 agent 的轮次仍**烧订阅额度、不进 CI**，本修正阶段禁止运行。
 
-### 零额度（2026-08-17 落地，全部进 `verify-m0.mjs`）
+### 零额度（既有项已落地；2026-08-30 no-go 修正项待建，全部进 `verify-m0.mjs --skip-live`）
 
 - [x] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [x] `node scripts/eval.mjs --dry-run` 退出码 0——在不调用 agent 的情况下校验 eval 集完整性：`fixtures/manifest.json` 里每个启用的 case 都有输入、期望集合与 `env.json`，且路径都存在（§3.4）
@@ -393,6 +477,18 @@ fixtures/local/<date>-<slug>/
 - [x] `cargo test formal_cli_uses_fixed_exit_codes` 通过——正式 CLI 的 complete / incomplete / no-go / 运行错误分别退出 0 / 2 / 3 / 1
 - [x] `cargo test m0_initializer_creates_neutral_local_manifest_without_inputs` · `cargo test m0_initializer_refuses_committed_set` · `cargo test initializer_cli_needs_no_backend_and_writes_no_input_path` 通过——Node 薄壳接 Rust 子命令，零 backend，只建中性骨架，不复制、不记录真实输入路径，拒绝 `fixtures/ci/`
 
+**第一次 no-go 修正待建（测试先行）**：
+
+- [ ] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——formal case 在 `status != eligible` 时报告合计（包括 valid claim 与 invalid decoy 三元组相等而归 `multiple_claims`），或在 `eligible` 时错报不同三元组 decoy、与 `expectedClaim` 不一致，均令 `scopeInvalidTotalReports > 0` 且 verdict 必为 `no_go`；局部合计碰巧等于草稿和也不能通过
+- [ ] `cargo test eval::formal_total_availability_counts_only_scope_valid_reports` 通过——指标 4 分母仍是全部正式 `kind = file`，阈值仍为 700；只有与 `expectedClaim` exact 匹配的 eligible 报告进分子，恢复旧分子时用例必须翻面
+- [ ] `cargo test eval::formal_utterance_ordinals_follow_first_transaction_appearance` 通过——新 formal 口述真值缺 span、ordinal 非 `1..N`、或 ordinal 与 span start 顺序冲突均在加载 backend 前拒绝；评分器仍走原 ordinal full outer join
+- [ ] `cargo test eval::formal_report_persists_expected_and_predicted_hard_fields` 通过——错误 / 漏读 / 多读项分别保存 expected / predicted 的四硬字段值与 pairing 状态；正确项可省略，`merchant/category/channel` 不混入
+- [ ] `cargo test eval::formal_report_persists_bounded_reconciliation_evidence` 通过——每 case 保存范围真值、reported / computed / delta；合计 evidence 超 160 code points 时按 Unicode code point 截断并带原长度 / `truncated`，完整原文与 `unparsed_note` 不进入报告
+- [ ] `cargo test eval::fixture_set_sha256_covers_all_formal_inputs` 通过——manifest、任一启用 case 的 expected / env / referenced input 改 1 byte 都改变 `fixtureSetSha256`；路径顺序变化不影响，未启用 case 不进入；报告带 `fixtureFileCount`
+- [ ] `cargo test eval::first_final_and_diagnosis_preserve_fixture_set` 通过——首轮保存前检测中途变化；final 继承 v2 首轮 hash 且不改首轮；diagnosis 在完整 set 改动后拒绝。第一次 v1 no-go 报告无需回填且保持可只读
+- [ ] `cargo test eval::synthetic_total_scope_fixture_catches_no_go` 通过——`fixtures/ci/2026-08-30-total-scope/` 的纯合成回归同时覆盖 scope-invalid 错报、eligible + 不同三元组 decoy 错报、相同三元组 decoy 的 `multiple_claims` 拒报与关键词非强制完成，不引用任何 `fixtures/local/` / `output/` 内容
+- [ ] `cargo test foundation::m0_total_claim_schema_stays_single` · `cargo test agent::total_markers_are_candidates_not_completion_gate` · `cargo test agent::prompt_requires_current_source_full_scope` 通过——不增加多 claim schema，删除关键词强制闸门，并把 current-source 全覆盖反例写进生产提示词
+
 ### 烧额度（2026-08-17 落地，**不进 CI**）
 
 - [x] `node scripts/eval.mjs`（不带参数）真跑 agent 一轮，产出与 `--replay` 同形的 diff 表
@@ -411,6 +507,11 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-08-30 · 第一次 M0 正式 verdict 为 `no_go`，本文由 `in-progress → draft`**（[`docs/PRD.md` §9.4](../PRD.md)）。
+  final 为 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`，`verdict = no_go`、exit 3；first / adjudications / final SHA-256 分别为 `1a8ead02a701aa99b3a1daa149cbe8f096b3ff93914cda79fa44f7fef2269384`、`61b5f98eca43a17b46f5df65cbf292c3b5ef87174443598b4cba6bfd2e4e35d4`、`e41426601bb52948cce39e7a65712ecb5ea435cf113eb4040db3ffc41ff28ca7`。截图池指标 1–3 全过；口述金额 `60/62` 低于 0.98，硬性 no-go；指标 4 为 `4/20`，指标 5 为 `6/7`。旧三份报告与 `fixtures/local/m0-2026-08-24` 永久保留，不修改、不重标、不回填新字段。
+  `6/7` 假警报的主因是月度 viewport 外、分页、按日、单笔 / 子组合计被误报成来源级 claim；因此新增来源级 `reconciliationScope.expectedClaim` formal 真值，以 amount/currency/kind 抓同源 decoy 错报；`scopeInvalidTotalReports == 0` 为硬契约，并保持指标 4 的 file 分母与 0.70 阈值不变。`m0-utterance-017` 又证明真值侧 ordinal 缺门禁：expected 把房租排在先出现的水电之后；新 formal 口述项改为「第一处交易 span 决定 `1..N`」，旧 expected 不改。
+  首次报告还暴露三处可审计性缺口：只哈希 manifest、hard-field diff 只存字段名、failed adjudication 缺 bounded 对账上下文。新写 formal envelope 升到 v2，持久化完整 `fixtureSetSha256`、expected/predicted 四硬字段两侧值与 160-code-point 对账摘录；真实内容只在 ignored `output/` / `fixtures/local/`。新增纯合成 CI scope 回归。后续正式复测必须使用独立新样本；修正真值只进新的 ignored 集，旧集只作 challenge / regression。修正阶段禁止无参数 live、`--m0-go-no-go` 与 `--m0-diagnose`，任何新真实 agent / formal run 需再次明确授权。
 
 - **2026-08-24 · M0 正式 verdict 流程在真实样本运行前冻结**（§3.4、§3.5、§6；[`docs/PRD.md` §9.4](../PRD.md)）。
   现有不带参数 live 是 ad-hoc 兼容入口，不能再由它顺手承担 M0 判定；正式入口固定为 `--m0-go-no-go`。指标 5 的人工性由两阶段协议兑现：首轮报告永久保存，PendingManual 时 incomplete / exit 2；独立 adjudications 经 `--m0-finalize` 零额度产出 final，不重跑 agent。三轮诊断拆成 `--m0-diagnose` 独立报告，目标为「首轮失败 ∪ 预标 flaky」，每例追加 3 轮而不覆盖首轮。同步冻结 1–8 的聚合作用域、0/1/2/3 正式退出码、case 质量失败继续 / 基础设施错误中止、manifest v1 的可选 profile/sample 元数据与仅正式模式启用的 local / 样本构成 / 中性 ID 门禁。
@@ -480,6 +581,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.14 | 2026-08-30 | **第一次 M0 正式 `no_go` 回流，`status: in-progress → draft`。** 永久记录 first/adjudications/final SHA 与 `fixtures/local/m0-2026-08-24` 不可变；口述金额 `60/62` 硬失败，合计可获得率 `4/20`、假警报率 `6/7`。新增 formal bounded `candidateClaims` + 唯一 `expectedClaim` 身份、scope-invalid / eligible 错报 decoy 数必须为 0、指标 4 只计与 expected claim 相等的 scope-valid 分子（file 分母 / 0.70 不变）；口述 expected 用第一处交易 span 强制 `1..N`，不改 ordinal full outer join。formal envelope 升 v2，增加完整 fixture-set hash、bounded 对账证据与 expected/predicted 四硬字段值；规定合成 CI scope 回归、真实修正真值只进新 ignored 集、后续只用独立新样本复测。M0 五工具 / 四列单 claim、四硬字段、确认策略与全部阈值不变 |
 | v0.13 | 2026-08-24 | **M0 正式 verdict 协议冻结并落地，`status` 保持 `in-progress`（真实样本尚未运行）。** 只有 `--m0-go-no-go` 产正式 verdict；指标 5 走首轮 immutable report + 独立 adjudications + 零额度 `--m0-finalize`；`--m0-diagnose` 对「首轮失败 ∪ flaky」各追加 3 轮并单写报告。补聚合作用域、正式退出码 0/1/2/3、case 质量失败继续 / 基础设施错误中止、manifest v1 可选 profile/sample 与正式 local / 构成 / 中性 ID 门禁，以及零 backend 的 `init-m0` 初始化器。阈值与样本构成未动 |
 | v0.12 | 2026-08-17 | **真跑 agent 的 eval 轮次落地——§3.6 成本表的两列现在都有实现。** 新增 `src-tauri/src/eval/live.rs` 与 `daybook-eval run`；`node scripts/eval.mjs` 不带参数即真跑一轮，`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数、其余进诊断栏，`--keep-runs <dir>`（规格外新增）让一次跑砸的轮次能直接变成回归夹具。**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录，要求它有等于逼人先烧一轮额度才能加用例。§6 重排为「零额度」「烧额度」「待建」三块，待建只剩 `--no-memory`（M3）与一条人工核对。**烧额度那一路不进 CI。** |
 | v0.11 | 2026-08-17 | **夹具导出器落地。** 新增 `src-tauri/src/eval/export.rs`、`daybook-eval export-fixture` 子命令、`scripts/export-fixture.mjs` 与 `src-tauri/tests/eval_export_cli.rs`。§6 把导出器那条从「待建」挪进「已落地」并拆成 6 条带真实选择器的验收。**新增一道规格里没有、但不设就是缺陷的闸门**：导出的 `expected.json` 带 `annotated: false`，评分器在人工核对前拒绝——导出器只能拿 `drafted_json` 预填，而那是被评分的那一侧，直接跑分等于模型给自己判卷（§3.2）。**真跑 agent 的 eval 轮次仍未做，`status` 保持 `in-progress`。** |

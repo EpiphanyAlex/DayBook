@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: review
+status: draft
 owner: "@maintainer"
-date: 2026-08-23
-version: v0.26
+date: 2026-08-30
+version: v0.27
 ---
 
 # 01 · Agent 运行时
@@ -66,7 +66,7 @@ version: v0.26
 | `list_pending_sources` | **M0** | 列出待解析的来源 | ∅ | **仅本次任务指派的来源**（M0 恒为 1 个）；不得遍历 `sources` 全表 |
 | `read_source` | **M0** | 读一个来源的元数据与证据文件；`utterance` 正文同时进入 `structuredContent.text` | ∅ | **仅本次任务指派的来源**；`source_id` 不在指派集合内 → `agent.tool_rejected` |
 | `draft_transaction` | **M0** | 起草一笔交易；M0/M1 的分类参数仍是可空文本，M2 随 [04 分类](./04-transactions.md) 迁为可空 `category_id` | `{draft_transactions}` | ∅ |
-| `report_source_total` | **M0** | 回报它在来源上看到的合计 | `{parse_attempts.reported_total_*}`（列级，**只写本次尝试那一行**） | ∅ |
+| `report_source_total` | **M0** | 回报当前不可变来源中唯一一条覆盖全部适用交易的 scope-valid 合计 | `{parse_attempts.reported_total_*}`（列级，**只写本次尝试那一行**） | ∅ |
 | `complete_source` | **M0** | **声明「这个来源我读完了」**，附条目数与未解析区域 | `{parse_attempts.reported_item_count, .unparsed_note}`（列级，同上） | ∅ |
 | `query_memory` | M3 | 查记忆规则；`merchant_category` 返回稳定 `category_id`，不返回会随改名漂移的分类名 | ∅ | **仅显式传入的键**（商户名、语境词）；**不提供「列出全部规则」** |
 | `find_item_candidates` | M3 | 为当前来源中的修改意图查找有界事项候选 | ∅ | 每次最多返回 8 个 `id / title / status / plan摘要 / result摘要 / due / list`；不得列出全表，不返回来源、审计或完整备注 |
@@ -184,18 +184,15 @@ version: v0.26
 
 **因此本工具的语义被收窄为**：
 
-1. 它回报的必须是**来源上原本印着的那个合计**（账单底部的 Total 那一行），**不是 agent 把逐笔加起来的结果，也不是账户余额**——余额不是合计（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)），来源上只印余额时按第 3 条处理。
-2. 参数为 `(amount_minor, currency, kind, evidence_text)` **四者齐全**，缺任一 → `agent.tool_rejected`。`evidence_text` 是该合计在来源上的原文片段；`kind` 取 `expense_total` / `income_total` / `net_change`（2026-08-10 新增，[00 地基 §3.6](./00-foundation.md)「合计必须带类型」）。
-3. **来源上没有印合计、或印了但判不出是哪一类时，agent 必须不调用本工具**——留空即 `unavailable`（[03 审核 §3.3](./03-review.md)），**不许自己算一个填进去，也不许在三个 kind 里挑一个试试看**。基准的语义不确定，它就不是基准。
-4. `reported_total_*` 四列在数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)），漏填一项写不进去。
-5. **一次尝试只接受一次成功调用**（2026-08-10 由「一个来源」收窄）。账单同时印着消费合计与收入合计时取消费合计，同一尝试内第二次调用返回 `agent.tool_rejected`。**重试产生新的尝试，可以重新回报**——合计和草稿一样属于产出它的那次尝试（[00 地基 §3.6](./00-foundation.md)「声明合计归尝试，不归来源」）。「一来源多条 claim」是 [00 地基 §5](./00-foundation.md) R7，M2 决。
-6. **口述里的明显合计词不能只靠提示词防漏。** M0 对落盘转写中的保守词集（`总共` / `一共` / `合计` / `总计` / 独立英文 `TOTAL`）做代码侧完成前检查：命中但本次尝试尚未成功调用 `report_source_total` 时，`complete_source` 返回可补救的 `agent.tool_rejected`，会话保持开放。该词集只用于阻止已知的静默漏报，**未命中不证明来源没有合计**；图片仍由视觉模型识别，M0 不伪装成拥有独立 OCR。
+1. **当前来源就是不可变证据原件本身。** `file` 可以是任意 viewport 截图，不要求整页或整月；不能把截图背后的未捕获区域算进 scope。
+2. 只允许一条同时满足三项的 claim：来源明确印出 / 说出；类型能确定为 `expense_total` / `income_total` / `net_change`；scope 精确覆盖当前来源中的**全部适用交易**（三类各自的适用集合见 [00 地基 §3.6](./00-foundation.md)「M0 单 claim 的范围资格」）。
+3. 下列均为 **scope-invalid**，不得调用：覆盖 viewport 外交易的月度 / 周期合计；分页的跨页合计；按日、按分类、语义上只属于单笔的金额 / 小计；其他任意子组合计。来源同时出现多条局部 claim 时不得挑一条硬塞进 M0 单 claim 字段；若有效来源级总计与一个 invalid decoy 恰好具有相同 amount/currency/kind，现有四列无法审计选中身份，M0 同样不得报告。
+4. 它回报的必须是来源上原本存在的 scope-valid 合计，**不是 agent 把逐笔加起来的结果，也不是账户余额**。参数 `(amount_minor, currency, kind, evidence_text)` 四者齐全，缺任一 → `agent.tool_rejected`；`reported_total_*` 在数据层继续 all-or-nothing。
+5. **来源没有 scope-valid 合计、类型 / 范围不明，或有效 claim 三元组与其他候选不唯一时必须不调用。** 不许自己算一个填进去，不许在三个 kind 里挑一个试，也不许为了通过完成协议把局部合计升级成来源合计。此时四列保持空，`file` / `utterance` 分别按 [03 审核 §3.3](./03-review.md) 得到现有 `unavailable` / `not_applicable` 语义。
+6. **一次尝试只接受一次成功调用。** 重试产生新尝试后可重新报告；不为这次修正新增 scope 参数、第二个工具或多 claim schema（[00 地基 §5](./00-foundation.md) R7 仍留 M2）。
+7. **合计关键词只是候选信号，不是完成协议闸门。** `总共` / `一共` / `合计` / `总计` / 独立英文 `TOTAL` 只能提醒 agent 检查「类型 + current-source 全覆盖」；命中后仍可能是月度、分页、按日、单笔或子组 claim。代码不得因命中词而强制 `report_source_total`，`complete_source` 也不得要求用 `unparsed_note` 为「为何没报告」找出口。`unparsed_note` 只记录真的未解析区域 / 内容，不承担绕过关键词门禁的职责。
 
-   **补救有两条路，不是一条**（2026-08-13 实施回流）：① 回报合计；② **在 `unparsed_note` 里说明为什么没有合计**，随后完成，产出 `completed_with_gaps`。**词表只认字面量，认不出「一共去了三个地方」这类非金额用法**——本条 v0.7–v0.19 只留了第 ① 条路，于是这种口述**无法完成解析**：agent 要么编一个合计（比漏报更糟，它会成为闸门 3 的假基准），要么被反复拒绝到 180 秒硬超时、整次尝试作废。第 ② 条路不削弱闸门：**它挡的是「静默」漏报，写了说明就不静默**，而 `unparsed_note` 非空会让审核界面显眼提示（§3.2「`complete_source`」、[03 审核 §3.4](./03-review.md)）。
-
-   **这道闸门还必须有界**（同上）：本条此前的拒绝**不计次**，是 M0 唯一一处可以无限重试的工具拒绝。现改为**同一次尝试内第二次仍未满足即 `agent.protocol_violation`**，与 `complete_source` 条目数不符那条同构（各自独立计数，互不影响）。**「拒绝可补救」必须同时意味着「补救不成会结束」**，否则它不是闸门，是一个挂起。
-
-**诚实说明这道闸门的边界**：它能捕获「逐笔读错但合计读对」，捕获不了「逐笔和合计一起读错」。后者只能靠**人扫一眼合计的原文**——这就是第 2 条强制 `evidence_text` 的理由：审核界面把声明合计与它的原文并排显示，让基准本身也可核对（[03 审核 §3.3](./03-review.md)）。**闸门 3 不是万能的，规格必须如实写明它挡不住什么。**
+**诚实说明这道闸门的边界**：它能捕获「逐笔读错但 scope-valid 合计读对」，捕获不了「逐笔和合计一起读错」，也无法在没有独立 OCR 的情况下由工具代码证明 agent 选中的 claim 是否全覆盖。前一项靠人扫一眼合计原文；后一项由 [07 评测 §3.4](./07-eval.md) 的人工 `candidateClaims` / expected claim 真值与「scope-invalid 成功报告数必须为 0」正式契约检验。生产 schema 暂不伪装成已经拥有 scope 证明。
 
 ### 3.3 每次**影响账目的**工具写入都记审计
 
@@ -317,7 +314,7 @@ trait AgentBackend {
 
 ### 3.6 任务下达
 
-- 应用给 agent 的是**任务级指令**（「有一个新来源 `<id>` 待解析，用工具读它，逐笔起草，最后回报合计」），不是「填这个 JSON」
+- 应用给 agent 的是**任务级指令**（「有一个新来源 `<id>` 待解析，用工具读它，逐笔起草；只有存在 current-source 全覆盖的 scope-valid 声明合计时才回报」），不是「填这个 JSON」
 - 任务级指令由代码附上用户当前选择的**本位币**。每条草稿尽量填全三元组；原币与本位币相同时必须用同金额 + `rate_ppm = 1000000`，不得留空。未选择本位币时编排器在 spawn 前返回 `data.base_currency_required`，不让 agent 猜地区
 - 提示词模板存为**独立文件**，不硬编码在 Rust 字符串里——便于调整与 diff
 - **提示词模板是「程序记忆」，只能由应用版本或人工编辑更新，不得被模型修改。**「程序记忆」指的是**规定 agent 怎么做事的那部分**（提示词、模板、流程），它与 agent 记住的事实（[06 记忆](./06-memory.md)）分属两类：后者随使用积累，前者只能由人改。事实上工具面里没有写文件的工具，所以 agent 现在改不了——**但那是巧合，不是设计**，因此在此明写。任何未来新增的工具都不得让 agent 触及提示词目录
@@ -553,9 +550,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::complete_source_writes_no_audit` 通过——`complete_source` 成功后 `audit_log` **不增加**行，而 `parse_attempts` 的两个字段已更新（§3.3）
 - [ ] `cargo test agent::report_total_requires_evidence_currency_and_kind` 通过——`report_source_total` 缺 `currency` / `kind` / `evidence_text` 任一时返回 `agent.tool_rejected` 且未写库（§3.2 可信性要求第 2 条）
 - [ ] `cargo test agent::report_total_accepts_only_once_per_attempt` 通过——**同一尝试内**第二次调用返回 `agent.tool_rejected`、首次写入的值不被覆盖；而**重试产生的新尝试可以重新回报**，两行 `parse_attempts` 各存各的（可信性要求第 5 条）
-- [ ] `cargo test agent::explicit_utterance_total_must_be_reported` 通过——口述原文命中明显合计词而本次尝试未报合计时，`complete_source` 被代码拒绝且会话仍可补救；成功调用 `report_source_total` 后才能完成（可信性要求第 6 条）
-- [ ] `cargo test agent::explicit_total_marker_is_escapable_with_note` 通过——命中词但那不是金额合计（「昨天一共去了三个地方」）时，在 `unparsed_note` 里说明即可完成，`outcome == completed_with_gaps`（第 6 条补救路径 ②）
-- [ ] `cargo test agent::explicit_total_marker_gate_is_bounded` 通过——同一次尝试内第二次仍未满足即 `agent.protocol_violation`、来源转 `failed`；**把拒绝改回不计次时该用例必须变红**（第 6 条「闸门必须有界」）
+- [ ] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——口述命中「总共 / 一共 / 合计 / 总计 / TOTAL」但该数字是月度、分页、按日、单笔或子组合计时，不调用 `report_source_total`、`unparsed_note` 可为空，`complete_source` 正常完成；恢复关键词强制闸门时该用例必须变红
+- [ ] `cargo test agent::prompt_requires_current_source_full_scope` 通过——生产提示词逐项写明任意 viewport 是来源边界、只报告覆盖当前来源全部适用交易且三元组在候选中唯一的单一 claim，并点名月度 viewport 外 / 分页 / 按日 / 分类 / 单笔语义 / 子组及相同三元组 decoy 均不得报告
+- [ ] `cargo test agent::scope_valid_utterance_total_can_still_be_reported` 通过——口述中存在一条覆盖整段全部适用交易的 scope-valid 合计时仍可调用一次 `report_source_total` 并正常完成；修正不得把所有口述来源一律排除
 - [ ] `cargo test agent::every_ledger_write_tool_writes_audit` 通过——每个影响账目或草稿内容的写入工具调用后 `audit_log` 恰好多一条且 `actor = "agent"`；只收束完成协议元数据的 `complete_source` 明确不写审计
 - [ ] `cargo test agent::timeout_voids_only_own_attempt` 通过——两个来源各自解析，其一超时后，**只有该 `attempt_id` 的草稿被置 `voided_at`**，另一来源的草稿不受影响（§5 R5 的会话粒度结论）
 - [ ] `cargo test agent::void_marks_not_deletes` 通过——作废后草稿行仍在且 `drafted_json` 完好（§3.4「作废是置标志，不是删行」）
@@ -584,6 +581,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** 正式样本中合计关键词强制闸门与提示词把月度 viewport 外、分页、按日、单笔 / 子组合计误报为来源合计，造成可获得率 `4/20`、假警报率 `6/7`。修正保留任意 viewport、五工具与一次一条 schema，只把 `report_source_total` 收窄为 current-source 全覆盖 claim；关键词降为候选，删除 `complete_source` 的关键词强制拒绝；同三元组 decoy 因现有四列无法审计身份而保守不报。指标、确认策略与工具权限不变；旧报告 / 旧样本不可修改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) 范围资格 |
 | 2026-08-23（人工验收） | **§6 人工验收后两条实测执行完毕，五条至此全部跑完；`status` 仍为 `review`（M0 的 go/no-go 与收尾三件事未动）。** ① **一次真实解析中的子进程日志**——一段口述来源经真实 CLI 2.1.241 解析出 3 条草稿，对账 `passed`（来源声明 49.30 AUD＝草稿合计 49.30 AUD），`completed_with_gaps` 的未读区域横幅照常显示；侧栏「本机解析日志」面板在**关掉**详细调试日志时渲染 trace 级摘要（`list_pending_sources` / `read_source` / `report_source_total` / 三条 `draft_transaction` / `complete_source · 通过 · 3 ms`），**打开**时渲染完整调用参数，落盘的 `*.trace.jsonl` 里只有 `argumentShape` 而无金额，与 [ADR-0007 本地可观测性与日志分级](../adr/0007-local-observability-and-log-tiers.md) 一致——**但解析进行中面板看不到本次会话的任何一条**，见下一行。② **手工拆密封**——产品代码一行未改，在 `PATH` 上放一个在 Daybook 的密封参数之后追加 `--tools Read` 的同名包装（等价于把「关掉内置工具」这一项关掉），probe 落 `agent.tool_surface_unsealed`，pill 显示「Claude Code 安全检查未通过」、侧栏显示「解析已被安全暂停／当前 CLI 暴露了额外工具、插件或 hook；恢复密封配置后再解析」，**且应用照常启动、既有草稿仍可审阅确认**；此时新导入一份口述来源，导入成功而**任务没有下发**（`parse_attempts` 计数全程恒为 1），来源上的「解析」入口 `enabled = false`、`AXPress` 不触发任何请求。**顺带取得的两条事实**：这台机器上 CLI 的凭证不在 `HOME` 里的普通配置文件（把 `~/.claude.json` 复制进受控 `HOME` 仍判未登录），所以真实解析只能靠还原**子进程**的 `HOME`；这个 webview 的辅助功能树完整暴露，`AXPress` / `set focused` 可直接驱动界面，比 `click at` 可靠 | 人工验收实测（2026-08-23）：真实 CLI 2.1.241 + 受控 `HOME` 下的桌面应用截图；`<数据目录>/logs/*.trace.jsonl`；`parse_attempts` 计数前后一致 |
 | 2026-08-23（人工验收，**未修，留 M1 审核界面切片**） | **解析进行中，UI 看不到这一次会话的子进程日志。** `src-tauri/src/agent/runtime.rs` 的 `write_session_logs` 是在 `AgentTaskResult` 回来之后**一次性**把整份 JSONL 写出去的，所以解析还在跑时该会话的日志文件根本不存在，`recent_agent_logs` 自然读不到：实测中途点「刷新日志」只看得到开机那条能力检查，解析结束后才跳到 17 条。**排障最想看的恰恰是卡住的那一次**，因此记在这里。不改的理由与同日那条「解析入口无禁用态视觉」同档——当前前端是功能基线、M1 才定设计稿与 token system（[`docs/PRD.md` §9](../PRD.md)），且它不构成闸门失效；改成边跑边追加要动日志落盘通道与相应测试，属于另一轮实现。**§3 决定与依据一字未改，本次没有证伪任何规格** | 人工验收实测（2026-08-23）：`src-tauri/src/agent/runtime.rs` 的 `write_session_logs` 调用点；解析中途与结束后各截一张日志面板 |
 | 2026-08-23（人工验收） | **「已装未登录」在真机上报的是 `agent.spawn_failed`，不是 §3.5 要求的 `agent.not_authenticated`——规格没错，实现错了，已修。** 根因是失败分类器只读 stderr：**Claude Code 2.1.241 未登录时子进程退出码 1、stderr 是 0 字节**，认证失败只写在 stdout 的 stream-json 里（一条 `"error":"authentication_failed"` 事件 + 一条 `"is_error":true` / `"result":"Not logged in · Please run /login"` 的终结事件）。分类器拿到空串落进兜底分支，于是 `runtime` 里 `authenticated = (code == "agent.not_authenticated")` 永远取不到 `false`，界面显示「解析器需要处理／错误码：agent.spawn_failed」——**正是本节禁止的「两种状态给同一句指引」**。改法：`classify_process_failure(stdout, stderr)` 把终结事件里的 `error` 与 `is_error` 为真时的 `result` 抽出来，与 stderr 合成一段信号交给**同一张词表**判定。**两处易踩的坑一并登记**：① 该终结事件的 `subtype` 仍写着 `"success"`，按它判会把失败读成成功；② 不能把整个 stdout 灌进词表——正常解析的输出里本来就有账目文本。§6 新增 1 条自动验收，样本取自本次真实输出 | 人工验收实测（2026-08-23）：`src-tauri/src/agent/claude.rs` 的 `run_sealed` 失败分支；真实 CLI 2.1.241 在干净 `HOME` 下的密封探测输出 |
@@ -627,6 +625,7 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.27 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** `report_source_total` 只接受 current immutable source 全部适用交易的一条 scope-valid claim；月度 viewport 外、分页、按日 / 分类、单笔语义 / 子组合计以及与有效 claim 同三元组的 decoy 不得报告。合计词降为候选信号，删除代码侧完成前强制闸门及 `unparsed_note` 逃生语义；五工具、参数 schema、一次一条、完成协议其他检查与权限边界不变。替换 3 条旧关键词验收 |
 | v0.26 | 2026-08-23 | **§6 人工验收后两条实测执行完毕，五条至此全部跑完；`status` 仍为 `review`。** 「手工拆密封」一条**通过**：不动产品代码、在 `PATH` 上放一个追加 `--tools Read` 的同名包装，probe 落 `agent.tool_surface_unsealed`，界面给出专用文案、应用照常启动、新来源导入成功而任务不下发（`parse_attempts` 不增）。「真实解析中看子进程日志」一条**部分满足**：解析结束后 trace / debug 两级都可见且分级正确，**解析进行中看不到**——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。§6 补记后两条的执行前提（受控 `HOME` 会让 CLI 未登录，需还原子进程 `HOME`）。**§3 决定与依据一字未改** |
 | v0.25 | 2026-08-23 | **§6 人工验收前三条实测执行完毕，`status` 由 `in-progress` 回到 `review`。** 三条里两条直接通过（三种安装资格指引各不相同且应用照常启动；延迟 probe 期间恒为「正在检查」、`parse_attempts` 不增、probe 成功后才 ready）；**「已装未登录」一条不通过并暴露一个实现缺陷**——失败分类器只读 stderr，而真实 CLI 未登录时 stderr 为空、原因只在 stdout 的 stream-json 里，界面因此报 `agent.spawn_failed`。已改为两个流合成一段信号交同一张词表判定，§6 新增 1 条自动验收（样本取自真实输出）。**§3 决定与依据一字未改**——本次没有证伪任何规格。另记一条**未修、留 M1** 的界面问题：检查中「解析」入口无禁用态视觉 |
 | v0.24 | 2026-08-23 | **补分类与商户规则的 AI-native 权限边界，`status` 仍为 `in-progress`。** M0/M1 `draft_transaction.category TEXT` 与五工具 / readiness 修正保持不变；M2 才切稳定 `category_id`，M3 `query_memory` 返回分类 ID。自然语言只能生成结构化待确认操作，影响数量由代码重算，用户确认后 domain 执行；分类目录的有界投递方式及具体表 / 工具形状登记为 M2 开工前待决，不在当前实施切片静默加工具 |

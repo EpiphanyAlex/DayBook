@@ -77,14 +77,14 @@ const RULES = [
   {
     id: 'utterance-total-always-empty',
     re: /(utterance|口述)[^\n]{0,40}(合计|reported_total_\*)[^\n]{0,20}恒为空|恒为空[^\n]{0,20}(utterance|口述)/,
-    why: '口述**通常**没有合计，但用户说「总共 100」时照常对账（00 §3.6、03 §3.3）',
-    fix: '改成「通常为空；用户明说合计时照常对账，确认策略仍是 user_attested_batch」',
+    why: '口述通常没有合计；只有 current-source 全部适用交易的 scope-valid claim 才可报告（00 §3.6、03 §3.3）',
+    fix: '改成「通常为空；只有来源级全覆盖 claim 才对账，关键词或子组合计不够；确认策略仍是 user_attested_batch」',
   },
   {
     id: 'utterance-always-na',
     re: /(utterance|口述|语音)[^\n]{0,40}恒为\s*\**`?not_applicable/,
-    why: '同上——`not_applicable` 只在「本次没报合计」时成立，不是口述来源的恒定属性',
-    fix: '把「恒为」改成「通常为 / 没报合计时为」',
+    why: '同上——`not_applicable` 在本次没有 scope-valid 报告时成立，不是口述来源的恒定属性',
+    fix: '把「恒为」改成「通常为 / 没有 scope-valid 合计报告时为」',
   },
   {
     id: 'na-grants-batch',

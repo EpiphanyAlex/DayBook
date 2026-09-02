@@ -6,7 +6,7 @@
 
 **[`CLAUDE.md`](./CLAUDE.md) 是唯一事实源，动手前必须完整读一遍。** 本文**不复述**它的 17 条实施约束——摘要会漂移：上一版这里抄的「数据不出本机」就漏掉了 `CLAUDE.md` 约束 2 里「用户自己的 agent CLI 与其模型服务商之间的通信是唯一允许的出站流量」这条例外，摘要读者因此得到了一条比原文更严格、也更错的规则。
 
-Daybook 是一个 **macOS 本地优先、不用逐条填表的 AI 个人事务助理**，把用户零散的钱和事整理成账目与安排。**「个人事务」在 v1 只指交易与事项两个实体**；「回溯优先」是设计原则，不是品类名称。AI 的角色是**考古学家，不是输入框**。**当前状态**：M0 实现处于 review / 修正阶段；[00 地基](./docs/prd/00-foundation.md) v0.20、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.26、[02 导入](./docs/prd/02-ingest.md) v0.16、[03 审核](./docs/prd/03-review.md) v0.17 均为 `review`。维护者 review 与真实样本 go/no-go 待完成；当前前端是功能基线。M1 的 token system、证据退路与状态管理已定案，参考设计稿仍待按回流规格重画。
+Daybook 是一个 **macOS 本地优先、不用逐条填表的 AI 个人事务助理**，把用户零散的钱和事整理成账目与安排。**「个人事务」在 v1 只指交易与事项两个实体**；「回溯优先」是设计原则，不是品类名称。AI 的角色是**考古学家，不是输入框**。**当前状态**：第一次 M0 正式结果为 `no_go` / exit 3，正在修正且不开始 M1。[00 地基](./docs/prd/00-foundation.md) v0.21、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.27、[03 审核](./docs/prd/03-review.md) v0.18、[07 评测](./docs/prd/07-eval.md) v0.14 因合计 scope / formal 证据契约被证伪退回 `draft`；[02 导入](./docs/prd/02-ingest.md) 只同步共享 scope 语义到 v0.17，保持 `review`。旧报告与 `fixtures/local/m0-2026-08-24` 永久保留；修正阶段只跑零额度门禁，真实 agent 与新 formal 复测需再次明确授权。当前前端仍是功能基线；M1 的 token system、证据退路与状态管理决定不变但本轮不实施。
 
 ## 干活的顺序
 

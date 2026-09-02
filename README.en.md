@@ -16,9 +16,9 @@ In v1, “personal admin” means exactly two entities: transactions and items. 
 
 ## Current status
 
-**M0 implementation is under review (2026-08-24).** Tauri / React / Rust have landed: the six-table foundation, the sealed five-tool agent path, screenshot and utterance import, review-and-confirm, and the total cross-check all run end to end; both `src/` and `src-tauri/` now exist. M0 is defined as the **end-to-end smoke test** — drop in a screenshot → the agent reads it → **drafts are written through MCP** → **a human confirms** → the fact tables are written → the list renders it. Milestone table: [`docs/PRD.md` §9](./docs/PRD.md).
+**The first formal M0 go / no-go is complete: `no_go`, exit 3 (2026-08-29/30). Work remains on M0; M1 is not starting.** The Tauri / React / Rust end-to-end path remains implemented: the six-table foundation, sealed five-tool agent runtime, screenshot and utterance import, review-and-confirm, and the total cross-check. Screenshot metrics 1–3 all passed, but utterance amount accuracy was `60/62`, a hard no-go; reported-total availability was `4/20`, and the false-alarm rate was `6/7`. See [`docs/PRD.md` §9.4](./docs/PRD.md).
 
-**M0 is not done yet, though.** [00 Foundation](./docs/prd/00-foundation.md), [01 Agent runtime](./docs/prd/01-agent-runtime.md), [02 Ingest](./docs/prd/02-ingest.md), and [03 Review and drafts](./docs/prd/03-review.md) are all in `review` — 01's installation-eligibility and parsing-readiness contract was disproved and rewritten, and both the corrected implementation and all five of its §6 on-device manual checks were carried out on 2026-08-23. Neither the maintainer's manual review nor the real-sample go / no-go in [`docs/PRD.md` §9.4](./docs/PRD.md) has happened. **The current interface is a functional baseline, not an approved design.** M1's token system is final; an [on-device spike](./docs/spikes/2026-08-24-r1-evidence-region.md) found source-image region highlighting unreliable, so the safe fallback remains the complete original plus the extraction claim; frontend state is settled as TanStack Query v5 plus a local React reducer. The reference designs still need to be redrawn against the decisions already folded back into the specs. Status overview: [`docs/prd/INDEX.md`](./docs/prd/INDEX.md).
+What failed was the M0 single-claim scope and formal-report evidence contract: monthly totals extending beyond the viewport, pagination totals, and per-day, single-item, or subset totals were mistaken for source-level totals. [00 Foundation](./docs/prd/00-foundation.md), [01 Agent runtime](./docs/prd/01-agent-runtime.md), [03 Review and drafts](./docs/prd/03-review.md), and [07 Eval](./docs/prd/07-eval.md) have returned to `draft`; [02 Ingest](./docs/prd/02-ingest.md) remains in `review`. The first reports and old local sample set are permanent evidence and will not be edited or relabeled; a future formal retest must use an independent new sample set. **The current interface remains a functional baseline, not an approved design.** M1's settled token system, complete-original evidence fallback, and TanStack Query + reducer state boundary remain valid, but are out of scope for this correction. Status overview: [`docs/prd/INDEX.md`](./docs/prd/INDEX.md).
 
 **The spike that blocked M0 was completed on 2026-08-12**: the MCP server lives in a standalone helper binary that talks back to the main process over a Unix domain socket ([`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md); measurements in [`docs/spikes/`](./docs/spikes/)).
 
@@ -64,14 +64,13 @@ node scripts/check-readme-sync.mjs  # README.en.md is not behind README.md
 node scripts/check-spec-invariants.mjs  # no superseded conclusions left in current sections
 ```
 
-One command runs all eleven of the above, plus the real-CLI capability probe and the screenshot / utterance happy paths:
+During correction of the first formal `no_go`, only the zero-quota gate is allowed:
 
 ```bash
-node scripts/verify-m0.mjs              # includes the two real-CLI steps; spends your own quota
 node scripts/verify-m0.mjs --skip-live  # skips the real CLI; this is not a full M0 pass
 ```
 
-CI runs both on every PR: the documentation gates via [`docs.yml`](./.github/workflows/docs.yml), the code gates via [`ci.yml`](./.github/workflows/ci.yml) (that is, the `--skip-live` command above). **A green CI is not an M0 pass** — the two real-CLI steps need a logged-in agent CLI and can only run on your own machine.
+Running `node scripts/verify-m0.mjs` without arguments executes two real-CLI steps and spends quota; **it is prohibited until explicit authorization is obtained again**. CI runs both on every PR: the documentation gates via [`docs.yml`](./.github/workflows/docs.yml), the code gates via [`ci.yml`](./.github/workflows/ci.yml) (that is, the `--skip-live` command above). **A green CI is not an M0 pass** — the two real-CLI steps need a logged-in agent CLI and can only run on your own machine.
 
 ---
 
@@ -127,7 +126,7 @@ Vision models **really do read 168 as 1680**, and a single wrong number in a led
 |---|---|
 | **Draft area** | The AI writes only to `draft_*` tables; nothing reaches the fact tables until a human confirms it. The subprocess starts under a sealed configuration, and **the tools it can actually reach** are probed before any task is dispatched |
 | **Evidence chain** | Every draft carries its origin — which screenshot (or which spoken utterance), and which passage the model claims it read — and what you get side by side when reviewing is **the original itself**, replacing "trust the AI" with "glance at the original" |
-| **Total cross-check** | The entries extracted from one source must add up to the total printed on that source itself; a mismatch raises an alarm without anyone asking. When a source has no printed total by its very nature (a sentence you spoke, say), that gate is swapped for another: the full transcript shown beside every extracted entry, and your single confirming keystroke |
+| **Total cross-check** | Extracted entries are checked only against a single total covering every applicable transaction in the current immutable source; monthly totals extending beyond the viewport, pagination totals, and per-day or subset totals do not qualify. A mismatch raises an alarm. A **file** without such a total is limited to item-by-item confirmation; an **utterance** usually has none and instead uses human attestation: the full transcript beside every extracted entry, and your single confirming keystroke |
 | **Append-only audit log** | Every AI write and every human edit leaves a trace; **the AI's original draft is kept forever** |
 
 ---
