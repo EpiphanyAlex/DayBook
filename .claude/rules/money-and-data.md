@@ -274,6 +274,8 @@ fn confirm_batch(...) { if status == NotApplicable { self.do_confirm(ids) } }
 // ↑ 也是错的：把「能不能对账」当成了「能不能批量确认」，两者是两个维度
 ```
 
+**等式之前先守 claim scope。** M0 的 `report_source_total` 只允许当前不可变来源全部适用交易的一条 claim；任意 viewport 截图仍接受，但月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计不得报告。合计词只是候选，不能强制调用；同三元组 invalid decoy 因现有四列无法审计身份也不得报告。生产保持单 claim 四列，formal 用 bounded `candidateClaims` 保证三元组唯一、再以 expected amount/currency/kind 锁定 eligible claim，scope-invalid=0（含错报同源 decoy）由真值契约守（[00 地基 §3.6](../../docs/prd/00-foundation.md)、[07 评测 §3.4](../../docs/prd/07-eval.md)）。
+
 **`NotApplicable` 与 `UserAttestedBatch` 只属于 `kind = utterance`**（[`docs/prd/03-review.md` §3.3](../../docs/prd/03-review.md)）。`kind = file` 取不到合计是**信号**，必须落在 `Unavailable` + `SingleOnly`——把它也放行等于闸门 3 白做。
 
 ### 6.1 校验的入参是 `attempt_id`，求和范围是「该次尝试的全部未作废草稿」

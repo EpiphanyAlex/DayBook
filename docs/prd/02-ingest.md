@@ -2,8 +2,8 @@
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
 status: review
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.16
+date: 2026-08-30
+version: v0.17
 ---
 
 # 02 · 导入 Ingest
@@ -59,7 +59,7 @@ version: v0.16
 - **转写文本落盘成 `.txt`**，与截图同等对待 → `evidence_relpath` 非空，闸门 2 的实现路径对两种来源完全一致
 - 每条草稿的 `evidence_text` 是**这段话里对应的那个片段**（「今天吃饭 180」这半句），不是整段
 - **幂等靠一次提交一个令牌，不靠内容哈希**（2026-08-10 改定，见 §3.2）：隔天再说同样一句话是**新的一笔**，不是重复
-- **`reported_total_*` 通常为空** → 对账结果 **`not_applicable`**（2026-08-10 改，此前写 `unavailable`）；**用户自己说出「总共 100」时照常对账**，结果是 `passed` / `failed`（[00 地基 §3.6](./00-foundation.md)「来源不等于文件」第 2 条）。**两种情况下确认策略都是 `user_attested_batch`**——闸门 3 之外另有「整段原文 + 全部拆分结果并排 + 一次人工确认」那道（[03 审核 §3.3](./03-review.md)）；`03` 仍会把这类草稿在异常前置里单独提一档
+- **`reported_total_*` 通常为空** → 对账结果 **`not_applicable`**。只有口述中恰有一条覆盖整段全部适用交易、且 amount/currency/kind 三元组不与 invalid decoy 重复的来源级 claim 时才照常对账，结果为 `passed` / `failed`；月度外部范围、按日、单笔或子组合计不得报告，合计词只是候选（[00 地基 §3.6](./00-foundation.md)「M0 单 claim 的范围资格」）。**两种情况下确认策略都是 `user_attested_batch`**——闸门 3 之外另有「整段原文 + 全部拆分结果并排 + 一次人工确认」那道（[03 审核 §3.3](./03-review.md)）；`03` 仍会把这类草稿在异常前置里单独提一档
 - **M0 只记交易**：`draft_items` 是 M3 的表，所以 agent 遇到事项类内容（「明天交房租」）**必须明确回一句「这条我现在还记不了」**，不得静默丢弃（[`docs/PRD.md` §9.2](../PRD.md)）
 
 ### 3.2 来源身份与幂等
@@ -192,10 +192,11 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | 重复来源（文件） | 内容哈希（§3.2） | 非错误，`deduplicated: true` | 成功返回，UI 提示「已导入过」 |
 | 重复文本（口述） | 文本比对（§3.2） | **非错误，也不去重** | 提示「你之前也说过同样的话」，**由用户决定** |
 | 格式不支持 | 格式集（§3.1） | `ingest.unsupported_format` | 不落盘不写库，UI 明说 |
-| 来源没印合计 | 总额校验（[03 §3.3](./03-review.md)） | `unavailable` + `single_only` | 批量确认被拒，逐条可用 |
-| 口述来源（本就无合计） | 总额校验 | `not_applicable` + **`user_attested_batch`** | **批量确认可用**（三条 UI 前提，[03 §3.3](./03-review.md)） |
+| 文件来源没有 scope-valid 合计 / 合计取不到 | 总额校验（[03 §3.3](./03-review.md)） | `unavailable` + `single_only` | 批量确认被拒，逐条可用 |
+| 口述来源（没有 scope-valid 来源级合计） | 总额校验 | `not_applicable` + **`user_attested_batch`** | **批量确认可用**（三条 UI 前提，[03 §3.3](./03-review.md)） |
 | 缺汇率 | 确认时校验（[04 §3.2](./04-transactions.md)） | `review.incomplete_triple` | 该条不入库，其余可入 |
-| 合计对不上 | 总额校验 | `failed` → `review.total_mismatch` | 批量被拒，逐条可用 |
+| 文件来源合计对不上 | 总额校验 | `failed` + `single_only` → `review.total_mismatch` | 批量被拒，逐条可用 |
+| 口述来源的 scope-valid 合计对不上 | 总额校验 | `failed` + **`user_attested_batch`** → `review.total_mismatch` | 异常前置并警告；仍可在三条 UI 前提下由人对整段原文背书后批量确认 |
 | 误确认了一条 | 软删除（[04 §3.5](./04-transactions.md)） | — | 删除是软删除并写审计 |
 
 > **一条贯穿全表的原则**：**每一格都有一个用户看得懂的说明和一个可做的动作。** 没有静默失败，也没有「出错了」这种说了等于没说的提示——上一节「失败不静默」只是它的一个实例，不是全部。
@@ -274,7 +275,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 - [ ] `cargo test ingest::source_state_has_one_writer` 通过——生产代码里除状态机模块外不存在第二处 `UPDATE sources SET state`（§3.4「转移表只有一份」）
 - [ ] `cargo test ingest::reparse_of_a_parsed_source_is_legal` 通过——`parsed → parsing` 合法、`reviewed → parsing` 返回 `ingest.invalid_state_transition`（§3.4 两条补进的边）
 - [ ] `cargo test ingest::startup_scan_clears_stuck_parsing` 通过——预置一条 `state = parsing` 的来源后启动，扫描把它转 `failed` + `agent.interrupted` 并作废其草稿
-- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段文本 → `kind = utterance`、`ext = txt`、转写文本已落盘且 `evidence_relpath` 非空；合计解析分别由 `cargo test review::utterance_yields_user_attested_batch` 与 `cargo test review::utterance_with_stated_total_reconciles` 覆盖（§3.1）
+- [ ] `cargo test ingest::utterance_source_roundtrip` 通过——投入一段文本 → `kind = utterance`、`ext = txt`、转写文本已落盘且 `evidence_relpath` 非空；无 scope-valid claim 与 current-source 全覆盖 claim 分别由 `cargo test review::utterance_yields_user_attested_batch` / `cargo test review::utterance_with_stated_total_reconciles` 覆盖（§3.1）
 - [ ] `cargo test ingest::utterance_idempotent_by_token` 通过——同一段文本配**同一个** `idempotency_key` 投两次只产生一条 `sources`（`deduplicated == true`）；配**不同**令牌投两次产生**两条**，`deduplicated == false`（§3.2，**取代原先的 `utterance_idempotent_by_text`**）
 - [ ] `cargo test agent::missing_complete_source_is_protocol_violation` 通过——agent 未调 `complete_source` 时来源转 `failed` + `agent.protocol_violation`，**不得为 `parsed`**（§3.4）
 - [ ] `cargo test ingest::startup_scan_closes_open_attempts` 通过——预置一行 `ended_at` 为空的 `parse_attempts` 后启动，扫描把它回填为 `outcome = "interrupted"`（§3.4）
@@ -291,6 +292,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-30（跨文档同步） | 口述来源的合计说明补 current-source 全覆盖 scope：关键词或单笔 / 子组「总共」不足以报告，同三元组 decoy 也拒报；降级矩阵按 kind 明列 `failed` 时 file 仍为 `single_only`、utterance 仍为 `user_attested_batch`，不改既有确认策略。本文导入边界与实现未被第一次 no-go 证伪，`status` 保持 `review`；只做共享语义同步 | [00 地基 §3.6](./00-foundation.md) v0.21；[`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果 |
 | 2026-08-22（跨文档同步） | §3.5.1「readiness probe 尚未完成」一行只写了「非错误」，没说用户在这个窗口里**主动**点解析时命令返回什么——落到实现上就是一个必须填的空。补 `agent.not_ready`（[00 §3.7](./00-foundation.md) v0.17 登记）：状态本身仍是非错误的中间态，这个码只属于显式发起的解析请求 | [01 §3.5](./01-agent-runtime.md) v0.23 的第四条实现边界 |
 | 2026-08-17（跨文档同步） | §3.5.1 原把 `agent.backend_unavailable` 缩写成「CLI 没装」，漏掉不可执行与版本不可读取，也没有 probe 进行中的 fail-closed 状态。矩阵按 [01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 拆为安装资格、探测中、未认证、密封失败与其他 probe 失败五类，并区分 probe 期与解析任务期复用同一错误码时的不同状态行为；应用仍可启动的既有降级原则不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
 | 2026-08-13（实现验收） | **§3.4 的状态机在实现里存在两份，且互相矛盾。** 本节对应的 `SourceState::can_transition_to` 有穷举 25 种转移的测试却无生产调用点；真正生效的是 `agent/runtime.rs` 内联的 `matches!`，两份对 `parsed → parsing` 的答案相反——**测试全绿，因为它测的是没人用的那份**。改定：转移表补 `parsed → parsing`（重新解析，[03 §6](./03-review.md) 本来就要求它）与 `failed → failed`（作废是会被触发两次的补偿动作），并把「只有一处代码写 `sources.state`」写成可执行验收。§6 新增 2 条 | M0 实施验收（2026-08-13）：`rg 'transition_source\|can_transition_to'` 在生产代码里零命中 |
@@ -311,6 +313,7 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.17 | 2026-08-30 | **第一次 no-go 后跨文档同步，`status` 仍为 `review`。** 口述只有 current-source 全覆盖 claim 才报告；月度外部范围、按日、单笔 / 子组合计与关键词本身均不够，同三元组 decoy 也拒报。降级矩阵补 kind 限定，明确 file / utterance 的既有确认策略不因 `failed` 改变。导入格式、落盘、幂等、状态机与编排实现不变 |
 | v0.16 | 2026-08-24 | **参考设计稿评审的两项产品决定回流，`status` 仍为 `review`（新增两节都是 **M1** 范围，不改任何 M0 结论）。** ① §3.5 新增「什么时候允许自动开始解析」——批准「丢进来就自动整理」（默认开），并把本文里三条看似矛盾的决定统一到**一条判据**：消耗 agent 额度必须由一个明确的、用户当场知道自己做了的动作触发。拖入符合，自动重试与文件夹监听不符合，**所以不是三次拍脑袋**。批量拖入（≥ 2 个来源）不自动开始，因为一个动作要花掉 N 次额度时用户在动作发生的瞬间不知道 N 是多少。② 新增 §3.8「整理记录」——取**不需要新表**的定义（一个来源 + 它当前受审的那次尝试），显式否掉「一次坐下来那一批」的读法（需要跨来源分组 ID，而没有任何规则以「这一批」为单位）；同时登记四个导航名与**「设置」屏无规格归属**这个缺口 |
 | v0.15 | 2026-08-22 | **补 `agent.not_ready`，`status` 仍为 `review`。** §3.5.1「readiness probe 尚未完成」一行明确：状态是非错误的中间态，但用户在这个窗口里显式发起解析时命令层返回 `agent.not_ready`；不创建尝试、不下发解析的行为不变 |
 | v0.14 | 2026-08-17 | **安装资格 / 解析就绪度跨文档同步，`status` 仍为 `review`。** §3.5.1 不再把 `agent.backend_unavailable` 一律称为「没装」，补稳定 `availability_reason`，并把 readiness probe 完成前及 probe 期其他失败与任务期失败拆开：前者 `ready = false` 且不创建尝试、不改变来源；行为权威出处仍为 [01 §3.5](./01-agent-runtime.md) |

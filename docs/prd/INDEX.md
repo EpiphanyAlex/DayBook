@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.38
+date: 2026-08-30
+version: v0.39
 ---
 
 # sub-PRD 索引
@@ -16,16 +16,16 @@ version: v0.38
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.20 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.26 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`review`** | v0.16 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`review`** | v0.17 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`draft`** | v0.21 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`draft`** | v0.27 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`review`** | v0.17 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`draft`** | v0.18 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.9 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.9 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.8 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`in-progress`** | v0.13 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`draft`** | v0.14 |
 
-**M0 四份曾于 2026-08-13 完成首轮实现并全部进入 `review`。2026-08-17，[01 Agent 运行时](./01-agent-runtime.md) 的安装资格 / 解析就绪度规格被证伪并重写；2026-08-22 修正实现开工，01 转入 `in-progress`；2026-08-23 §6 人工验收前三条实测执行完毕，01 回到 `review`，同日把剩下两条也跑完，§6 五条人工验收至此全部执行过。**当前状态：[00 地基](./00-foundation.md) v0.20、[01 Agent 运行时](./01-agent-runtime.md) v0.26、[02 导入](./02-ingest.md) v0.16、[03 审核与草稿区](./03-review.md) v0.17 **四份都是 `review`**。2026-08-13 已通过的确定性链路、外部进程 → stdio MCP → UDS → SQLite、真实 Claude Code 五工具能力探测及截图/口述 happy path 仍是有效证据；新发现的 `is_file()` 安装假阳性与 probe 完成前短暂假 ready 已由 01 v0.23 的实现修正并各自补了自动验收，其人工验收已于 2026-08-23 跑过；03 v0.17 关闭的是 M1 前置决定（截图坐标不进 schema；前端状态选 TanStack Query + reducer），不改变现有 M0 实现与 `review` 状态。
+**第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，版本分别为 v0.21 / v0.27 / v0.18 / v0.14；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。M1 不开始。
 
 > **那轮人工验收抓到一个自动门禁抓不到的缺陷**（2026-08-23，[01 §7](./01-agent-runtime.md)）：「已装未登录」报的是 `agent.spawn_failed` 而不是 `agent.not_authenticated`——**真实 CLI 未登录时 stderr 是 0 字节，原因只写在 stdout 的 stream-json 里**，而失败分类器只读 stderr。规格没错、实现错了，当天改完并补了一条以真实输出为样本的自动验收。**它再次说明同一件事：M0 的门禁只测库、确定性链路与外部 MCP 链路，凡是「真机上那一眼」的问题都只能靠人工验收捞。**
 
@@ -33,7 +33,7 @@ version: v0.38
 >
 > **同一次人工验收暴露了一个门禁盲区，值得单独记一笔**：桌面应用当天**根本起不来**（`src-tauri` 两个 bin 缺 `default-run`；`icons/icon.png` 是 16 位/通道，tauri 判定图标无效后 abort），而 `node scripts/verify-m0.mjs` 不带 `--skip-live` 全绿。**M0 的十一条门禁只测库、确定性链路与外部 MCP 链路，没有一条会启动桌面壳。** 两条已修复并各补一条 `cargo test` 断言（[03 §6](./03-review.md)）。
 
-**`review` 不等于 M0 产品 go。** 01 的 M0 修正已实现、自动验收通过、§6 五条人工验收于 2026-08-23 实测执行完毕，因而回到 `review`；但维护者人工 review 与 [`docs/PRD.md` §9.4](../PRD.md) 的 20–30 张真实截图 + 20 段口述评测仍未完成；在正式给出 go / no-go、完成收尾之前，M0 四份都不得进入 `done`。M0 当前三栏界面是功能基线，不是设计定稿。**M1 开工前的技术 / 产品决定已于 2026-08-24 全部关闭**：[`design.md`](../../design.md) v0.5 定稿并接进 [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md)；[03 §5](./03-review.md) R1 实测判定截图区域坐标不可靠，M1 采用完整原件 + `evidence_text` 退路；R3 选定 TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互。参考设计稿已归档评审并逐条回流（[`docs/design/README.md`](../design/README.md) 八条决定），但**它本身尚未按其中第 1、3、6 条重画**。
+**第一次 no-go、报告与旧样本是不可变证据，不是待修数据。** first / adjudications / final 与 `fixtures/local/m0-2026-08-24` 不修改、不重标、不重新解释；`m0-utterance-017` 的 expected ordinal 缺陷只用于说明新门禁为何存在。修正后的真实真值只进入新的 ignored 样本集，后续 formal retest 必须使用独立新样本；旧集只作 challenge / regression。M0 当前三栏界面仍是功能基线，不是设计定稿；M1 的 token、证据退路与状态管理决定仍有效，但 **no-go 修正与独立复测通过前不得开工 M1**。
 
 > ✅ **[01 Agent 运行时](./01-agent-runtime.md) 已于 2026-08-12 回到 `ready`——M0 不再被阻塞。** 它曾于 2026-08-09 退回 `draft`：§3.1「MCP server 在 Tauri 主进程内」与 §3.4「Tauri spawn CLI 并把 server 的 stdio 端接上」互斥——stdio 型 MCP server 由 agent CLI 自己 `fork/exec`，没有「连到已在跑的进程」这种形态。R6 的四项检查已全部做完，实测记录见 [`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
 >
@@ -45,7 +45,7 @@ version: v0.38
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**下一步**（2026-08-24 更新）：① 用零 backend 的 `node scripts/init-m0-eval.mjs --out <fixtures/local/...>` 建中性正式清单骨架，再按 [07 §3.4](./07-eval.md) 的构成放入并标注本机样本（`node scripts/export-fixture.mjs` 可预填）；② 只用 `node scripts/eval.mjs --m0-go-no-go --manifest <fixtures/local/.../manifest.json>` 跑首轮正式数，若指标 5 待裁定则填独立 adjudications 后用 `--m0-finalize <首轮报告>` 零额度定案；三轮只经 `--m0-diagnose <首轮报告>` 写独立诊断；③ 把 go / conditional-go / no-go 回流 [`docs/PRD.md` §9.4](../PRD.md)，再做 M0 四份收尾。`node scripts/eval.mjs` 不带参数仍是烧额度的 ad-hoc live，**不是正式 verdict**。07 当前 `status` 为 `in-progress`，`--no-memory` 属 M3。**00 与 02 的人工验收还欠一份与 [03 §7](./03-review.md) 同等级的逐条实测记录**（03 有、01 已于 2026-08-23 补上，00 / 02 没有），维护者 review 时一并补。若进入 M1：token design system、「40 笔 30 秒」测量协议、R1 证据退路与 R3 状态管理选型**都已就位**；剩余的设计前置只是按已定规格重画参考设计稿。
+**下一步**（2026-08-30 更新）：① 先审核 00/01/03/07 的 draft 范围契约与 formal v2 报告契约；② 审核通过后按 `ready → in-progress` 测试先行，删除关键词强制闸门、收窄提示词、补 scope-invalid=0 / full fixture hash / bounded evidence / hard-field values / utterance span-order 门禁，并新建纯合成 CI fixture；③ 只跑 `node scripts/verify-m0.mjs --skip-live` 等零额度门禁，更新 feature 速查与共享文档后进入 `review`；④ 再次取得明确授权后，才可用**独立新样本**跑正式复测。修正阶段禁止无参数 live、`--m0-go-no-go`、`--m0-diagnose` 与任何真实 agent 调用。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -91,6 +91,7 @@ version: v0.38
 | **M0 六张表的逐列字段** | [00 地基 §3.6](./00-foundation.md) |
 | **币种精度（exponent）与换算公式** | [00 地基 §3.4](./00-foundation.md)「币种精度」 |
 | **权威错误码集**（30 条，新增码先改这里） | [00 地基 §3.7](./00-foundation.md) |
+| **M0 声明合计的范围资格**（任意 viewport、current-source 全覆盖、scope-invalid=0、单 claim） | [00 地基 §3.6](./00-foundation.md)「M0 单 claim 的范围资格」+ [01 §3.2](./01-agent-runtime.md) `report_source_total` + [07 §3.4](./07-eval.md) formal 契约 |
 | **总额校验：入参、求和范围、按什么等式、两个结果字段** | [03 审核 §3.3](./03-review.md)「校验式」 |
 | **闸门 3 挡不住什么** | [03 审核 §3.3](./03-review.md)「基准值本身必须可核对」+ [01 §3.2](./01-agent-runtime.md)「`report_source_total` 可信性要求」 |
 | **口述为什么能一次批量确认** | [03 审核 §3.3](./03-review.md)「`user_attested_batch` 换的是另一道闸门」+ [`docs/PRD.md` §1.1](../PRD.md) 脚注 |
@@ -126,6 +127,7 @@ version: v0.38
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.39 | 2026-08-30 | **第一次 M0 正式 verdict 为 `no_go` / exit 3，M1 不开始。** 截图指标 1–3 全过，口述金额 `60/62` 硬失败，合计可获得率 `4/20`、假警报率 `6/7`。00→v0.21 / 01→v0.27 / 03→v0.18 / 07→v0.14 并全部退回 `draft`；02 同步到 v0.17、保持 `review`。冻结旧报告与 `fixtures/local/m0-2026-08-24` 不改；新增 current-source 全覆盖单 claim、bounded candidate + 唯一 expected claim 身份 / scope-invalid=0（含不同值错报与同三元组 decoy 拒报）、formal v2 完整 fixture hash / bounded evidence / expected-predicted 硬字段值、口述第一交易 span ordinal 门禁与合成 CI 回归。阈值、指标 4 分母、ordinal join、四硬字段、确认策略、五工具权限边界均不变；后续只用独立新样本正式复测 |
 | v0.38 | 2026-08-24 | **[07 评测](./07-eval.md) → v0.13：M0 正式 verdict 协议在真实样本运行前冻结并落地，status 不变。** 正式入口为 `--m0-go-no-go`；指标 5 走 immutable first report + 独立 adjudications + 零额度 finalize；诊断只对首轮失败与 flaky 的并集追加 3 轮并单写报告。同步冻结聚合作用域、正式退出码、case 质量 / 基础设施错误边界、manifest v1 可选元数据与正式 local / 构成 / 中性 ID 门禁，并增加零 backend 初始化器。阈值与样本构成未动；同步 [`docs/PRD.md`](../PRD.md) v0.26 |
 | v0.37 | 2026-08-24 | **M1 前置 R1 / R3 关闭。** [03 审核](./03-review.md)→v0.17：产品密封链路坐标 spike 未达到危险误定位与相邻行侵入门槛，决定不加截图 bbox，完整原件 + `evidence_text` 作为安全退路；前端状态选定 TanStack Query v5 + screen reducer / 局部 state，不引入 Zustand。[00 地基](./00-foundation.md)→v0.20 同步关闭坐标列 R6，[`docs/architecture.md`](../architecture.md)→v0.12 同步关闭 A4。四份 M0 sub-PRD 的 `status` 均不变，M1 尚未开工 |
 | v0.36 | 2026-08-23 | **[01 Agent 运行时](./01-agent-runtime.md) §6 的后两条人工验收实测执行完毕（→ v0.26），五条至此全部跑完；`status` 仍为 `review`，M0 的 go/no-go 未动。** 「手工拆密封」通过：不动产品代码、在 `PATH` 上放一个追加 `--tools Read` 的同名包装即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、新来源导入成功而任务不下发。「真实解析中看子进程日志」**部分满足**：解析结束后 trace / debug 两级都可见且分级符合 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md)，**进行中看不到**——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。**01 §3 决定与依据一字未改，没有证伪任何规格** |

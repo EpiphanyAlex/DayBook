@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: review
+status: draft
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.17
+date: 2026-08-30
+version: v0.18
 ---
 
 # 03 · 审核与草稿区
@@ -91,6 +91,14 @@ M0 首屏同时呈现当前本位币选择；修改只影响之后的新解析�
 
 **这是唯一能在无人工介入下捕获错误的机制，优先级高于解析准确率本身**（[ADR-0002](../adr/0002-ai-never-writes-directly.md) 闸门 3）。
 
+#### M0 先判 claim 范围，再谈等式（2026-08-30 no-go 回流）
+
+`total_check` 的等式只有在 `report_source_total` 报的是**当前不可变来源全部适用交易**时才有意义。来源可以是任意 viewport 截图；边界就是导入后不再改变的那些字节，不是截图背后的整页、整月或其他分页。`expense_total` 必须覆盖来源内全部支出，`income_total` 覆盖全部收入，`net_change` 覆盖全部收入与支出。
+
+覆盖 viewport 外交易的月度 / 周期合计、分页合计、按日 / 分类 / 语义上单笔 / 任意子组合计均为 **scope-invalid**，不得进入 `parse_attempts.reported_total_*`。多个局部 claim 不能任选一条；若有效来源级 claim 与 invalid decoy 恰有相同 amount/currency/kind，现有四列无法审计身份，M0 也不得报告。合计词只证明「这里可能有个数字」，不能证明 scope；未满足资格时保持未报告，`file` 为 `unavailable + single_only`，`utterance` 为 `not_applicable + user_attested_batch`。
+
+**M0 不新增生产 scope 字段或多 claim 表。** domain 没有独立 OCR，无法从图像字节证明 agent 选中的 claim 是否全覆盖；因此生产 `total_check` 继续在单 claim 前提下执行下面的确定性等式，而范围误报被定义为解析缺陷，由 [01 Agent 运行时 §3.2](./01-agent-runtime.md) 的提示词契约收窄，并由 [07 评测 §3.4](./07-eval.md) 的范围真值与「scope-invalid 成功报告数必须为 0」正式硬契约检验。不能把生产侧无法独立证明写成「已验证 scope」。
+
 #### 校验的对象是「解析完整性」，不是「这一批要确认什么」（2026-08-10 修正）
 
 **这是一个会在 M0 第一次逐条确认时就复现的缺陷。** 本节 v0.2–v0.4 写的求和范围是「该来源下每条**未消费**草稿」。而 `failed` 时用户仍可逐条确认（见下方结果表），**确认第一条之后它就变成已消费、退出求和范围**——剩下的和永远小于声明合计，该来源从此**再也回不到 `passed`**。全部确认完后求和为 0，校验结果仍是 `failed`。
@@ -157,7 +165,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 **为什么必须拆**：初稿让 `not_applicable` 自己就意味着「允许批量」，那是把「校验不适用」和「换一道人工闸门就放行」焊死在一个值上。三个已经看得见的场景会立刻把它撑破： <!-- legacy -->
 
-- 用户在口述里**明确说了「总共 100」** —— 这时对账其实可做（`report_source_total` 照常调，[00 地基 §3.6](./00-foundation.md)「来源不等于文件」第 2 条），结果是 `passed` / `failed`，而确认策略仍是用户背书那一档。**白拿一道校验，且不改变放行方式**
+- 用户在口述里明确说出一条**覆盖整段全部适用交易**的来源级合计 —— 这时对账可做（`report_source_total` 照常调，[00 地基 §3.6](./00-foundation.md)「M0 单 claim 的范围资格」），结果是 `passed` / `failed`，而确认策略仍是用户背书那一档。**白拿一道校验，且不改变放行方式**；只覆盖单笔或子组的「总共」不属于此例
 - 一张**只有一笔、没印合计**的截图 —— 直觉上「对账不适用」，但它是 `file`，**既不该因此获得批量放行，M0 也不该判它 `not_applicable`**。理由见下方专门一段
 - M3 的一段口述**同时产生交易与事项** —— 两类条目的确认路径不同，一个枚举表达不了
 
@@ -177,7 +185,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 **将来真要支持 `file` 的 `not_applicable`，需要一个明确的适用性信号**（来源画像、或 agent 显式声明「这张图的版式里不存在合计行」并附证据），**不能从字段为空推出来**。这与「余额不当合计用」「类型判不出就不填」是同一条纪律：**缺少信息时不许猜一个语义出来。** 登记为 §5 R7。
 
-**M0 不落成数据库字段**：两者都由 `total_check` 当场算出并一起返回。落字段是 M2 的事（真出现「口述里说了合计」这类情形时）。**但概念现在就分开**，否则 UI 与 domain 会围着一个混合语义的枚举写一遍，将来两次返工。
+**M0 不把两个结果或 claim scope 落成数据库字段**：结果仍由 `total_check` 当场算出并一起返回，`reported_total_*` 仍是单 claim 四列。多 claim / scope schema 是 M2 的事。**但概念现在就分开**，否则 UI 与 domain 会围着一个混合语义的枚举写一遍，将来两次返工。
 
 **`reconciliation_status` 的四个值：**
 
@@ -186,7 +194,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 | `passed` | 按上式精确相等 | — |
 | `failed` | 不等 | **显式报警**（`review.total_mismatch`） |
 | `unavailable` | ① 来源**本该有**合计而本次尝试没拿到（`reported_total_*` 为空且 `kind = file`）；**或** ② 存在草稿取不到该币种下的金额（缺三元组、或 `base_currency` 与合计币种不匹配）；**或** ③ 存在 `direction = transfer` 的条目 | UI 明确标注**无法校验**并**列出是哪几条导致的**。**不伪装成通过，也不谎报 failed**——「算不出来」和「算出来不对」是两回事 |
-| `not_applicable` | 来源**结构性没有合计**：`kind = utterance` 且本次尝试没报合计（[00 地基 §3.6](./00-foundation.md)）。**口述里明说了「总共 100」时不落在这里**——那时对账照常做，结果是 `passed` / `failed` | — |
+| `not_applicable` | 当前来源没有 scope-valid 合计：`kind = utterance` 且本次尝试没报合计（[00 地基 §3.6](./00-foundation.md)）。**只有口述里存在 current-source 全覆盖且三元组在候选中唯一的合计时才不落在这里**；月度 viewport 外、单笔或子组「总共」仍在这里 | — |
 
 **`confirmation_policy` 的三个值：**
 
@@ -227,7 +235,7 @@ confirmation_policy:    reconciled_batch | user_attested_batch | single_only   �
 
 - `report_source_total` 强制携带 `reported_total_evidence_text`（合计在来源上的原文片段），数据层有 all-or-nothing CHECK（[00 地基 §3.6](./00-foundation.md)）
 - **审核界面把声明合计与它的原文片段并排显示在批量确认按钮附近**——用户按下批量确认前，最后看到的一眼就是「账单上印的合计是 1847.20，系统读到的也是 1847.20」
-- 来源上没印合计时 agent 不得自己算一个（[01 Agent 运行时 §3.2](./01-agent-runtime.md)），结果如实为 `unavailable`
+- 来源上没有 current-source 全覆盖合计时 agent 不得自己算一个，也不得用月度 viewport 外 / 分页 / 按日 / 分类 / 单笔 / 子组合计顶替（[01 Agent 运行时 §3.2](./01-agent-runtime.md)）；结果按来源 kind 如实为 `unavailable` 或 `not_applicable`
 
 **一句话**：闸门 3 把「逐条核对 40 笔」压缩成「核对 1 个合计」，但压缩不到零。
 
@@ -408,8 +416,9 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 - [ ] `cargo test review::total_check_uses_reported_kind` 通过——同一批草稿（含 `expense` 与 `income`）在 `expense_total` / `income_total` / `net_change` 三种 `kind` 下分别命中三条不同等式（§3.3）
 - [ ] `cargo test review::total_check_unavailable_on_transfer` 通过——含 `direction = transfer` 的条目时 `reconciliation_status == unavailable`，**不是把它按支出算进去**
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——`kind = utterance` 且未报合计时 `reconciliation_status == not_applicable` 且 `confirmation_policy == user_attested_batch`，**批量确认可用**
-- [ ] `cargo test review::utterance_with_stated_total_reconciles` 通过——口述里报了合计时 `reconciliation_status` 为 `passed` / `failed`（**不是 `not_applicable`**），而 `confirmation_policy` **仍是** `user_attested_batch`（§3.3「两个维度」）
-- [ ] `cargo test agent::explicit_utterance_total_must_be_reported` 通过——口述原文命中明显合计词时，漏报合计不能完成解析并静默落到 `not_applicable`；报告后才可完成（[01 §3.2](./01-agent-runtime.md) 代码侧完成前闸门）
+- [ ] `cargo test review::utterance_with_stated_total_reconciles` 通过——口述里报了一条覆盖整段全部适用交易、且三元组在候选中唯一的 scope-valid 合计时，`reconciliation_status` 为 `passed` / `failed`（不是 `not_applicable`），而 `confirmation_policy` 仍是 `user_attested_batch`（§3.3「两个维度」）
+- [ ] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——月度 viewport 外、分页、按日、单笔或子组「总共 / 合计」不报告也能正常完成，不能被关键词闸门逼进 `reported_total_*`（[01 §3.2](./01-agent-runtime.md)）
+- [ ] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——正式真值标为 scope-invalid 的 case 成功报告任意合计都会触发硬 no-go，即使该数字碰巧与草稿和相等；生产侧没有 scope 字段不能让 formal 契约静默消失
 - [ ] `cargo test review::file_source_never_user_attested` 通过——`kind = file` 在任何输入下都拿不到 `user_attested_batch`，也拿不到 `not_applicable`
 - [ ] `cargo test review::file_without_total_is_unavailable_not_na` 通过——**只有一条草稿**且没报合计的 `file` 来源，结果是 `unavailable` + `single_only`（**不是 `not_applicable`**）——§3.3「`file` 为什么永远不判 `not_applicable`」
 - [ ] `cargo test review::batch_gate_reads_policy_not_status` 通过——批量确认的准入只看 `confirmation_policy`；构造一个 `reconciliation_status == passed` 但策略为 `single_only` 的输入，批量仍被拒（§3.3「两个维度」）
@@ -499,6 +508,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** `6/7` 对账假警报证明「任何来源上的合计都可送进现有等式」这个隐含前提错误：月度 viewport 外、分页、按日、单笔 / 子组合计的等式语义与 current source 不同。新增「先判 claim 范围」：M0 只支持当前不可变来源全部适用交易的一条 claim；任意 viewport 仍接受，同三元组 decoy 因现有四列无法审计身份而保守不报；生产 schema 与确认策略不改，范围资格由提示词 + formal candidate/expected claim 真值检验。指标 4 分母 / 阈值、现有 total_check 等式、四硬字段与无 force 旁路均不改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) |
 | 2026-08-24（M1 前置） | **R1 与 R3 关闭。** R1 的产品密封链路探针在受控合成图上仍出现危险误定位与相邻行侵入，且同一 CLI 的 Sonnet 对照大幅退化；错误高亮属于证据闸门风险，因此 M1 不加坐标列，安全退回「完整原件 + `evidence_text`」。R3 定为 **TanStack Query v5 + screen reducer / local state**：Query 只缓存 Rust 可重取投影，用户选择/焦点/编辑留在 reducer；明确修复当前迟到响应覆盖与刷新后重新全选两类风险，不引入 Zustand | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[`docs/architecture.md` §8](../architecture.md) A4；当前 `src/App.tsx::refreshSelected` 实现审查 |
 | 2026-08-17（跨文档同步） | **[05 事项](./05-items.md) v0.8 将自然语言回溯从「只新建事项」扩为「可修改已有事项」**，因此本文 §3.6 增加 M3 create/update 共用审核闸门、目标消歧、mixed batch 与字段差异契约。该扩展只影响尚未实现的 M3；M0/M1 已验收的交易闸门、状态与 `status: review` 均未被证伪 | [`docs/PRD.md` §5.2](../PRD.md) v0.21；[05 事项 §3.4](./05-items.md) |
 | 2026-08-13（人工验收） | **§6 的 M0 人工验收六条全部实测通过**，`status` 由 `in-progress` 回到 `review`。做法：本机真实 Claude Code CLI，两张截图 + 一段口述。① 原件同屏——截图渲染成图、口述显示整段转写；② `evidence_text` 与解析结果同屏无需点击；③ 声明合计与原文片段（「TOTAL SPENT 147.65」）与批量确认按钮**始终同屏**——`.reconciliation` 在 `.draft-stack` 这个滚动容器之外，条目再多也不会把它滚走；④ 一张无声明合计的截图落在 `unavailable` + `single_only`，提示可见、批量按钮禁用；⑤ 一段口述拆出 4 条、一次批量确认入库，整段原文与全部条目及条数同屏；⑥ **缺三元组的草稿当场补齐并确认**——补 `AUD` + `0.21` 后 `base_amount_minor` 由 3800 CNY 导出为 798 AUD（§3.5「本位币金额是导出值」），随即单条确认入库，`drafted_json` 里 `baseAmountMinor` 仍为 `null` | 人工验收实测（2026-08-13）：`transactions` 9 行、`audit_log` 28 行，含 `human/update` 与 `human/confirm` 各自的 before/after |
@@ -528,6 +538,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.18 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 总额校验新增 claim 范围前置：只认 current immutable source 全部适用交易；月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计不得进入等式；同三元组 decoy 也因身份不可审计而拒报。生产 schema、对账四态、确认策略三态、无 force、现有三条等式均不改；新增 formal scope-invalid=0 的验收，替换口述关键词强制验收 |
 | v0.17 | 2026-08-24 | **关闭 M1 前置 R1 / R3，`status` 仍为 `review`。** R1 实测结论为「agent 截图坐标不够稳定」：不加 bbox schema/迁移，M1 保留完整原件 + `evidence_text` 的安全退路；R3 选定 TanStack Query v5 管 IPC 权威快照、screen reducer / 局部 state 管瞬时交互，不引入 Zustand。§3.8 固定 query key、桌面 IPC 默认项、mutation 失效边界与「排除集合」选择语义；§6 新增迟到响应与选择意图两条 M1 验收；规格不变式新增「不得把 M0 推迟区域高亮写成 M1 必做」防回退规则 |
 | v0.16 | 2026-08-24 | **关闭 R4 与 R8，`status` 仍为 `review`。** ① §6 新增「**40 笔 30 秒怎么测**」——R4 提的方差问题是真的，所以协议的每一条都在砍一个方差来源：应用自埋 `performance.now()` 计时（人的反应时间不进区间、界面响应时间全进）、夹具固定数据且**必须含异常项**（异常项的处理成本才是这一屏的真实成本）、按键脚本固定操作以剔除执行者判断速度、`pointerdown` 计数**由代码判**「不碰鼠标」、7 轮丢首轮取中位数。通过判据两条，第二条 **IQR ≤ 中位数 20%** 是给协议自身的自检——方差比效应还大时不许宣布通过。② R8 关闭：设计事实源定为 [`design.md`](../../design.md) v0.5，已接进 [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) §10–§11。③ §3.4 的记忆冲突例子随 [04 §3.3](./04-transactions.md) 两字分类改名（食品杂货 / 日用家居 → 买菜 / 日用） |
 | v0.15 | 2026-08-23 | **新增 M2 分类体系操作审核契约，`status` 仍为 `review`。** M0/M1 自由文本编辑保持不变；M2 方向变化明确清空不兼容分类、停用目标阻止新确认。对话只生成待确认操作，影响数量由代码重算；M2 覆盖分类 / 事实 / 活跃交易草稿，M3 再纳入规则。合并规则随同一确认卡重定向，拆分 / 历史重分类才逐组另问；有条件整批撤销恢复完整批次前状态，任一冲突零写入。M3 明确商户规则指令一次确认即可生效，默认不回写历史 |

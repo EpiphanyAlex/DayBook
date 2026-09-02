@@ -2,8 +2,8 @@
 title: Daybook 术语表
 status: ready
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.13
+date: 2026-08-30
+version: v0.14
 ---
 
 # 术语表
@@ -44,7 +44,7 @@ version: v0.13
 | **不定时** | 已安排到某一天，但没有具体开始时间。不是占满整天的「全天事项」 | [`05-items` §3.2](./prd/05-items.md) |
 | **日期范围** | 用户只声明事项计划或结果落在起止日期之间的粗粒度表达；不推断每天都发生、每日内容或每日用时 | [`05-items` §3.2](./prd/05-items.md) |
 | **事项清单** | 每个事项最多所属的一个用户自定义分组，用于周视图着色、筛选和浏览；未选择时为「未分组」，不等于多标签或优先级。首次建账种入 5 个两字默认清单，种入后与自建清单同权。**与账目分类是两套东西**，不共享实体、不互相映射 | [`05-items` §3.5](./prd/05-items.md) |
-| **来源 / source** | 一份**痕迹**，不一定是文件。两种 `kind`：**`file`**（截图 / PDF）与 **`utterance`**（一段口述或文字的转写结果，转写文本也落盘成 `.txt`）。它是证据链的锚点 | [`00-foundation` §3.6](./prd/00-foundation.md)「来源不等于文件」 |
+| **来源 / source** | 一份导入后**不可变的痕迹**，不一定是文件。两种 `kind`：**`file`**（截图 / PDF）与 **`utterance`**（一段口述或文字的转写结果，转写文本也落盘成 `.txt`）。截图可来自任意 viewport；来源边界就是落盘字节，不自动扩成整页、整月或其他分页。它是证据链与 M0 合计 scope 的锚点 | [`00-foundation` §3.6](./prd/00-foundation.md)「来源不等于文件」/「M0 单 claim 的范围资格」 |
 | **整理记录** | **一个来源，加上它当前受审的那次解析尝试**（`sources` 一行 + `latest_attempt_id` 指向的 `parse_attempts` 一行）。是「补记」屏左栏能翻回去的那个列表项，显示「N 条待确认 / N 条已记下」。**不是「一次坐下来整理的那一批」**——那个读法需要跨来源分组 ID，而没有任何规则以「这一批」为单位，所以不建 | [`02-ingest` §3.8](./prd/02-ingest.md) |
 | **证据 / evidence** | **不可变的来源原件**——截图字节 / `utterance` 的转写文本。导入时逐位落盘，之后谁也不改。**审核界面必须让它本身可见** | [ADR-0002](./adr/0002-ai-never-writes-directly.md) 闸门 2 |
 | **位置声明 / `source_ordinal`** | agent 声称「这条是原件上的第几条」（1 起，同尝试内唯一，允许跳号）。**必填**——`file` 来源没有 OCR 也没有坐标，位置**只能由 agent 报**，[07 评测](./prd/07-eval.md) 的条目对齐用的就是它。`utterance` 另带 **Unicode code point 区间**（零起、左闭右开，对未 normalize 的落盘文本计；Rust `.chars()` / TS `Array.from`——**不是字节偏移、不是 UTF-16 索引**） | [`01-agent-runtime` §3.2](./prd/01-agent-runtime.md) · [`07-eval` §3.2](./prd/07-eval.md) |
@@ -70,10 +70,11 @@ version: v0.13
 
 | 词 | 定义 | 出处 |
 |---|---|---|
-| **声明合计** | 来源上**原本印着**的那个合计（账单底部的 Total 那一行）。**库里存的是 agent 某一次解析对它的报告**——`parse_attempts.reported_total_*` 四列（金额、币种、**类型**、原文片段），**不在 `sources` 上**：它是那次尝试的输出，和草稿同生共死。**不是账户余额，也不是 agent 把逐笔加起来的结果**。类型判不出来时不许填 | [`00-foundation` §3.6](./prd/00-foundation.md)「声明合计归尝试，不归来源」 |
+| **声明合计** | 来源上原本印着 / 说出的聚合值。M0 只承认其中一条**覆盖当前不可变来源全部适用交易**的 claim；月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计均不是 M0 可报告的声明合计。库里存的是 agent 某次解析对 scope-valid claim 的报告——`parse_attempts.reported_total_*` 四列（金额、币种、类型、原文片段），不在 `sources` 上。不是账户余额，也不是 agent 自己逐笔相加；合计词只是候选 | [`00-foundation` §3.6](./prd/00-foundation.md)「M0 单 claim 的范围资格」 |
+| **合计范围资格 / scope-valid** | M0 claim 的 scope 精确等于当前不可变来源中的全部适用交易：expense 覆盖全部支出、income 覆盖全部收入、net 覆盖全部收入与支出。超出来源或只覆盖局部即 **scope-invalid**，不得 `report_source_total`；若有效 claim 的 amount/currency/kind 与 invalid decoy 相同，M0 也因现有四列无法审计身份而不报告。正式评测用 bounded `candidateClaims` 与 expected amount/currency/kind 固定 eligible claim 身份，并要求 scope-invalid 成功报告数为 0；有效总计旁的 decoy 被错报也算违规。生产不新增 scope / 多 claim schema | [`01-agent-runtime` §3.2](./prd/01-agent-runtime.md) · [`07-eval` §3.4](./prd/07-eval.md) |
 | **声明合计的类型** | `expense_total` / `income_total` / `net_change`。三者对应**三条不同的等式**——把收入行算进「消费合计」，校验会稳定地错 | [`00-foundation` §3.6](./prd/00-foundation.md)「合计必须带类型」 |
 | **总额交叉校验** | **入参是 `attempt_id`**：对该次尝试**全部未作废**草稿（不论是否已消费）按合计的类型求和，须与该次报告的合计精确相等。**它是那次尝试的属性，确认动作不改变它**；`sources.latest_attempt_id` 决定当前审的是哪次输出。**不伪装成通过，也不谎报 failed** | [ADR-0002](./adr/0002-ai-never-writes-directly.md) 闸门 3 · [`03-review` §3.3](./prd/03-review.md)「校验式」 |
-| **`reconciliation_status`** | 对账结果四态：`passed` / `failed` / `unavailable`（本该有却取不到）/ `not_applicable`（结构性没有）。**它只回答「能不能对账」** | [`03-review` §3.3](./prd/03-review.md) |
+| **`reconciliation_status`** | 对账结果四态：`passed` / `failed` / `unavailable`（`kind = file` 没有 scope-valid 合计或本该有却取不到）/ `not_applicable`（`kind = utterance` 没有 scope-valid 来源级合计）。**它只回答「能不能对账」**，不能跨 kind 推导确认策略 | [`03-review` §3.3](./prd/03-review.md) |
 | **`confirmation_policy`** | 确认策略三态：`reconciled_batch`（机器对上账）/ `user_attested_batch`（**人对着整段原文背书**）/ `single_only`（只能逐条）。**真正放行批量确认的是它，不是 `not_applicable`**——两者是两个维度，口述里说了合计时对账可做而策略仍走背书那一档。`kind = file` 永远拿不到 `user_attested_batch` | [`03-review` §3.3](./prd/03-review.md) · [`docs/PRD.md` §1.1](./PRD.md) |
 | **审核界面** | 产品的**胜负手**——省下的时间全兑现在这一屏。判定标准 **40 笔 30 秒** | [`03-review`](./prd/03-review.md) |
 | **异常前置** | 审核界面的排序规则：校验不过的、置信度低的、与历史规则冲突的排最前。注意力花在可疑项上，而不是均匀分给 40 条 | [`03-review` §3.4](./prd/03-review.md) |
@@ -101,7 +102,8 @@ version: v0.13
 | **记忆 / memory** | **存规则，不存对话**：商户→分类映射、用户的每次纠正、个人语境词表、语音专有名词表。由 agent 主动调 `query_memory` 按键查，**不预先注入上下文**。**规则只能影响待确认草稿；事实只由人的确认动作产生；规则变化不追溯改写事实** | [`06-memory` §3.4/§3.5](./prd/06-memory.md) |
 | **商户分类规则 / `merchant_category`** | 「某个商户文本模式以后默认建议到哪个稳定分类」的用户确认规则；默认只影响未来草稿，不等于分类体系操作，也不自动改写历史 | [`06-memory` §3.2/§3.3](./prd/06-memory.md) |
 | **纠正 / correction** | 用户在审核时对草稿做的修改，**就是 `audit_log` 里 `actor = "human"` 的那一行**（没有第二套事件表）。**一份数据三处用**：记忆规则的输入、审计留痕、eval 样本 | [`06-memory` §3.2](./prd/06-memory.md) · [`07-eval` §3.2](./prd/07-eval.md) |
-| **eval 集 / 评测集** | 度量「agent 读得准不准」的样本集合。**真值只有一个：来源级期望条目集合**（`expected.json`，每条带位置标识）；`drafted_json` 是**被评分的输出快照**，不是真值。评分**先按 `source_ordinal` 做 full outer join、再逐字段比**（ordinal 两侧唯一，**不是序列对齐、不需要动态规划**）——拿被评字段当匹配键会让字段准确率恒为 100%。用例清单固定在 manifest 里。真调模型、烧订阅额度、**不进 CI** | [`07-eval` §3.2/§3.3](./prd/07-eval.md) |
+| **eval 集 / 评测集** | 度量「agent 读得准不准」的样本集合。真值只有来源级 `expected.json`；`drafted_json` 是被评分的输出快照。评分先按 `source_ordinal` 做 full outer join、再逐字段比（算法与四硬字段不因第一次 no-go 改变）。新 formal 口述真值的 ordinal 必须按**实际交易首次出现 span**编号；来源级另标合计范围资格。真调模型、烧订阅额度、不进 CI | [`07-eval` §3.2/§3.4](./prd/07-eval.md) |
+| **formal fixture-set 指纹 / `fixtureSetSha256`** | 新 formal v2 报告对 manifest + 全部启用 case 的 expected / env / 原始 input 计算的完整 SHA-256；不同于只覆盖 manifest 的 `manifestSha256`。first/final/diagnosis 以它证明使用同一批不可变输入 | [`07-eval` §3.5](./prd/07-eval.md) |
 | **夹具 / fixture** | 一次真实运行的**录像**：输入 + 那次的完整工具调用序列 + 期望结果 + **重放所需的环境**（初始 DB 状态、ID 映射、版本三元组）。**重放时跳过 agent**，所以测的不是模型，是「agent 读错时代码有没有拦住」——零额度、确定性、**可进 CI**。本机夹具含真实金额，不进 git | [`07-eval` §3.6](./prd/07-eval.md) |
 
 ## 其他
@@ -118,6 +120,7 @@ version: v0.13
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.14 | 2026-08-30 | **第一次 M0 正式 no-go 后同步术语。** 来源明确为任意 viewport 的不可变字节边界；声明合计收窄为 current-source 全部适用交易的一条 scope-valid claim，新增 scope-invalid 定义、formal bounded candidates / 唯一 expected claim 身份与 =0 契约；澄清 file / utterance 的 `unavailable` / `not_applicable` kind 边界；eval 口述 ordinal 改准为实际交易首次出现 span（join 不变），新增 `fixtureSetSha256` 词条。生产单 claim 四列与确认策略不变 |
 | v0.13 | 2026-08-24 | **随参考设计稿评审同步（[`docs/design/README.md`](./design/README.md) 八条决定）。** 新增 **整理记录** 词条（含显式否掉的那个读法）；**其他分类** 改为「两侧各有一条名为『其他』的分类，同名而不同实体，脱离 scope 上下文必须标注方向」——默认分类命名由四字改两字后，「其他支出 / 其他收入」这两个名字不再存在；**事项清单** 补 5 个默认清单与「与账目分类是两套东西」。**不复制默认分类清单本身**，仍以 [04 §3.3](./prd/04-transactions.md) 为准 |
 | v0.12 | 2026-08-23 | **补账目分类领域语言。** 新增分类、未分类、其他分类、转账、分类体系操作与商户分类规则；只给定义并链接 [04 交易](./prd/04-transactions.md) / [06 记忆](./prd/06-memory.md)，不复制默认分类清单、生命周期或数据表细节 |
 | v0.11 | 2026-08-17 | **事项术语随 [`docs/PRD.md` v0.21](./PRD.md) 与 [05 事项 v0.8](./prd/05-items.md) 重写。** 「待办 + 时间日志」改为同一实体的「计划 + 结果」；更新事项与 backlog 定义，新增计划时间、结果时间、截止约束、不定时、日期范围与事项清单。术语只给定义，完整状态/时间规则仍以 [05 事项](./prd/05-items.md) 为准 |

@@ -14,9 +14,9 @@
 
 ## 当前状态
 
-**M0 实现处于 review 阶段（2026-08-24）。** Tauri / React / Rust 已落地：六表地基、五工具密封 agent 链路、截图与口述导入、审核确认与总额交叉校验能端到端跑通，`src/` 与 `src-tauri/` 均已创建。M0 的定义是**端到端点亮**——拖一张截图 → agent 读 → 经 MCP **写草稿** → **人确认** → 写事实表 → 列表显示。里程碑表见 [`docs/PRD.md` §9](./docs/PRD.md)。
+**第一次 M0 正式 go/no-go 已完成，结果为 `no_go` / exit 3（2026-08-29/30）；当前只做 M0 修正，不开始 M1。** 已落地的 Tauri / React / Rust 端到端链路仍在：六表地基、五工具密封 agent、截图与口述导入、审核确认与总额交叉校验。正式结果中截图池指标 1–3 全过，但口述金额准确率为 `60/62`，触发硬性 no-go；声明合计可获得率 `4/20`、假警报率 `6/7`。详见 [`docs/PRD.md` §9.4](./docs/PRD.md)。
 
-**但还不能称 M0 已完成。** [00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[02 导入](./docs/prd/02-ingest.md)、[03 审核与草稿区](./docs/prd/03-review.md) 四份当前都是 `review`——01 的安装资格 / 解析就绪度规格曾被证伪并重写，修正实现与 §6 的 5 条本机人工验收已于 2026-08-23 全部执行完毕。维护者人工 review 与 [`docs/PRD.md` §9.4](./docs/PRD.md) 的真实样本 go / no-go 都尚未完成。**当前界面是功能基线，不是设计定稿。** M1 的 token system 已定稿；原图区域高亮经[实测](./docs/spikes/2026-08-24-r1-evidence-region.md)判定不可靠，保留完整原件 + 抽取声明；前端状态选定 TanStack Query v5 + React 局部 reducer。参考设计稿仍待按已回流规格重画。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
+被证伪的是 M0 单 claim 的范围与正式报告证据契约：月度 viewport 外、分页、按日、单笔 / 子组合计被误当成来源级合计。[00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[03 审核与草稿区](./docs/prd/03-review.md)、[07 评测](./docs/prd/07-eval.md) 已退回 `draft`；[02 导入](./docs/prd/02-ingest.md) 保持 `review`。第一次报告与旧本机样本永久保留、不修改、不重标；后续正式复测只使用独立新样本。**当前界面仍是功能基线，不是设计定稿。** M1 已定的 token system、完整原件证据退路与 TanStack Query + reducer 状态边界不变，但本轮不实施。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
 
 **阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。
 
@@ -62,14 +62,13 @@ node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
 node scripts/check-spec-invariants.mjs  # 现行章节不得残留已被推翻的结论
 ```
 
-一条命令把上面十一条全部跑一遍，外加真实 CLI 的能力探测与截图/口述 happy path：
+第一次正式 `no_go` 的修正阶段只允许零额度门禁：
 
 ```bash
-node scripts/verify-m0.mjs              # 含真实 CLI 两步，会消耗你自己的额度
 node scripts/verify-m0.mjs --skip-live  # 跳过真实 CLI；这不是完整 M0 通过
 ```
 
-CI 在所有 PR 上跑：文档门禁走 [`docs.yml`](./.github/workflows/docs.yml)，代码门禁走 [`ci.yml`](./.github/workflows/ci.yml)（即上面那条 `--skip-live`）。**CI 绿不等于 M0 通过**——真实 CLI 那两步需要一个已登录的 agent CLI，只能在本机跑。
+无参数 `node scripts/verify-m0.mjs` 会执行真实 CLI 两步并消耗额度，**重新取得明确授权前禁止运行**。CI 在所有 PR 上跑：文档门禁走 [`docs.yml`](./.github/workflows/docs.yml)，代码门禁走 [`ci.yml`](./.github/workflows/ci.yml)（即上面那条 `--skip-live`）。**CI 绿不等于 M0 通过**——真实 CLI 那两步需要一个已登录的 agent CLI，只能在本机跑。
 
 ---
 
@@ -125,7 +124,7 @@ Daybook 的前提相反：**主路径不要求逐条填表；生活可以先发�
 |---|---|
 | **草稿区** | AI 只写 `draft_*` 表，人确认才进事实表。子进程以密封配置启动，**它实际拿得到的工具**在下发任务前实测 |
 | **证据链** | 每条草稿挂「来自哪张截图（或哪段口述）、模型说它读的是哪一段」——审核时**并排给你看的是原件**，把「信任 AI」换成「扫一眼原件」 |
-| **总额交叉校验** | 拆出的 N 笔加起来必须对上来源自己印着的合计，对不上自己报警。来源本来就没有合计时（比如你说的一段话），换成「整段原文并排 + 你按一次确认」那道闸门 |
+| **总额交叉校验** | 拆出的 N 笔只与一条覆盖当前不可变来源全部适用交易的合计核对；月度 viewport 外、分页、按日或子组合计不拿来凑。对不上自己报警。**文件**没有这种合计时只能逐条确认；**口述**通常没有，则换成「整段原文并排 + 你按一次确认」的人背书闸门 |
 | **append-only 审计日志** | 每次 AI 写入、每次人工修改都留痕；**AI 最初写的那一版永远保留** |
 
 ---

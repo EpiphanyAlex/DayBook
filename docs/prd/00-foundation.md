@@ -1,9 +1,9 @@
 ---
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
-status: review
+status: draft
 owner: "@maintainer"
-date: 2026-08-24
-version: v0.20
+date: 2026-08-30
+version: v0.21
 ---
 
 # 00 · 地基 Foundation
@@ -279,7 +279,20 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 
 - 取值集：`expense_total`（本期消费/支出合计）· `income_total`（本期收入合计）· `net_change`（净变动，收入减支出）
 - **判不出类型时 agent 不得调 `report_source_total`**（[01 §3.2](./01-agent-runtime.md)），结果如实为 `unavailable`——与「余额不当合计用」同一条原则：**基准的语义不确定，就不是基准**（[ADR-0002 闸门 3](../adr/0002-ai-never-writes-directly.md)）
-- **一次尝试只登记一条合计。** 账单同时印了消费合计与收入合计时，v1 取消费合计（覆盖绝大多数场景），另一条丢弃——「一来源多条 claim」登记为 §5 R7，M2 决
+- **一次尝试只登记一条合计。** 账单同时印了消费合计与收入合计时，M0 只有在其中恰有一条满足下方「当前来源全覆盖」资格时才报告；多条局部 claim 不得挑一条硬塞进四列。「一来源多条 claim」仍登记为 §5 R7，M2 决
+
+##### M0 单 claim 的范围资格：只认当前不可变来源全覆盖（2026-08-30 no-go 回流）
+
+**来源边界是导入后不可变的证据字节，不是它背后的整页、整月或完整账户。** 因此 M0 继续接受任意 viewport 截图；截图裁到哪里，当前来源就到哪里。`report_source_total` 唯一支持的 claim 必须同时满足：
+
+1. 来源上明确印出 / 说出一条 `expense_total`、`income_total` 或 `net_change`；
+2. scope 精确等于当前来源中的**全部适用交易**：`expense_total` 覆盖全部支出，`income_total` 覆盖全部收入，`net_change` 覆盖全部收入与支出；M0 现有校验遇到 `transfer` 仍为 `unavailable`，不把缺失的转入 / 转出符号编出来；
+3. scope 不包含当前不可变来源之外的交易，也不只覆盖当前来源内的一个局部组；
+4. 该 claim 的 amount/currency/kind 三元组在来源全部合计候选中唯一。若一个有效总计与按日 / 子组 decoy 恰好三元组相同，现有四列无法审计 agent 选中了哪一条，M0 保守地不报告；这不是新增多 claim schema。
+
+下列全部 **scope-invalid**，agent 不得调用 `report_source_total`：覆盖截图 viewport 外交易的月度 / 周期合计；分页列表的跨页合计；按日、按分类、语义上只属于单笔的金额 / 小计；任意其他子组合计。`总共` / `一共` / `合计` / `总计` / `TOTAL` 只是**候选信号**，不是范围资格证明。口述里的「一共 1500，其中 300 水电、1200 房租」若整段还有其他交易，1500 只是子组 claim，不能报告。
+
+**不为这次修正新增生产 schema。** `parse_attempts.reported_total_*` 仍是四列 all-or-nothing、一次尝试至多一条；不新增 scope 列，不提前建立 `reconciliation_claims`。生产代码没有独立 OCR，无法从截图字节证明 agent 选中的 claim 是否全覆盖；M0 先由提示词收窄输出，再由 [07 评测 §3.4](./07-eval.md) 的人工真值列出 bounded `candidateClaims` 并标注 exact expected claim（amount/currency/kind）与「scope-invalid 成功报告数必须为 0」正式契约检验；同图有效总计旁有 decoy 小计时，错报 decoy 也必须被抓住。未满足资格时四列保持全空，按 [03 审核 §3.3](./03-review.md) 现有 `kind` 规则得到 `unavailable` 或 `not_applicable`。
 
 ##### 口述的幂等键不是内容哈希（2026-08-10 改定）
 
@@ -300,9 +313,9 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 三条随之确定：
 
 1. **转写文本落盘成 `.txt`，与截图同等对待。** 这样 `evidence_relpath` 保持非空，闸门 2 的实现路径对两种来源完全一致，不产生分支。
-2. **`utterance` 来源通常没有合计，但不是「恒为空」**（2026-08-10 三轮改定）—— 一段口述一般没有「账单底部印着的合计」，此时 `reported_total_*` 全空、对账结果 `not_applicable`、确认策略 `user_attested_batch`（[03 审核 §3.3](./03-review.md)）。**但用户自己说出「总共 100」时，那就是一个来源上真实存在的声明合计**，agent 可以照常调 `report_source_total`（`evidence_text` 取那半句话），于是对账结果变成 `passed` / `failed`——**白拿一道校验**。 <!-- legacy -->
-   **确认策略不随之改变**：无论对账做没做成，`utterance` 的策略恒为 `user_attested_batch`。**这正是把两个维度拆开的理由**（[03 审核 §3.3](./03-review.md)「两个维度，不是一个枚举」）——本条 v0.6–v0.7 写「恒为空」，与 03 拿这个场景当拆分论据**直接打架**，是同一轮改动里留下的自相矛盾。
-   **闸门 3 对语音来源结构性不适用**（因为多数时候确实没有合计），代之以「整段原文 + 全部拆分结果并排展示 + 一次人工确认」这道闸门；**有合计时两道都在**。
+2. **`utterance` 来源通常没有 scope-valid 合计**（2026-08-30 收窄）—— 一段口述一般没有来源级聚合，此时 `reported_total_*` 全空、对账结果 `not_applicable`、确认策略 `user_attested_batch`（[03 审核 §3.3](./03-review.md)）。只有用户说出的合计满足上方「当前不可变来源全部适用交易」资格时，agent 才可调用 `report_source_total`，对账结果变成 `passed` / `failed`；**词面上出现「总共」不等于 scope 合格**。覆盖月度外部范围、单笔或子组的口述合计仍保持全空。
+   **确认策略不随之改变**：无论对账做没做成，`utterance` 的策略恒为 `user_attested_batch`。**这正是把两个维度拆开的理由**（[03 审核 §3.3](./03-review.md)「两个维度，不是一个枚举」）。
+   **闸门 3 对语音来源通常不适用**；代之以「整段原文 + 全部拆分结果并排展示 + 一次人工确认」这道闸门。只有存在 scope-valid 来源级 claim 时两道都在。
 3. **`utterance` 的幂等键是提交令牌，不是内容哈希**（2026-08-10 改定）—— 见上方「口述的幂等键不是内容哈希」。原写法会让「今天咖啡 5 元」这类跨天重复的真实交易被静默吞掉。
 
 #### `parse_attempts` — 一次解析尝试（2026-08-10 新增）
@@ -328,7 +341,7 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 | `error_code` | TEXT | 可空 | `outcome` 非 `completed*` 时取 §3.7 的 `agent.*` 码 |
 | `reported_item_count` | INTEGER | 可空 | agent 经 `complete_source` 自报的条目数（[01 §3.2](./01-agent-runtime.md)） |
 | `unparsed_note` | TEXT | 可空 | agent 自报的「有哪块我没读」——**空字符串与 NULL 语义不同**：前者是「它说全读了」，后者是「它没说」 |
-| **`reported_total_minor`** | INTEGER | 可空 | **agent 报告它在来源上看到的合计**（此前叫 `sources.declared_total_minor`，2026-08-10 移入本表） | <!-- legacy -->
+| **`reported_total_minor`** | INTEGER | 可空 | **agent 报告它在当前不可变来源上看到、且满足本节「全部适用交易」范围资格的合计**（此前叫 `sources.declared_total_minor`，2026-08-10 移入本表） | <!-- legacy -->
 | **`reported_total_currency`** | TEXT | 可空 | 该合计的币种——**没有币种的金额无法校验** |
 | **`reported_total_kind`** | TEXT | 可空 | `expense_total` / `income_total` / `net_change`，见 `sources`「合计必须带类型」 |
 | **`reported_total_evidence_text`** | TEXT | 可空 | 合计在来源上的原文片段——**校验基准本身也必须可核对**（[03 审核 §3.3](./03-review.md)） |
@@ -566,7 +579,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | R4 | 证据目录长期累积到 GB 级后的清理策略（[`docs/PRD.md` §13](../PRD.md) 开放问题 P3） | 本文 §3.2、[02 导入](./02-ingest.md) | 真实使用出现容量问题时 |
 | R5 | 数据库 at-rest 加密——v1 不做（数据不出本机 + macOS FileVault 已提供一层）。若未来需要，`rusqlite` 的 `bundled-sqlcipher` 是路径 | 全产品安全姿态 | v1 明确不做，登记以免被沉默填掉 |
 | ~~R6~~ **已关闭（2026-08-24）** | 证据区域坐标字段——[03 审核 §5](./03-review.md) R1 若结论是「能稳定定位」，`draft_transactions` 需加坐标列 | 本文 §3.6 | **结论：不加。** 产品密封链路与模型对照均未达到危险误定位 / 相邻行侵入门槛；错误高亮比无高亮更危险。M1 不创建 `0002_*` 坐标迁移、不改 `draft_transaction` 工具形状；完整原件 + `evidence_text` 继续作为安全退路。见 [spike 记录](../spikes/2026-08-24-r1-evidence-region.md) |
-| R7（**新增 2026-08-10**） | **一次尝试多条合计**——账单常同时印「本期消费合计」与「本期收入合计」，甚至再加期初/期末余额。§3.6 现在只登记一条（取消费合计），另一条丢弃 | 本文 §3.6 `reported_total_*`、[03 审核 §3.3](./03-review.md) | M2 拿到真实月结单后决。**候选是把四列拆成 `reconciliation_claims` 子表**（一来源多行，各带 kind/金额/币种/原文）。M0/M1 不做——单条已覆盖交易列表类截图，而那是 M0 的主要来源类型 |
+| R7（**2026-08-30 no-go 后重述**） | **一次尝试多条、分组或跨范围合计**——月结单、分页与按日 / 分类汇总常同时存在多条 claim；M0 四列既表达不了多个 scope，也无法证明哪条覆盖当前来源全部适用交易 | 本文 §3.6 `reported_total_*`、[03 审核 §3.3](./03-review.md) | M2 拿到独立样本后决。候选仍是 `reconciliation_claims` 子表，但 **M0 修正不提前实现**：仅允许一条 current-source 全覆盖 claim；多条局部 claim 一律不报告。第一次正式 no-go 的 `6/7` 假警报正是提前把这些 claim 塞进单字段的实证（[`docs/PRD.md` §9.4](../PRD.md)） |
 | R10（**新增 2026-08-10**） | **模型报不准 span 时的退路**——§3.6「span 用哪套坐标」要求 agent 直接报 code point 区间。若实测发现它经常算错，退路是改成 `evidence_text` + `evidence_occurrence`（第几次出现），由 Rust 算 span | 本文 §3.6、[01 §3.2](./01-agent-runtime.md) 工具参数 | **M0 第一轮 eval 后决**——这是工具形态变更，需要真实数据支撑。在此之前不做 |
 | R11（**新增 2026-08-10**） | **M3 的 ordinal 跨表唯一**——同一段口述会同时产出 `draft_transactions` 与 `draft_items`，两张表**各自**的 `UNIQUE(attempt_id, source_ordinal)` **保证不了跨表唯一**：交易第 2 条和事项第 2 条会同时存在，而 [07 评测](./07-eval.md) 的对齐按 ordinal 配对 | 本文 §3.6、[05 事项](./05-items.md)、[07 评测 §3.2](./07-eval.md) | **M3 开工前决**，两条候选：① domain 在同一事务里跨表检查；② 引入一张公共的位置占用表。**不阻塞 M0**（`draft_items` 是 M3 的表），登记以免被沉默填掉 |
 | R9（**新增 2026-08-10**） | **范围不变式挡不住时怎么办**——§3.4 用「IPC 传字符串 + `\|v\| ≤ 10^15`」换掉了全链路 `bigint`。若将来出现合法但超范围的金额（极端通胀币种、或产品扩到机构场景），路径是**全链路 `bigint`**：IPC 已经是字符串，改动面收窄在 TS 侧 | 本文 §3.4/§3.8、[`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) | 出现第一个被 `data.amount_out_of_range` 拒绝的**合法**金额时。**在此之前不做**——`bigint` 的代价是真的，而这个场景至今是假想的 |
@@ -596,6 +609,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 - [ ] `rg -n 'SUM\(base_amount_minor\)' src-tauri/src` 的每处命中都伴随 `GROUP BY base_currency` 或单本位币断言
 - [ ] `cargo test foundation::draft_requires_evidence` 通过——`source_id` 或 `evidence_text` 为空时插入 `draft_transactions` 失败
 - [ ] `cargo test foundation::reported_total_all_or_nothing` 通过——`parse_attempts.reported_total_*` 四列只填一部分时 CHECK 拒绝
+- [ ] `cargo test foundation::m0_total_claim_schema_stays_single` 通过——M0 no-go 修正后仍只有 `parse_attempts.reported_total_*` 四列、一次尝试至多一条；没有提前新增 scope 列或 `reconciliation_claims` 表（§3.6「M0 单 claim 的范围资格」）
 - [ ] `cargo test foundation::reported_total_lives_on_attempt` 通过——`sources` 表**不存在** `declared_total_*` 列；同一来源解析两次，两行 `parse_attempts` 各自带自己的 `reported_total_*`，第一次的值不被第二次覆盖（§3.6「声明合计归尝试，不归来源」） <!-- legacy -->
 - [ ] `cargo test ingest::utterance_source_roundtrip` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——未报告合计的 `utterance` 尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
@@ -641,6 +655,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** 第一次正式结果为 `no_go` / exit 3；声明合计可获得率 `4/20`、假警报率 `6/7`，主要因为月度 viewport 外、分页、按日、单笔或子组合计被塞进单条 `reported_total_*`。被证伪的是「来源上出现一个合计即可报告」这条隐含范围，不是四列生命周期。M0 收窄为一条覆盖当前不可变来源全部适用交易的 claim；合计关键词降为候选信号；生产 schema、指标 4 分母 / 阈值与多 claim 的 M2 决策均不动。首次报告与 `fixtures/local/m0-2026-08-24` 永久保留 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[07 评测 §7](./07-eval.md) |
 | 2026-08-24（M1 前置） | **R6 随 [03 审核 §5](./03-review.md) R1 一并关闭为「不加截图坐标列」。** 产品密封链路的受控合成图仍出现危险误定位与相邻行侵入；同一 CLI 的 Sonnet 对照进一步说明该能力不具备跨模型稳定性。既然代码无法独立验证模型是否指到正确行，可空 bbox 也保护不了「有值但值错」；因此不做原计划的 `0002_*` 迁移，也不改 M0 五工具 | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[03 审核 §3.2/§5](./03-review.md) |
 | 2026-08-22（跨文档同步） | **权威错误码表新增 `agent.not_ready`。** [01 §3.5](./01-agent-runtime.md) 的状态矩阵把「已发现合格 CLI、尚未探测或探测中」定为 `error_code` 空的**非错误**态，但同一条规格又要求这一档 fail closed——用户显式发起解析时命令层必须返回一个码，而矩阵里没有。复用 `agent.backend_unavailable` 会把 v0.16 刚拆开的「安装资格 / 解析就绪度」两层重新合上，所以登记新码，只用于 probe 未开始 / 进行中 | 01 的 M0 修正实施计划（2026-08-22 获批）；[01 §3.5](./01-agent-runtime.md) 状态矩阵与 §6 `agent::readiness_blocks_attempt_and_task` |
 | 2026-08-17（跨文档同步） | 权威错误码表把 `agent.backend_unavailable` 从含糊的「`probe()` 失败」收窄为安装资格失败（未找到、不可执行、版本不可读取）；完整 readiness probe 的认证、密封与其他失败继续使用各自错误码。`agent.tool_surface_unsealed` 同步改准为「无法证明完整 manifest 与预期严格相等」，不再只写“多出工具”；错误码集合不变 | [`docs/PRD.md` P5](../PRD.md) 部分关闭；[01 Agent 运行时 §3.5](./01-agent-runtime.md) v0.21 |
@@ -668,6 +683,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.21 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 定义 M0 单 claim 只认 current immutable source 全部适用交易；任意 viewport 仍支持，月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计均不得报告；有效 claim 与 invalid decoy 三元组相同时也因身份不可审计而拒报，关键词只作候选。`parse_attempts.reported_total_*` 四列与一次一条限制不变，不提前实现多 claim schema；新增保持单 claim schema 的验收。第一次 no-go、旧报告与 `fixtures/local/m0-2026-08-24` 不改 |
 | v0.20 | 2026-08-24 | **关闭 R6，`status` 仍为 `review`。** [03 审核](./03-review.md) R1 spike 未达到证据高亮的安全门槛，因此不新增截图 bbox 列、不创建 `0002_*` 迁移、不改 `draft_transaction`；M0 六表五工具与已实现 schema 一字未动 |
 | v0.19 | 2026-08-24 | **跟随 [04 §3.3](./04-transactions.md) v0.9，`status` 仍为 `review`（M2 表，M0 实现不受影响）。** `categories.name` 的注释由「默认值统一四个汉字」改为「两个汉字」，并注明唯一性只在同一 `scope` 内。**`UNIQUE(scope, normalized_name)` 这条约束本来就是对的、一个字没改**——变的是它从此**真的被用到**：四字命名下没有任何两条默认分类同名，`scope` 那一列在种入路径上从未被行使过；两字命名后「礼金」与「其他」两侧各一条，**种子数据本身就会去撞这个索引**。这一行存在的意义是提醒实现者别在种入时按 `name` 去查重 |
 | v0.18 | 2026-08-23 | **补 M2 分类实体与迁移边界，`status` 仍为 `review`。** v1 终态表清单新增 `categories`；明确 M0/M1 已实现的 `category TEXT` 不变，M2 才迁为稳定 `category_id`。补分类表最小列、方向 / 停用 / 合并引用约束、默认只种一次、旧文本无损迁移、迁移前只读预检、`audit_log.batch_id` 与完整批次前状态撤销；结构化分类操作的表 / 工具形状及诊断修复入口登记为 M2 `ready` 前待决，不自行发明、不改变当前 M0 六表五工具 |
