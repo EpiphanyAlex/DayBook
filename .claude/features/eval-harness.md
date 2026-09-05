@@ -1,6 +1,6 @@
 # 评测与夹具重放
 
-> 规格：[docs/prd/07-eval.md](../../docs/prd/07-eval.md) · 阈值与口径：[docs/PRD.md §9.4](../../docs/PRD.md) · 最后更新：2026-09-02
+> 规格：[docs/prd/07-eval.md](../../docs/prd/07-eval.md) · 阈值与口径：[docs/PRD.md §9.4](../../docs/PRD.md) · 最后更新：2026-09-05
 
 ## 一句话
 

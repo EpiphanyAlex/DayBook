@@ -2,7 +2,7 @@
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
 status: review
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.20
 ---
 

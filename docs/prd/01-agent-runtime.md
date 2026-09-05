@@ -2,7 +2,7 @@
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
 status: review
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.29
 ---
 
@@ -581,7 +581,8 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
-| 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 合计关键词已降为提示词候选并从 `complete_source` 代码闸门删除；生产提示词与 live MCP 描述共同明确 current-source 全覆盖、viewport / 分页 / 按日 / 分类 / 单笔 / 子组与同三元组 decoy；收口复审先用红测抓到 MCP 描述遗漏，再逐项补齐。scope-valid 口述仍可报告。五工具、权限边界与生产单 claim 参数未改变；完整零额度门禁通过，未运行真实 agent | 本文 §6；[00 地基 §3.6](./00-foundation.md)；`node scripts/verify-m0.mjs --skip-live` |
+| 2026-09-05（收口独立复审） | 先用红测抓到 live MCP 描述遗漏，再逐项补齐 current-source 范围及相同三元组 decoy；与生产提示词共同受 §6 回归约束。`status` 保持 `review`，五工具、参数与确认策略不变 | [PR #28](https://github.com/EpiphanyAlex/DayBook/pull/28)；本文 §6；[07 评测 §7](./07-eval.md) |
+| 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 合计关键词已降为提示词候选并从 `complete_source` 代码闸门删除；生产提示词明确 current-source 全覆盖、viewport / 分页 / 按日 / 分类 / 单笔 / 子组与同三元组 decoy；scope-valid 口述仍可报告。五工具、权限边界与生产单 claim 参数未改变；完整零额度门禁通过，未运行真实 agent | 本文 §6；[00 地基 §3.6](./00-foundation.md)；`node scripts/verify-m0.mjs --skip-live` |
 | 2026-09-02（no-go 修正开工） | PR #27 的关键词降级、current-source 全覆盖提示词与五工具不变规格已独立 review 通过，本文先由 `draft → ready`；维护者随后批准分阶段实施计划，正式开始测试先行实现，故由 `ready → in-progress`。本轮不运行任何真实解析，不改变五工具权限边界 | [PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步 |
 | 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** 正式样本中合计关键词强制闸门与提示词把月度 viewport 外、分页、按日、单笔 / 子组合计误报为来源合计，造成可获得率 `4/20`、假警报率 `6/7`。修正保留任意 viewport、五工具与一次一条 schema，只把 `report_source_total` 收窄为 current-source 全覆盖 claim；关键词降为候选，删除 `complete_source` 的关键词强制拒绝；同三元组 decoy 因现有四列无法审计身份而保守不报。指标、确认策略与工具权限不变；旧报告 / 旧样本不可修改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) 范围资格 |
 | 2026-08-23（人工验收） | **§6 人工验收后两条实测执行完毕，五条至此全部跑完；`status` 仍为 `review`（M0 的 go/no-go 与收尾三件事未动）。** ① **一次真实解析中的子进程日志**——一段口述来源经真实 CLI 2.1.241 解析出 3 条草稿，对账 `passed`（来源声明 49.30 AUD＝草稿合计 49.30 AUD），`completed_with_gaps` 的未读区域横幅照常显示；侧栏「本机解析日志」面板在**关掉**详细调试日志时渲染 trace 级摘要（`list_pending_sources` / `read_source` / `report_source_total` / 三条 `draft_transaction` / `complete_source · 通过 · 3 ms`），**打开**时渲染完整调用参数，落盘的 `*.trace.jsonl` 里只有 `argumentShape` 而无金额，与 [ADR-0007 本地可观测性与日志分级](../adr/0007-local-observability-and-log-tiers.md) 一致——**但解析进行中面板看不到本次会话的任何一条**，见下一行。② **手工拆密封**——产品代码一行未改，在 `PATH` 上放一个在 Daybook 的密封参数之后追加 `--tools Read` 的同名包装（等价于把「关掉内置工具」这一项关掉），probe 落 `agent.tool_surface_unsealed`，pill 显示「Claude Code 安全检查未通过」、侧栏显示「解析已被安全暂停／当前 CLI 暴露了额外工具、插件或 hook；恢复密封配置后再解析」，**且应用照常启动、既有草稿仍可审阅确认**；此时新导入一份口述来源，导入成功而**任务没有下发**（`parse_attempts` 计数全程恒为 1），来源上的「解析」入口 `enabled = false`、`AXPress` 不触发任何请求。**顺带取得的两条事实**：这台机器上 CLI 的凭证不在 `HOME` 里的普通配置文件（把 `~/.claude.json` 复制进受控 `HOME` 仍判未登录），所以真实解析只能靠还原**子进程**的 `HOME`；这个 webview 的辅助功能树完整暴露，`AXPress` / `set focused` 可直接驱动界面，比 `click at` 可靠 | 人工验收实测（2026-08-23）：真实 CLI 2.1.241 + 受控 `HOME` 下的桌面应用截图；`<数据目录>/logs/*.trace.jsonl`；`parse_attempts` 计数前后一致 |

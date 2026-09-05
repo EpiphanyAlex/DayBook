@@ -2,7 +2,7 @@
 title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑地图
 status: ready
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.28
 ---
 

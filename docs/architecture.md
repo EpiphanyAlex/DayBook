@@ -2,7 +2,7 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.14
 ---
 

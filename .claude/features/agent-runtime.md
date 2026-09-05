@@ -1,6 +1,6 @@
 # Agent 运行时
 
-> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-09-02
+> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-09-05
 
 ## 一句话
 

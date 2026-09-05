@@ -2,7 +2,7 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.42
 ---
 
@@ -25,7 +25,7 @@ version: v0.42
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.8 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`review`** | v0.17 |
 
-**第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，并在 PR #27 的规格独立 review 通过与维护者批准实施后，于 2026-09-02 依次转为 `ready → in-progress → review`，收口复审后当前版本分别为 v0.23 / v0.29 / v0.20 / v0.17；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。M1 不开始。
+**第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，并在 PR #27 的规格独立 review 通过与维护者批准实施后，于 2026-09-02 依次转为 `ready → in-progress → review`，2026-09-05 收口复审后当前版本分别为 v0.23 / v0.29 / v0.20 / v0.17；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。M1 不开始。
 
 > **那轮人工验收抓到一个自动门禁抓不到的缺陷**（2026-08-23，[01 §7](./01-agent-runtime.md)）：「已装未登录」报的是 `agent.spawn_failed` 而不是 `agent.not_authenticated`——**真实 CLI 未登录时 stderr 是 0 字节，原因只写在 stdout 的 stream-json 里**，而失败分类器只读 stderr。规格没错、实现错了，当天改完并补了一条以真实输出为样本的自动验收。**它再次说明同一件事：M0 的门禁只测库、确定性链路与外部 MCP 链路，凡是「真机上那一眼」的问题都只能靠人工验收捞。**
 
@@ -45,7 +45,7 @@ version: v0.42
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**当前实施**（2026-09-02 更新）：第一次 M0 `no_go` 的代码修正已测试先行完成，00/01/03/07 均由 `in-progress → review`。关键词强制完成闸门已删除，提示词收窄为 current-source 全覆盖；formal v2 已补 scope-invalid=0、完整 fixture-set 指纹、bounded 对账证据、expected/predicted 四硬字段值与口述 span-order 门禁；纯合成 CI scope fixture 已落地。完整 `node scripts/verify-m0.mjs --skip-live` 通过，feature 速查与共享规格已同步；没有运行 live / 真实 agent / 新 formal，没有修改第一次报告、旧 fixtures、冻结阈值 / 分母 / join / 四硬字段，也没有开始 M1。再次取得明确授权后，才可用**独立新样本**跑正式复测。
+**当前实施**（2026-09-05 收口复审更新）：第一次 M0 `no_go` 的代码修正已测试先行完成，00/01/03/07 均由 `in-progress → review`。关键词强制完成闸门已删除，提示词收窄为 current-source 全覆盖；formal v2 已补 scope-invalid=0、完整 fixture-set 指纹、bounded 对账证据、expected/predicted 四硬字段值与口述 span-order 门禁；纯合成 CI scope fixture 已落地。完整 `node scripts/verify-m0.mjs --skip-live` 通过，feature 速查与共享规格已同步；没有运行 live / 真实 agent / 新 formal，没有修改第一次报告、旧 fixtures、冻结阈值 / 分母 / join / 四硬字段，也没有开始 M1。再次取得明确授权后，才可用**独立新样本**跑正式复测。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -127,7 +127,7 @@ version: v0.42
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
-| v0.42 | 2026-09-02 | **独立复审收口同步。** 07→v0.17，保持 `review`；修复 control 聚合越界、claim 金额别名、失败尝试证据丢失、manifest 字节绑定与 formal 路径绕过，补正向合成重放。冻结口径与 M1 条件不变 |
+| v0.42 | 2026-09-05 | **独立复审收口同步。** 07→v0.17，保持 `review`；修复 control 聚合越界、claim 金额别名、失败尝试证据丢失、manifest 字节绑定与 formal 路径绕过，补正向合成重放。冻结口径与 M1 条件不变 |
 | v0.41 | 2026-09-02 | **第一次 no-go 修正完成并进入 review。** 00→v0.23 / 01→v0.29 / 03→v0.20 / 07→v0.16，四份均由 `in-progress → review`。关键词降级、current-source scope、formal v2 完整 fixture-set 指纹、scope 硬失败、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI fixture 全部落地；完整 `verify-m0 --skip-live` 通过。未运行真实 agent / 新 formal，旧报告与 fixtures、冻结口径、五工具边界均不变，M1 未开始 |
 | v0.40 | 2026-09-02 | **第一次 no-go 修正开工。** PR #27 的 00/01/03/07 规格已独立 review 通过，维护者批准分阶段实施；四份由 `draft → ready → in-progress`，版本分别升为 v0.22 / v0.28 / v0.19 / v0.15。只做 M0 测试先行修正与零额度门禁，不改冻结口径、不运行真实 agent、不开始 M1 |
 | v0.39 | 2026-08-30 | **第一次 M0 正式 verdict 为 `no_go` / exit 3，M1 不开始。** 截图指标 1–3 全过，口述金额 `60/62` 硬失败，合计可获得率 `4/20`、假警报率 `6/7`。00→v0.21 / 01→v0.27 / 03→v0.18 / 07→v0.14 并全部退回 `draft`；02 同步到 v0.17、保持 `review`。冻结旧报告与 `fixtures/local/m0-2026-08-24` 不改；新增 current-source 全覆盖单 claim、bounded candidate + 唯一 expected claim 身份 / scope-invalid=0（含不同值错报与同三元组 decoy 拒报）、formal v2 完整 fixture hash / bounded evidence / expected-predicted 硬字段值、口述第一交易 span ordinal 门禁与合成 CI 回归。阈值、指标 4 分母、ordinal join、四硬字段、确认策略、五工具权限边界均不变；后续只用独立新样本正式复测 |

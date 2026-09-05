@@ -2,7 +2,7 @@
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
 status: review
 owner: "@maintainer"
-date: 2026-09-02
+date: 2026-09-05
 version: v0.17
 ---
 
@@ -518,7 +518,7 @@ fixtures/local/<date>-<slug>/
 
 ## 7. 回流记录
 
-- **2026-09-02 · 收口独立复审，`status` 保持 `review`**（本节首次 no-go 修正；[`docs/PRD.md` §9.4](../PRD.md) 冻结分池）。
+- **2026-09-05 · 收口独立复审，`status` 保持 `review`**（本节首次 no-go 修正；[`docs/PRD.md` §9.4](../PRD.md) 冻结分池）。
   先补红测再修复：control scope 错报意外进入正式硬计数、金额字符串别名绕过同三元组 decoy、协议失败丢弃已写入 claim、manifest 解析与快照两次读取不绑定、未存在父目录的 `..` 与隐私根 symlink 逃逸。保留 control 只记录边界；formal claim 金额规范化校验不改变交易 join；失败证据保留 reported 而不伪造 computed/delta；所有 formal 写入共用最终路径复验，白名单固定在仓库根下。另补正确总计正向重放与 live MCP 描述逐项一致性回归。均为实现缺陷收口，不改冻结阈值 / 分母、旧报告、生产四列五工具或 M1 条件。
 
 - **2026-09-02 · 第一次 no-go 修正验收，本文由 `in-progress → review`**（§3.4–§3.6、§6）。
@@ -601,7 +601,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
-| v0.17 | 2026-09-02 | **独立复审收口，`status` 保持 `review`。** 保留 control 不参与 verdict 的冻结边界；堵金额别名、协议失败 claim 丢失、manifest 混合集合及 formal 路径绕过；补正确总计正向合成重放。只跑零额度门禁，旧证据与 M1 条件不变 |
+| v0.17 | 2026-09-05 | **独立复审收口，`status` 保持 `review`。** 保留 control 不参与 verdict 的冻结边界；堵金额别名、协议失败 claim 丢失、manifest 混合集合及 formal 路径绕过；补正确总计正向合成重放。只跑零额度门禁，旧证据与 M1 条件不变 |
 | v0.16 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** formal v2 fixture-set 指纹、scope 硬失败与指标 4 分子、bounded evidence、四硬字段两侧值、口述 span ordinal 及纯合成 CI 回归全部落地并通过零额度门禁；v1 / 旧 fixtures 不回填，不运行真实 agent，不开始 M1 |
 | v0.15 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；按 §6 待建项测试先行，只跑零额度门禁。第一次 v1 报告、旧 fixtures、阈值 / 分母、ordinal join 与四硬字段不变，真实 agent 与 M1 均不启动 |
 | v0.14 | 2026-08-30 | **第一次 M0 正式 `no_go` 回流，`status: in-progress → draft`。** 永久记录 first/adjudications/final SHA 与 `fixtures/local/m0-2026-08-24` 不可变；口述金额 `60/62` 硬失败，合计可获得率 `4/20`、假警报率 `6/7`。新增 formal bounded `candidateClaims` + 唯一 `expectedClaim` 身份、scope-invalid / eligible 错报 decoy 数必须为 0、指标 4 只计与 expected claim 相等的 scope-valid 分子（file 分母 / 0.70 不变）；口述 expected 用第一处交易 span 强制 `1..N`，不改 ordinal full outer join。formal envelope 升 v2，增加完整 fixture-set hash、bounded 对账证据与 expected/predicted 四硬字段值；规定合成 CI scope 回归、真实修正真值只进新 ignored 集、后续只用独立新样本复测。M0 五工具 / 四列单 claim、四硬字段、确认策略与全部阈值不变 |
