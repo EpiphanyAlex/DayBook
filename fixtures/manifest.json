@@ -12,6 +12,42 @@
       "enabled": true,
       "addedOn": "2026-08-17",
       "flaky": false
+    },
+    {
+      "id": "synthetic-scope-invalid-report",
+      "dir": "fixtures/ci/2026-08-30-total-scope/scope-invalid-report",
+      "expected": "expected.json",
+      "pool": "screenshot",
+      "enabled": true,
+      "addedOn": "2026-09-02",
+      "flaky": false
+    },
+    {
+      "id": "synthetic-keyword-not-gate",
+      "dir": "fixtures/ci/2026-08-30-total-scope/keyword-not-gate",
+      "expected": "expected.json",
+      "pool": "utterance",
+      "enabled": true,
+      "addedOn": "2026-09-02",
+      "flaky": false
+    },
+    {
+      "id": "synthetic-eligible-decoy",
+      "dir": "fixtures/ci/2026-08-30-total-scope/eligible-decoy",
+      "expected": "expected.json",
+      "pool": "control",
+      "enabled": true,
+      "addedOn": "2026-09-02",
+      "flaky": false
+    },
+    {
+      "id": "synthetic-same-triple-decoy",
+      "dir": "fixtures/ci/2026-08-30-total-scope/same-triple-decoy",
+      "expected": "expected.json",
+      "pool": "control",
+      "enabled": true,
+      "addedOn": "2026-09-02",
+      "flaky": false
     }
   ]
 }

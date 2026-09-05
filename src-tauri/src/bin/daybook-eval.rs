@@ -33,7 +33,7 @@ use daybook_lib::{
     agent::runtime::AgentRuntime,
     domain::confirm,
     eval::{
-        expected::ExpectedSet,
+        expected::{evaluate_scope, ExpectedSet},
         export, formal,
         init::{self, InitOptions},
         join::{degraded_set_match, ordinal_full_outer_join},
@@ -44,7 +44,10 @@ use daybook_lib::{
             predictions_from_drafted_json, replay_fixture, scratch_root,
             utterance_substring_violations, FixtureEnv,
         },
-        report::{Attribution, CaseReport, Report},
+        report::{
+            build_hard_field_diffs, build_reconciliation_evidence, reported_claim_identity,
+            Attribution, CaseReport, Report,
+        },
         EvalError, EvalResult,
     },
 };
@@ -282,26 +285,29 @@ fn m0_go_no_go(flags: &Flags) -> EvalResult<u8> {
             sidecar.display()
         )));
     }
+    m0::ensure_private_report_path(&options.root, output)?;
     ensure_m0_manifest_location(&options.root, &options.manifest)?;
     let manifest_bytes = std::fs::read(&options.manifest)?;
-    let manifest = Manifest::load(&options.manifest)?;
+    let manifest = Manifest::from_bytes(&manifest_bytes)?;
     let cases = manifest.validate_m0(&options.root, &options.manifest)?;
+    let fixture_set = m0::snapshot_fixture_set_from_manifest(
+        &options.root,
+        &options.manifest,
+        &cases,
+        &manifest_bytes,
+    )?;
     let async_runtime = tokio::runtime::Runtime::new()
         .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
     let report = async_runtime.block_on(async {
         let agent = AgentRuntime::claude_default();
         formal::run_first(&agent, &cases).await
     })?;
-    if std::fs::read(&options.manifest)? != manifest_bytes {
-        return Err(EvalError::Manifest(
-            "正式运行期间 manifest 发生变化，拒绝保存混合样本报告".to_owned(),
-        ));
-    }
     let written = m0::save_first(
         &report,
         &options.root,
         &options.manifest,
-        &manifest_bytes,
+        &cases,
+        &fixture_set,
         output,
     )?;
     println!("✓ M0 首轮报告已永久保存：{}", written.report_path.display());
@@ -362,6 +368,7 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
     let first_bytes = std::fs::read(&first_path)?;
     let first = m0::read_first(&first_path)?;
+    m0::ensure_private_report_path(&root, &first_path)?;
     let targets = m0::diagnosis_targets(&first);
     if targets.is_empty() {
         return Err(EvalError::Usage(
@@ -378,17 +385,22 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
             output.display()
         )));
     }
-    ensure_m0_manifest_location(&root, &root.join(&first.manifest_path))?;
-    let manifest_path = m0::ensure_manifest_unchanged(&root, &first)?;
-    let manifest = Manifest::load(&manifest_path)?;
+    m0::ensure_private_report_path(&root, &output)?;
+    let manifest_path = root.join(&first.manifest_path);
+    ensure_m0_manifest_location(&root, &manifest_path)?;
+    let manifest_bytes = std::fs::read(&manifest_path)?;
+    let manifest = Manifest::from_bytes(&manifest_bytes)?;
     let cases = manifest.validate_m0(&root, &manifest_path)?;
+    m0::snapshot_fixture_set_from_manifest(&root, &manifest_path, &cases, &manifest_bytes)?;
+    let fixture_set = m0::fixture_set_from_first(&first)?;
+    m0::ensure_fixture_set_for_first(&root, &first, &cases)?;
     let async_runtime = tokio::runtime::Runtime::new()
         .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
     let diagnosis = async_runtime.block_on(async {
         let agent = AgentRuntime::claude_default();
-        formal::run_diagnosis(&agent, &cases, &targets, &first.report_id).await
+        formal::run_diagnosis(&agent, &cases, &targets, &first.report_id, &fixture_set).await
     })?;
-    m0::ensure_manifest_unchanged(&root, &first)?;
+    m0::ensure_fixture_set_for_first(&root, &first, &cases)?;
     m0::write_diagnosis_new(&output, &diagnosis)?;
     if std::fs::read(&first_path)? != first_bytes {
         return Err(EvalError::Fixture(
@@ -497,6 +509,14 @@ async fn run_case(
 
     let (outcome, expected) = official.expect("rounds ≥ 1");
     let degraded = live::degraded_for(&expected, &outcome)?;
+    let predicted = predictions_from_drafted_json(&outcome.database, &outcome.attempt_id)?;
+    let hard_field_diffs = build_hard_field_diffs(&expected.items, &predicted, &outcome.join);
+    let reconciliation_evidence =
+        build_reconciliation_evidence(expected.reconciliation_scope.as_ref(), &outcome.check);
+    let scope_evaluation = evaluate_scope(
+        expected.reconciliation_scope.as_ref(),
+        reported_claim_identity(&outcome.check).as_ref(),
+    );
     let attribution = attribution_of(&outcome.database, &outcome.attempt_id)?;
     let unparsed_note = outcome.check.unparsed_note.clone().unwrap_or_default();
     let join = outcome.join.clone();
@@ -510,6 +530,7 @@ async fn run_case(
         reconciliation_status: outcome.check.reconciliation_status.clone(),
         confirmation_policy: outcome.check.confirmation_policy.clone(),
         unparsed_note: unparsed_note.clone(),
+        scope_evaluation,
         stated_item_count: expected.stated_item_count(),
         duration_ms: Some(outcome.duration_ms),
         usage: outcome.usage.clone(),
@@ -524,6 +545,8 @@ async fn run_case(
         reconciliation_status: outcome.check.reconciliation_status.clone(),
         confirmation_policy: outcome.check.confirmation_policy.clone(),
         unparsed_note,
+        hard_field_diffs,
+        reconciliation_evidence,
         matched: join.matched_count(),
         missed: join.missed_count(),
         extra: join.extra_count(),
@@ -660,6 +683,13 @@ fn score_in_scratch(
     })?;
 
     let unparsed_note = check.unparsed_note.clone().unwrap_or_default();
+    let hard_field_diffs = build_hard_field_diffs(&expected.items, &predicted, &join);
+    let reconciliation_evidence =
+        build_reconciliation_evidence(expected.reconciliation_scope.as_ref(), &check);
+    let scope_evaluation = evaluate_scope(
+        expected.reconciliation_scope.as_ref(),
+        reported_claim_identity(&check).as_ref(),
+    );
     let case_passed = join.is_clean_source();
     let outcome = CaseOutcome {
         id: case.id.clone(),
@@ -670,6 +700,7 @@ fn score_in_scratch(
         reconciliation_status: check.reconciliation_status.clone(),
         confirmation_policy: check.confirmation_policy.clone(),
         unparsed_note: unparsed_note.clone(),
+        scope_evaluation,
         stated_item_count: expected.stated_item_count(),
         duration_ms: None,
         usage: None,
@@ -684,6 +715,8 @@ fn score_in_scratch(
         reconciliation_status: check.reconciliation_status,
         confirmation_policy: check.confirmation_policy,
         unparsed_note,
+        hard_field_diffs,
+        reconciliation_evidence,
         matched: join.matched_count(),
         missed: join.missed_count(),
         extra: join.extra_count(),
@@ -698,4 +731,131 @@ fn score_in_scratch(
         trial_diagnostics: None,
     };
     Ok((report, outcome))
+}
+
+#[cfg(test)]
+mod eval {
+    use super::*;
+
+    #[test]
+    fn synthetic_eligible_decoy_correct_claim_is_exact() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let source = root.join("fixtures/ci/2026-08-30-total-scope/eligible-decoy");
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["input.png", "expected.json", "env.json", "tool-calls.json"] {
+            std::fs::copy(source.join(name), directory.path().join(name)).unwrap();
+        }
+        let case = ValidatedCase {
+            id: "synthetic-correct-total".to_owned(),
+            pool: daybook_lib::eval::manifest::Pool::Screenshot,
+            flaky: false,
+            sample: None,
+            dir: directory.path().to_path_buf(),
+            expected_path: directory.path().join("expected.json"),
+            env_path: directory.path().join("env.json"),
+            tool_calls_path: Some(directory.path().join("tool-calls.json")),
+        };
+        let (_, wrong) = score_one(&case).unwrap();
+        assert!(wrong.scope_evaluation.as_ref().unwrap().scope_violation);
+        let calls_path = case.tool_calls_path.as_ref().unwrap();
+        let mut calls: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(calls_path).unwrap()).unwrap();
+        let claim = calls["calls"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|call| call["tool"] == "report_source_total")
+            .unwrap();
+        claim["arguments"]["amountMinor"] = serde_json::json!("300");
+        claim["arguments"]["evidenceText"] = serde_json::json!("VIEWPORT TOTAL 3.00 AUD");
+        std::fs::write(calls_path, serde_json::to_vec(&calls).unwrap()).unwrap();
+        let (case_report, correct) = score_one(&case).unwrap();
+        let evidence = case_report.reconciliation_evidence.as_ref().unwrap();
+        assert_eq!(evidence.reported_claim_matches_expected, Some(true));
+        assert!(!evidence.scope_violation);
+        let before = daybook_lib::eval::metrics::total_availability(&[&wrong]);
+        let after = daybook_lib::eval::metrics::total_availability(&[&correct]);
+        assert_eq!((before.num, before.den), (Some(0), 1));
+        assert_eq!((after.num, after.den), (Some(1), 1));
+        let report = Report::build("replay", vec![case_report], &[correct]);
+        assert_eq!(report.scope_invalid_total_reports, 0);
+        assert_eq!(report.verdict, "go");
+    }
+
+    #[test]
+    fn synthetic_total_scope_fixture_catches_no_go() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let manifest_path = root.join("fixtures/manifest.json");
+        let manifest = Manifest::load(&manifest_path).unwrap();
+        let cases = manifest.validate(&root).unwrap();
+        let selected = cases
+            .iter()
+            .filter(|case| case.id.starts_with("synthetic-"))
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 4);
+
+        let mut reports = Vec::new();
+        let mut outcomes = Vec::new();
+        for case in selected {
+            let expected = ExpectedSet::load(&case.expected_path).unwrap();
+            let input = FixtureEnv::load(&case.env_path)
+                .map(|env| case.dir.join(env.source.input))
+                .unwrap();
+            for path in [
+                case.expected_path.clone(),
+                case.env_path.clone(),
+                case.tool_calls_path.clone().unwrap(),
+                input.clone(),
+            ] {
+                let bytes = std::fs::read(path).unwrap();
+                let content = String::from_utf8_lossy(&bytes);
+                assert!(!content.contains("fixtures/local/"));
+                assert!(!content.contains("output/m0-eval/"));
+            }
+            expected
+                .validate_formal(&case.expected_path, &input)
+                .unwrap();
+            let (report, outcome) = score_one(case).unwrap();
+            reports.push(report);
+            outcomes.push(outcome);
+        }
+        let report = Report::build("replay", reports, &outcomes);
+        assert_eq!(report.scope_invalid_total_reports, 1);
+        assert_eq!(
+            report
+                .cases
+                .iter()
+                .filter(|case| case
+                    .reconciliation_evidence
+                    .as_ref()
+                    .is_some_and(|evidence| evidence.scope_violation))
+                .count(),
+            3,
+            "对照栏仍保留逐例 violation 证据"
+        );
+        assert_eq!(report.verdict, "no_go");
+
+        let keyword = report
+            .cases
+            .iter()
+            .find(|case| case.id == "synthetic-keyword-not-gate")
+            .unwrap();
+        assert_eq!(keyword.reconciliation_status, "not_applicable");
+        assert!(keyword.case_passed);
+        assert!(
+            keyword
+                .reconciliation_evidence
+                .as_ref()
+                .unwrap()
+                .reported
+                .is_none(),
+            "仅有合计关键词不能强制 report_source_total"
+        );
+    }
 }

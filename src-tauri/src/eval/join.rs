@@ -257,6 +257,8 @@ mod eval {
             amount_minor: amount.to_owned(),
             currency: "AUD".to_owned(),
             direction: "expense".to_owned(),
+            evidence_span_start: None,
+            evidence_span_end: None,
             merchant: Some("SHOP".to_owned()),
         }
     }

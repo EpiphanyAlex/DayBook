@@ -47,7 +47,7 @@ impl DaybookMcp {
     }
 
     #[tool(
-        description = "回报来源原件明确写出的合计；总共/一共/合计/总计/TOTAL 均不可漏报，且不能自行加总生成"
+        description = "仅当原件有唯一、覆盖当前不可变来源全部适用交易的合计时回报；任意 viewport 即完整来源边界，关键词只作候选。月度 viewport 外、分页、按日、分类、单笔语义、子组合计都不报告；有效 claim 与无效 decoy 若有相同 amount/currency/kind 则两者都不报告，也不能自行加总生成"
     )]
     async fn report_source_total(
         &self,

@@ -1,0 +1,7 @@
+{
+  "calls":[
+    {"tool":"read_source","arguments":{"sourceId":"33333333-3333-4333-8333-333333333333"}},
+    {"tool":"draft_transaction","arguments":{"sourceId":"33333333-3333-4333-8333-333333333333","evidenceText":"咖啡 1 澳元","sourceOrdinal":1,"evidenceSpan":{"start":0,"end":7},"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","baseAmountMinor":"100","baseCurrency":"AUD","ratePpm":"1000000","direction":"expense","merchant":"咖啡","category":null,"channel":null,"confidence":99}},
+    {"tool":"complete_source","arguments":{"sourceId":"33333333-3333-4333-8333-333333333333","itemCount":1,"unparsedNote":""}}
+  ]
+}

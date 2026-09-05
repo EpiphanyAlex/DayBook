@@ -17,6 +17,7 @@
 use serde::Serialize;
 
 use super::{
+    expected::ScopeEvaluation,
     join::{DegradedMatch, HardField, OrdinalJoin, HARD_FIELDS},
     manifest::Pool,
 };
@@ -162,6 +163,8 @@ pub struct CaseOutcome {
     pub reconciliation_status: String,
     pub confirmation_policy: String,
     pub unparsed_note: String,
+    /// 新 formal 的 claim identity 判定；旧普通夹具为 `None`，保持向后兼容。
+    pub scope_evaluation: Option<ScopeEvaluation>,
     /// 口述原文里说了几笔（指标 6 的基准）。
     pub stated_item_count: i64,
     /// 指标 9：只记录，不参与 verdict。重放路径为 `None`。
@@ -363,7 +366,14 @@ pub fn total_availability(cases: &[&CaseOutcome]) -> Ratio {
         .collect();
     let obtained = files
         .iter()
-        .filter(|case| matches!(case.reconciliation_status.as_str(), "passed" | "failed"))
+        .filter(|case| {
+            let reconciled = matches!(case.reconciliation_status.as_str(), "passed" | "failed");
+            reconciled
+                && case
+                    .scope_evaluation
+                    .as_ref()
+                    .is_none_or(|scope| scope.exact_eligible_report)
+        })
         .count() as i64;
     Ratio::new(obtained, files.len() as i64)
 }
@@ -426,7 +436,11 @@ pub fn overall_verdict(pools: &[PoolReport], decision_metrics: &[Metric]) -> &'s
 #[cfg(test)]
 mod eval {
     use super::*;
-    use crate::eval::join::{FreeTextField, MatchedPair, PredictedItem};
+    use crate::eval::{
+        expected::ScopeEvaluation,
+        join::{FreeTextField, MatchedPair, PredictedItem},
+        report::Report,
+    };
 
     fn clean_pair(ordinal: i64) -> MatchedPair {
         MatchedPair {
@@ -451,6 +465,7 @@ mod eval {
             reconciliation_status: status.to_owned(),
             confirmation_policy: "single_only".to_owned(),
             unparsed_note: String::new(),
+            scope_evaluation: None,
             duration_ms: None,
             usage: None,
         }
@@ -766,6 +781,73 @@ mod eval {
 
     /// `PredictedItem` 参与聚合时不该被这里悄悄读到——留一条编译期锚点，
     /// 防止有人把「预测侧」的构造挪进 metrics 而绕开 `drafted_json`。
+    #[test]
+    fn formal_scope_invalid_total_reports_must_be_zero() {
+        let mut invalid = case(
+            "scope-invalid",
+            "file",
+            OrdinalJoin {
+                matched: vec![clean_pair(1)],
+                ..OrdinalJoin::default()
+            },
+            "passed",
+        );
+        invalid.scope_evaluation = Some(ScopeEvaluation {
+            reported_claim_matches_expected: Some(false),
+            scope_violation: true,
+            exact_eligible_report: false,
+        });
+        let report = Report::build("live", Vec::new(), &[invalid]);
+        assert_eq!(report.scope_invalid_total_reports, 1);
+        assert_eq!(
+            report.verdict, "no_go",
+            "scope transcript 硬失败不能被指标 4–8 吸收"
+        );
+    }
+
+    #[test]
+    fn formal_total_availability_counts_only_scope_valid_reports() {
+        let mut cases = (0..10)
+            .map(|index| {
+                let mut value = case(
+                    &format!("case-{index}"),
+                    "file",
+                    OrdinalJoin {
+                        matched: vec![clean_pair(1)],
+                        ..OrdinalJoin::default()
+                    },
+                    "passed",
+                );
+                value.scope_evaluation = Some(ScopeEvaluation {
+                    reported_claim_matches_expected: Some(index < 7),
+                    scope_violation: index >= 7,
+                    exact_eligible_report: index < 7,
+                });
+                value
+            })
+            .collect::<Vec<_>>();
+        let refs = cases.iter().collect::<Vec<_>>();
+        let ratio = total_availability(&refs);
+        assert_eq!((ratio.num, ratio.den), (Some(7), 10));
+        assert_eq!(
+            ratio.judge(Threshold::AtLeast(TOTAL_AVAILABILITY_MIN_PERMILLE)),
+            Verdict::Pass
+        );
+
+        cases[6].scope_evaluation = Some(ScopeEvaluation {
+            reported_claim_matches_expected: Some(false),
+            scope_violation: true,
+            exact_eligible_report: false,
+        });
+        let refs = cases.iter().collect::<Vec<_>>();
+        let ratio = total_availability(&refs);
+        assert_eq!((ratio.num, ratio.den), (Some(6), 10));
+        assert_eq!(
+            ratio.judge(Threshold::AtLeast(TOTAL_AVAILABILITY_MIN_PERMILLE)),
+            Verdict::Fail
+        );
+    }
+
     #[test]
     fn metrics_consume_joins_not_raw_predictions() {
         let sample = PredictedItem {

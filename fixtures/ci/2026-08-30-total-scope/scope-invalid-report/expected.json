@@ -1,0 +1,16 @@
+{
+  "_": "完全合成：月度合计覆盖 viewport 外交易；即使数值碰巧等于当前两条草稿和也仍 scope-invalid。",
+  "sourceKind": "file",
+  "reconciliationScope": {
+    "status": "scope_invalid",
+    "reason": "outside_viewport",
+    "expectedClaim": null,
+    "candidateClaims": [
+      {"amountMinor":"300","currency":"AUD","kind":"expense_total","scope":"invalid","reason":"outside_viewport"}
+    ]
+  },
+  "items": [
+    {"sourceOrdinal":1,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","direction":"expense","merchant":"ALPHA"},
+    {"sourceOrdinal":2,"occurredOn":"2026-08-30","amountMinor":"200","currency":"AUD","direction":"expense","merchant":"BETA"}
+  ]
+}

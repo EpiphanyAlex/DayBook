@@ -1,0 +1,16 @@
+{
+  "_":"完全合成：有效来源总计旁有不同三元组的无效分类小计。",
+  "sourceKind":"file",
+  "reconciliationScope":{
+    "status":"eligible","reason":"current_source_all_applicable",
+    "expectedClaim":{"amountMinor":"300","currency":"AUD","kind":"expense_total"},
+    "candidateClaims":[
+      {"amountMinor":"300","currency":"AUD","kind":"expense_total","scope":"valid","reason":"current_source_all_applicable"},
+      {"amountMinor":"100","currency":"AUD","kind":"expense_total","scope":"invalid","reason":"category_group"}
+    ]
+  },
+  "items":[
+    {"sourceOrdinal":1,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","direction":"expense","merchant":"GAMMA"},
+    {"sourceOrdinal":2,"occurredOn":"2026-08-30","amountMinor":"200","currency":"AUD","direction":"expense","merchant":"DELTA"}
+  ]
+}

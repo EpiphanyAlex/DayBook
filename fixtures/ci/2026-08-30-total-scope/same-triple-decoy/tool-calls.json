@@ -1,0 +1,9 @@
+{
+  "calls":[
+    {"tool":"read_source","arguments":{"sourceId":"55555555-5555-4555-8555-555555555555"}},
+    {"tool":"draft_transaction","arguments":{"sourceId":"55555555-5555-4555-8555-555555555555","evidenceText":"2026-08-30 EPSILON 1.00 AUD","sourceOrdinal":1,"evidenceSpan":null,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","baseAmountMinor":"100","baseCurrency":"AUD","ratePpm":"1000000","direction":"expense","merchant":"EPSILON","category":null,"channel":null,"confidence":99}},
+    {"tool":"draft_transaction","arguments":{"sourceId":"55555555-5555-4555-8555-555555555555","evidenceText":"2026-08-30 ZETA 2.00 AUD","sourceOrdinal":2,"evidenceSpan":null,"occurredOn":"2026-08-30","amountMinor":"200","currency":"AUD","baseAmountMinor":"200","baseCurrency":"AUD","ratePpm":"1000000","direction":"expense","merchant":"ZETA","category":null,"channel":null,"confidence":99}},
+    {"tool":"report_source_total","arguments":{"sourceId":"55555555-5555-4555-8555-555555555555","amountMinor":"300","currency":"AUD","kind":"expense_total","evidenceText":"DAY SUBTOTAL 3.00 AUD"}},
+    {"tool":"complete_source","arguments":{"sourceId":"55555555-5555-4555-8555-555555555555","itemCount":2,"unparsedNote":""}}
+  ]
+}

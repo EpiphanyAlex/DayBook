@@ -9,13 +9,16 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use super::{
-    expected::ExpectedSet,
+    expected::{evaluate_scope, ExpectedSet},
     live,
-    m0::DIAGNOSIS_ROUNDS,
+    m0::{FixtureSetSnapshot, DIAGNOSIS_ROUNDS, FORMAT_VERSION},
     manifest::ValidatedCase,
     metrics::CaseOutcome,
-    replay::{scratch_root, FixtureEnv},
-    report::{Attribution, CaseReport, Report},
+    replay::{predictions_from_drafted_json, scratch_root, FixtureEnv},
+    report::{
+        build_hard_field_diffs, build_reconciliation_evidence, reported_claim_identity,
+        Attribution, CaseReport, Report,
+    },
     EvalResult,
 };
 use crate::{agent::runtime::AgentRuntime, db::Database};
@@ -48,6 +51,14 @@ async fn run_once(
     let _ = std::fs::remove_dir_all(&scratch);
     let trial = trial?;
     let degraded = live::degraded_for(&expected, &trial)?;
+    let predicted = predictions_from_drafted_json(&trial.database, &trial.attempt_id)?;
+    let hard_field_diffs = build_hard_field_diffs(&expected.items, &predicted, &trial.join);
+    let reconciliation_evidence =
+        build_reconciliation_evidence(expected.reconciliation_scope.as_ref(), &trial.check);
+    let scope_evaluation = evaluate_scope(
+        expected.reconciliation_scope.as_ref(),
+        reported_claim_identity(&trial.check).as_ref(),
+    );
     let attribution = attribution_of(&trial.database, &trial.attempt_id)?;
     let unparsed_note = trial.check.unparsed_note.clone().unwrap_or_default();
     // 正式报告只需要知道「有没有解释」来审计指标 6，不保存可能复述真实原文的内容。
@@ -64,6 +75,7 @@ async fn run_once(
         reconciliation_status: trial.check.reconciliation_status.clone(),
         confirmation_policy: trial.check.confirmation_policy.clone(),
         unparsed_note: unparsed_note.clone(),
+        scope_evaluation,
         stated_item_count: expected.stated_item_count(),
         duration_ms: Some(trial.duration_ms),
         usage: trial.usage.clone(),
@@ -78,6 +90,8 @@ async fn run_once(
         reconciliation_status: trial.check.reconciliation_status,
         confirmation_policy: trial.check.confirmation_policy,
         unparsed_note: report_unparsed_note,
+        hard_field_diffs,
+        reconciliation_evidence,
         matched: join.matched_count(),
         missed: join.missed_count(),
         extra: join.extra_count(),
@@ -101,6 +115,8 @@ pub struct DiagnosisReport {
     pub mode: &'static str,
     pub stage: &'static str,
     pub first_report_id: String,
+    pub fixture_set_sha256: String,
+    pub fixture_file_count: usize,
     pub rounds_per_case: usize,
     pub cases: Vec<DiagnosisCase>,
 }
@@ -129,6 +145,7 @@ pub async fn run_diagnosis(
     cases: &[ValidatedCase],
     target_ids: &[String],
     first_report_id: &str,
+    fixture_set: &FixtureSetSnapshot,
 ) -> EvalResult<DiagnosisReport> {
     let targets: BTreeSet<&str> = target_ids.iter().map(String::as_str).collect();
     let selected = cases
@@ -175,10 +192,12 @@ pub async fn run_diagnosis(
         });
     }
     Ok(DiagnosisReport {
-        format_version: 1,
+        format_version: FORMAT_VERSION,
         mode: "m0_go_no_go",
         stage: "diagnosis",
         first_report_id: first_report_id.to_owned(),
+        fixture_set_sha256: fixture_set.sha256.clone(),
+        fixture_file_count: fixture_set.file_count,
         rounds_per_case: DIAGNOSIS_ROUNDS,
         cases: reports,
     })
@@ -250,6 +269,7 @@ mod eval {
     #[derive(Clone, Copy)]
     enum Action {
         QualityFailure,
+        InvalidClaimThenFailure,
         InfrastructureFailure,
         Pass,
     }
@@ -305,7 +325,7 @@ mod eval {
                         debug_events: Vec::new(),
                     })
                 }
-                Action::Pass => {}
+                Action::Pass | Action::InvalidClaimThenFailure => {}
             }
 
             let store = DraftStore::for_task(
@@ -316,6 +336,27 @@ mod eval {
                 },
             );
             store.handle("read_source", json!({"sourceId": task.source_id}))?;
+            if matches!(
+                self.actions[index.min(self.actions.len() - 1)],
+                Action::InvalidClaimThenFailure
+            ) {
+                store.handle(
+                    "report_source_total",
+                    json!({
+                        "sourceId": task.source_id, "amountMinor":"100", "currency":"AUD",
+                        "kind":"expense_total", "evidenceText":"界".repeat(161)
+                    }),
+                )?;
+                return Ok(AgentTaskResult {
+                    success: false,
+                    model_id: Some("scripted".to_owned()),
+                    agent_session_id: Some(task.agent_session_id),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    trace_events: store.trace_events(),
+                    debug_events: store.debug_events(),
+                });
+            }
             store.handle(
                 "draft_transaction",
                 json!({
@@ -430,6 +471,39 @@ mod eval {
         );
         assert!(!report.cases[0].case_passed);
         assert!(report.cases[1].case_passed);
+    }
+
+    #[tokio::test]
+    async fn formal_failed_attempt_preserves_successfully_reported_claim() {
+        let repository = tempfile::tempdir().unwrap();
+        let case = case(repository.path(), "failed-claim");
+        let mut expected: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&case.expected_path).unwrap()).unwrap();
+        expected["reconciliationScope"] = json!({
+            "status":"scope_invalid", "reason":"outside_viewport", "expectedClaim":null,
+            "candidateClaims":[{"amountMinor":"100", "currency":"AUD", "kind":"expense_total", "scope":"invalid", "reason":"outside_viewport"}]
+        });
+        std::fs::write(&case.expected_path, serde_json::to_vec(&expected).unwrap()).unwrap();
+        let runtime = AgentRuntime::new(Arc::new(SequenceBackend {
+            actions: vec![Action::InvalidClaimThenFailure],
+            calls: Arc::new(AtomicUsize::new(0)),
+        }));
+        let report = run_first(&runtime, &[case]).await.unwrap();
+        assert_eq!(report.scope_invalid_total_reports, 1);
+        assert_eq!(report.verdict, "no_go");
+        let case = &report.cases[0];
+        assert_eq!(
+            case.execution_error.as_deref(),
+            Some("agent.protocol_violation")
+        );
+        assert_eq!(case.reconciliation_status, "error");
+        let evidence = case.reconciliation_evidence.as_ref().unwrap();
+        let claim = evidence.reported.as_ref().unwrap();
+        assert_eq!(claim.amount_minor, "100");
+        assert_eq!(claim.evidence_excerpt.text.chars().count(), 160);
+        assert!(claim.evidence_excerpt.truncated);
+        assert!(evidence.computed_minor.is_none());
+        assert!(evidence.delta_minor.is_none());
     }
 
     #[tokio::test]

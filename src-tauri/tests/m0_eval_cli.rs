@@ -20,7 +20,7 @@ fn run_with(arguments: &[&str], path: Option<&str>) -> std::process::Output {
 
 fn first(path: &Path, base_verdict: &str) {
     let envelope = FormalEnvelope {
-        format_version: 1,
+        format_version: 2,
         mode: "m0_go_no_go".to_owned(),
         stage: "first".to_owned(),
         status: "incomplete".to_owned(),
@@ -30,6 +30,8 @@ fn first(path: &Path, base_verdict: &str) {
         created_at: "2026-08-24T00:00:00Z".to_owned(),
         manifest_path: "fixtures/local/m0/manifest.json".to_owned(),
         manifest_sha256: "0".repeat(64),
+        fixture_set_sha256: Some("1".repeat(64)),
+        fixture_file_count: Some(4),
         adjudications_file: Some("first.adjudications.json".to_owned()),
         first_report_id: None,
         failed_reconciliation_case_ids: vec!["m0-screenshot-001".to_owned()],
@@ -114,11 +116,58 @@ fn formal_first_rejects_existing_output_before_backend() {
 }
 
 #[test]
+fn formal_first_rejects_public_output_before_backend() {
+    let workspace = tempfile::tempdir().unwrap();
+    let output_path = workspace.path().join("public-first.json");
+    let output = run_with(
+        &[
+            "m0-go-no-go",
+            "--manifest",
+            workspace.path().join("missing.json").to_str().unwrap(),
+            "--root",
+            workspace.path().to_str().unwrap(),
+            "--out",
+            output_path.to_str().unwrap(),
+        ],
+        Some("/definitely/no-agent-cli"),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Git 已忽略"));
+    assert!(!output_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn formal_finalize_rejects_symlinked_private_root() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::create_dir(workspace.path().join(".git")).unwrap();
+    std::fs::create_dir(workspace.path().join("docs")).unwrap();
+    std::os::unix::fs::symlink(
+        workspace.path().join("docs"),
+        workspace.path().join("output"),
+    )
+    .unwrap();
+    let first_path = workspace.path().join("output/first.json");
+    first(&first_path, "go");
+    let before = std::fs::read(&first_path).unwrap();
+    let result = run_with(
+        &["m0-finalize", "--report", first_path.to_str().unwrap()],
+        Some("/definitely/no-agent-cli"),
+    );
+    assert_eq!(result.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("Git 已忽略"));
+    assert!(!workspace.path().join("docs/first.final.json").exists());
+    assert_eq!(std::fs::read(&first_path).unwrap(), before);
+}
+
+#[test]
 fn formal_cli_uses_fixed_exit_codes() {
     let workspace = tempfile::tempdir().unwrap();
-    let first_path = workspace.path().join("first.json");
+    std::fs::create_dir(workspace.path().join(".git")).unwrap();
+    std::fs::create_dir(workspace.path().join("output")).unwrap();
+    let first_path = workspace.path().join("output/first.json");
     first(&first_path, "go");
-    let final_path = workspace.path().join("final.json");
+    let final_path = workspace.path().join("output/final.json");
 
     let incomplete = run(&[
         "m0-finalize",
@@ -130,7 +179,7 @@ fn formal_cli_uses_fixed_exit_codes() {
     assert_eq!(incomplete.status.code(), Some(2));
     assert!(!final_path.exists());
 
-    let adjudications_path = workspace.path().join("first.adjudications.json");
+    let adjudications_path = workspace.path().join("output/first.adjudications.json");
     let mut adjudications: AdjudicationFile =
         serde_json::from_slice(&std::fs::read(&adjudications_path).unwrap()).unwrap();
     adjudications.adjudications[0].false_alarm = Some(false);
@@ -148,9 +197,11 @@ fn formal_cli_uses_fixed_exit_codes() {
     ]);
     assert_eq!(go.status.code(), Some(0));
 
-    let no_go_first = workspace.path().join("no-go-first.json");
+    let no_go_first = workspace.path().join("output/no-go-first.json");
     first(&no_go_first, "no_go");
-    let no_go_sidecar = workspace.path().join("no-go-first.adjudications.json");
+    let no_go_sidecar = workspace
+        .path()
+        .join("output/no-go-first.adjudications.json");
     let mut no_go_adjudications: AdjudicationFile =
         serde_json::from_slice(&std::fs::read(&no_go_sidecar).unwrap()).unwrap();
     no_go_adjudications.adjudications[0].false_alarm = Some(false);
@@ -159,7 +210,7 @@ fn formal_cli_uses_fixed_exit_codes() {
         serde_json::to_vec_pretty(&no_go_adjudications).unwrap(),
     )
     .unwrap();
-    let no_go_final = workspace.path().join("no-go-final.json");
+    let no_go_final = workspace.path().join("output/no-go-final.json");
     let no_go = run(&[
         "m0-finalize",
         "--report",

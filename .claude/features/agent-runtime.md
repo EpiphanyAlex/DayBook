@@ -1,6 +1,6 @@
 # Agent 运行时
 
-> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-08-23
+> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-09-02
 
 ## 一句话
 
@@ -58,8 +58,8 @@ AgentRuntime::parse_source
 - attempt 在 spawn 前插入。失败、超时、取消、协议失败按 attempt 作废草稿；作废是置 `voided_at` 并写 system 审计，不删行。
 - `cancel` 先向独立进程组发 SIGTERM，2 秒后仍未退出才 SIGKILL；等 attempt、草稿与 stdout/stderr 持久化收束后才返回。应用退出走同一条 shutdown，防止 helper 成为孤儿。
 - `trace` 常开且不含金额、原文或 prompt；`debug` 可见开关，含完整调用与原始流。两类日志启动时清除 14 天前文件。
-- 口述原文命中「总共 / 一共 / 合计 / 总计 / 独立 TOTAL」但未报告合计时，代码拒绝 `complete_source` 并保持会话可补救；这只是防已知漏报的保守词集，不是通用语义解析。
-- **该闸门有两条出口、且有界**：回报合计，或在 `unparsed_note` 里说明为什么没有合计（产出 `completed_with_gaps`）。词表认不出「一共去了三个地方」这类非金额用法，只留一条出口会让这种口述根本无法完成解析。同一次尝试内第二次仍未满足即 `agent.protocol_violation`；计数器与条目数不符那条各自独立（`total_marker_rejections` / `completion_rejections`）。
+- **合计关键词只在生产提示词与 live MCP 工具描述里作为候选信号，不是代码完成闸门。** `complete_source` 不扫描「总共 / 合计 / TOTAL」；月度 viewport 外、分页、按日、分类、单笔或子组合计即使带关键词也不得报告，agent 可以在 `reported_total_*` 为空时正常完成。
+- `complete_source` 的可恢复拒绝只处理**自报条目数与实际草稿数不符**；第二次仍不一致才是 `agent.protocol_violation`。合计 claim 的范围资格由 `src-tauri/prompts/m0-parse.md` 要求「当前不可变来源全部适用交易且身份唯一」，生产侧仍只保存单 claim 四列，不新增 scope / 多 claim schema；错报由 formal eval 硬契约抓。
 - **密封指纹从真命令读回来，不是手抄的清单**：`seal()` 是 `sealed_command` 与 `sealed_config_contract` 共用的那一处，指纹取后者的 argv + env（socket/token/prompt 用固定占位串，helper 只取文件名），所以「加一个 flag 而指纹不变」在构造上不可能，也不随安装位置漂移。
 - **CLI 发现只查静态路径，不 spawn 登录 shell**（枚举出的是**候选**，合格与否见上一条）：`PATH` + `~/.local/bin` + `~/.claude/local` + npm-global / volta / bun / yarn / pnpm + nvm / fnm / n 的带版本号目录（较新版本优先）。从 Finder 启动的 `.app` 只继承 `/usr/bin:/bin:/usr/sbin:/sbin`，`PATH` 那一路基本必然落空；这条只在打包后暴露，`cargo test` 里 `PATH` 是全的。发现只在构造 `AgentRuntime` 时做一次，装完 CLI 需重启应用。
 

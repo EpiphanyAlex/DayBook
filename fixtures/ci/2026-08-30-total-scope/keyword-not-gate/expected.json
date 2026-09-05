@@ -1,0 +1,9 @@
+{
+  "_": "完全合成：含合计关键词但 claim 覆盖月度外部范围；不报告仍正常完成。",
+  "sourceKind":"utterance",
+  "reconciliationScope":{
+    "status":"scope_invalid","reason":"outside_viewport","expectedClaim":null,
+    "candidateClaims":[{"amountMinor":"2000","currency":"AUD","kind":"expense_total","scope":"invalid","reason":"outside_viewport"}]
+  },
+  "items":[{"sourceOrdinal":1,"evidenceSpanStart":0,"evidenceSpanEnd":7,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","direction":"expense","merchant":"咖啡"}]
+}

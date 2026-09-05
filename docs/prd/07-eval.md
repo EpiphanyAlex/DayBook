@@ -1,9 +1,9 @@
 ---
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
-status: draft
+status: review
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.14
+date: 2026-09-02
+version: v0.17
 ---
 
 # 07 · 评测 Eval
@@ -249,7 +249,9 @@ manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层
 - `scope_invalid`：所有合计候选都覆盖 viewport 外 / 其他分页，或只按日 / 分类 / 单笔语义 / 子组；又或者多条候选里无法唯一确定一条 current-source 全覆盖 claim。即使语义上有一条有效 claim，只要另一个 invalid decoy 具有相同 amount/currency/kind、formal 无法只凭现有四列审计 agent 选中了哪条，也归 `reason = multiple_claims`、`expectedClaim = null`。其他无效原因取对应枚举；`candidateClaims` 非空。
 - `absent`：来源没有合计候选；`reason = no_claim`，`expectedClaim = null`，`candidateClaims = []`。
 
-正式评分新增一个**不属于十项阈值**的 transcript 计数 `scopeInvalidTotalReports`。成功写入 `reported_total_*` 且满足以下任一条件的 case 计入：① `status != eligible`；② `status = eligible`，但 agent 报告的 amount/currency/kind 与 `expectedClaim` 不逐字段相等。这样「一条有效总计 + 一个无效 decoy 小计」里错报 decoy 也不能借来源级 `eligible` 漏过。该计数必须精确等于 0；大于 0 直接 `no_go`，即使局部数字碰巧与草稿和相等也不豁免。指标 4 的分母和 `≥ 0.70` 阈值不动；分子只计 `eligible`、报告与 `expectedClaim` 相等且实际得到 `passed` / `failed`。普通 `--dry-run` / `--replay` 的旧夹具可不带该元数据；正式模式缺失、`eligible` 缺 `expectedClaim`，或 `candidateClaims` 证明 expected 三元组不唯一时，均须在 backend 前拒绝该 `eligible` 标注并要求改为 `scope_invalid / multiple_claims`。
+claim 金额须使用范围内的**规范十进制字符串**（解析后再转字符串仍逐字相同），拒绝前导零、正号与负零，防止 `300` / `0300` 等同值别名绕过三元组唯一性；币种与 kind 仍用既有枚举，不改交易四硬字段 join。
+
+正式评分新增一个**不属于十项阈值**的 transcript 计数 `scopeInvalidTotalReports`，只聚合截图池 + 口述池的正式判定集合；**对照栏保留逐 case scope evidence，但不改变硬计数或 verdict**（沿用本节冻结分池）。成功写入 `reported_total_*` 且满足以下任一条件的 case 计入：① `status != eligible`；② `status = eligible`，但 agent 报告的 amount/currency/kind 与 `expectedClaim` 不逐字段相等。这样「一条有效总计 + 一个无效 decoy 小计」里错报 decoy 也不能借来源级 `eligible` 漏过。尝试随后协议失败也不得抹去已成功写入的 claim：失败仍记录 `error`，计算值与差额不可得，但保留 reported 四列的 bounded 证据并判 scope。该计数必须精确等于 0；大于 0 直接 `no_go`，即使局部数字碰巧与草稿和相等也不豁免。指标 4 的分母和 `≥ 0.70` 阈值不动；分子只计 `eligible`、报告与 `expectedClaim` 相等且实际得到 `passed` / `failed`。普通 `--dry-run` / `--replay` 的旧夹具可不带该元数据；正式模式缺失、`eligible` 缺 `expectedClaim`，或 `candidateClaims` 证明 expected 三元组不唯一时，均须在 backend 前拒绝该 `eligible` 标注并要求改为 `scope_invalid / multiple_claims`。
 
 #### 关键用例跑多轮（2026-08-10 新增）
 
@@ -328,7 +330,7 @@ manifest 继续使用 `version: 1`，并新增两组**可选**元数据：顶层
 
 **agent 是非确定性的**，所以「复现一个 bug」不能是「重新跑一次 agent」。必须重放那次录下来的工具调用序列（依赖 `debug` 级日志，见 [ADR-0007](../adr/0007-local-observability-and-log-tiers.md)）。
 
-**夹具导出器**：`node scripts/export-fixture.mjs <agent_session_id>`（**待建**）把散落三处的数据打包成一个自包含目录：
+**夹具导出器**：`node scripts/export-fixture.mjs <agent_session_id>` 把散落三处的数据打包成一个自包含目录：
 
 ```
 fixtures/local/<date>-<slug>/
@@ -366,7 +368,7 @@ fixtures/local/<date>-<slug>/
 
 #### 第一次 no-go 的合成 CI 回归（2026-08-30 新增）
 
-新建 `fixtures/ci/2026-08-30-total-scope/`（待建）作为**完全合成**的零额度回归，不从 `fixtures/local/m0-2026-08-24` 复制截图、文本、金额、ID 或人工备注。至少覆盖四条：
+`fixtures/ci/2026-08-30-total-scope/` 是**完全合成**的零额度回归，不从 `fixtures/local/m0-2026-08-24` 复制截图、文本、金额、ID 或人工备注。至少覆盖四条：
 
 1. 一个带月度 / 分页 / 子组合计候选、但没有 current-source 全覆盖 claim 的合成来源；夹具故意重放一次错误的 `report_source_total`，formal scorer 必须得到 `scopeInvalidTotalReports = 1` 与 `no_go`，即使数字碰巧等于草稿和也一样；
 2. 一个含合计关键词但不报告局部 claim、正常 `complete_source` 的合成口述；重放后 `reported_total_*` 全空且协议完成，证明关键词不再是强制工具调用；
@@ -422,9 +424,9 @@ fixtures/local/<date>-<slug>/
 
 ## 6. 验收标准
 
-**分两块，因为它们的成本不同**（§3.6 的成本表）：2026-08-17 的零额度与 live 基线已落地；第一次 formal no-go 新增的 scope、报告证据与 fixture-set 指纹验收尚待实现，因此本文退回 `draft`。真跑 agent 的轮次仍**烧订阅额度、不进 CI**，本修正阶段禁止运行。
+**分两块，因为它们的成本不同**（§3.6 的成本表）：2026-08-17 的零额度与 live 基线已落地；第一次 formal no-go 新增的 scope、报告证据、fixture-set 指纹与纯合成回归也已实现。真跑 agent 的轮次仍**烧订阅额度、不进 CI**，本修正阶段禁止运行。
 
-### 零额度（既有项已落地；2026-08-30 no-go 修正项待建，全部进 `verify-m0.mjs --skip-live`）
+### 零额度（既有项与 2026-08-30 no-go 修正项均已落地，全部进 `verify-m0.mjs --skip-live`）
 
 - [x] `cargo fmt --all -- --check` · `cargo clippy --all-targets --all-features -- -D warnings` · `cargo test` 全绿
 - [x] `node scripts/eval.mjs --dry-run` 退出码 0——在不调用 agent 的情况下校验 eval 集完整性：`fixtures/manifest.json` 里每个启用的 case 都有输入、期望集合与 `env.json`，且路径都存在（§3.4）
@@ -477,17 +479,25 @@ fixtures/local/<date>-<slug>/
 - [x] `cargo test formal_cli_uses_fixed_exit_codes` 通过——正式 CLI 的 complete / incomplete / no-go / 运行错误分别退出 0 / 2 / 3 / 1
 - [x] `cargo test m0_initializer_creates_neutral_local_manifest_without_inputs` · `cargo test m0_initializer_refuses_committed_set` · `cargo test initializer_cli_needs_no_backend_and_writes_no_input_path` 通过——Node 薄壳接 Rust 子命令，零 backend，只建中性骨架，不复制、不记录真实输入路径，拒绝 `fixtures/ci/`
 
-**第一次 no-go 修正待建（测试先行）**：
+**第一次 no-go 修正（测试先行，已落地）**：
 
-- [ ] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——formal case 在 `status != eligible` 时报告合计（包括 valid claim 与 invalid decoy 三元组相等而归 `multiple_claims`），或在 `eligible` 时错报不同三元组 decoy、与 `expectedClaim` 不一致，均令 `scopeInvalidTotalReports > 0` 且 verdict 必为 `no_go`；局部合计碰巧等于草稿和也不能通过
-- [ ] `cargo test eval::formal_total_availability_counts_only_scope_valid_reports` 通过——指标 4 分母仍是全部正式 `kind = file`，阈值仍为 700；只有与 `expectedClaim` exact 匹配的 eligible 报告进分子，恢复旧分子时用例必须翻面
-- [ ] `cargo test eval::formal_utterance_ordinals_follow_first_transaction_appearance` 通过——新 formal 口述真值缺 span、ordinal 非 `1..N`、或 ordinal 与 span start 顺序冲突均在加载 backend 前拒绝；评分器仍走原 ordinal full outer join
-- [ ] `cargo test eval::formal_report_persists_expected_and_predicted_hard_fields` 通过——错误 / 漏读 / 多读项分别保存 expected / predicted 的四硬字段值与 pairing 状态；正确项可省略，`merchant/category/channel` 不混入
-- [ ] `cargo test eval::formal_report_persists_bounded_reconciliation_evidence` 通过——每 case 保存范围真值、reported / computed / delta；合计 evidence 超 160 code points 时按 Unicode code point 截断并带原长度 / `truncated`，完整原文与 `unparsed_note` 不进入报告
-- [ ] `cargo test eval::fixture_set_sha256_covers_all_formal_inputs` 通过——manifest、任一启用 case 的 expected / env / referenced input 改 1 byte 都改变 `fixtureSetSha256`；路径顺序变化不影响，未启用 case 不进入；报告带 `fixtureFileCount`
-- [ ] `cargo test eval::first_final_and_diagnosis_preserve_fixture_set` 通过——首轮保存前检测中途变化；final 继承 v2 首轮 hash 且不改首轮；diagnosis 在完整 set 改动后拒绝。第一次 v1 no-go 报告无需回填且保持可只读
-- [ ] `cargo test eval::synthetic_total_scope_fixture_catches_no_go` 通过——`fixtures/ci/2026-08-30-total-scope/` 的纯合成回归同时覆盖 scope-invalid 错报、eligible + 不同三元组 decoy 错报、相同三元组 decoy 的 `multiple_claims` 拒报与关键词非强制完成，不引用任何 `fixtures/local/` / `output/` 内容
-- [ ] `cargo test foundation::m0_total_claim_schema_stays_single` · `cargo test agent::total_markers_are_candidates_not_completion_gate` · `cargo test agent::prompt_requires_current_source_full_scope` 通过——不增加多 claim schema，删除关键词强制闸门，并把 current-source 全覆盖反例写进生产提示词
+- [x] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——formal case 在 `status != eligible` 时报告合计（包括 valid claim 与 invalid decoy 三元组相等而归 `multiple_claims`），或在 `eligible` 时错报不同三元组 decoy、与 `expectedClaim` 不一致，均令 `scopeInvalidTotalReports > 0` 且 verdict 必为 `no_go`；局部合计碰巧等于草稿和也不能通过
+- [x] `cargo test eval::formal_total_availability_counts_only_scope_valid_reports` 通过——指标 4 分母仍是全部正式 `kind = file`，阈值仍为 700；只有与 `expectedClaim` exact 匹配的 eligible 报告进分子，恢复旧分子时用例必须翻面
+- [x] `cargo test eval::formal_utterance_ordinals_follow_first_transaction_appearance` 通过——新 formal 口述真值缺 span、ordinal 非 `1..N`、或 ordinal 与 span start 顺序冲突均在加载 backend 前拒绝；评分器仍走原 ordinal full outer join
+- [x] `cargo test eval::formal_report_persists_expected_and_predicted_hard_fields` 通过——错误 / 漏读 / 多读项分别保存 expected / predicted 的四硬字段值与 pairing 状态；正确项可省略，`merchant/category/channel` 不混入
+- [x] `cargo test eval::formal_report_persists_bounded_reconciliation_evidence` 通过——每 case 保存范围真值、reported / computed / delta；合计 evidence 超 160 code points 时按 Unicode code point 截断并带原长度 / `truncated`，完整原文与 `unparsed_note` 不进入报告
+- [x] `cargo test eval::fixture_set_sha256_covers_all_formal_inputs` 通过——manifest、任一启用 case 的 expected / env / referenced input 改 1 byte 都改变 `fixtureSetSha256`；路径顺序变化不影响，未启用 case 不进入；报告带 `fixtureFileCount`
+- [x] `cargo test eval::first_final_and_diagnosis_preserve_fixture_set` 通过——首轮保存前检测中途变化；final 继承 v2 首轮 hash 且不改首轮；diagnosis 在完整 set 改动后拒绝。第一次 v1 no-go 报告无需回填且保持可只读
+- [x] `cargo test formal_first_rejects_public_output_before_backend` 通过——首轮在 backend 前拒绝 `output/` / `fixtures/local/` 外的持久路径；保存函数再次防御，final 只能与 immutable first 同目录，bounded 真实摘录与人工备注不能落到可提交 / 外部路径
+- [x] `cargo test eval::synthetic_total_scope_fixture_catches_no_go` 通过——`fixtures/ci/2026-08-30-total-scope/` 的纯合成回归同时覆盖 scope-invalid 错报、eligible + 不同三元组 decoy 错报、相同三元组 decoy 的 `multiple_claims` 拒报与关键词非强制完成，不引用任何 `fixtures/local/` / `output/` 内容
+- [x] `cargo test foundation::m0_total_claim_schema_stays_single` · `cargo test agent::total_markers_are_candidates_not_completion_gate` · `cargo test agent::prompt_requires_current_source_full_scope` 通过——不增加多 claim schema，删除关键词强制闸门，并把 current-source 全覆盖反例写进生产提示词
+
+- [x] `cargo test eval::formal_control_scope_violation_does_not_change_verdict` 通过——control 错报只留逐例证据，不改变正式硬计数与 verdict
+- [x] `cargo test eval::formal_claim_identity_rejects_numeric_aliases` 通过——拒绝 `0300` / `+300` / `-0` 等金额别名，保留规范负值 `net_change`
+- [x] `cargo test eval::formal_failed_attempt_preserves_successfully_reported_claim` 通过——脚本后端先成功报告无效 claim 再协议失败，错误状态与 scope 硬失败同时保留，对账摘录仍有界
+- [x] `cargo test eval::fixture_set_snapshot_rejects_changed_manifest_after_validation` 通过——manifest 解析与快照绑定同一次读取的原始字节，校验后修改不得形成旧 cases + 新 manifest 的混合集合
+- [x] `cargo test eval::formal_private_paths` · `cargo test eval::formal_diagnosis_writer_rejects_public_caller_path` · `cargo test formal_finalize_rejects_symlinked_private_root` 通过——拒绝不存在父目录中的 `..`、隐私根及子目录 symlink 逃逸；first / final / diagnosis 写入者均不能绕过路径检查
+- [x] `cargo test eval::synthetic_eligible_decoy_correct_claim_is_exact` 通过——同一纯合成来源的正确总计与错误 decoy 分别重放；正确时 exact=true、scope violation=false，指标 4 分子由 0 增至 1，分母不变
 
 ### 烧额度（2026-08-17 落地，**不进 CI**）
 
@@ -507,6 +517,16 @@ fixtures/local/<date>-<slug>/
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
 ## 7. 回流记录
+
+- **2026-09-02 · 收口独立复审，`status` 保持 `review`**（本节首次 no-go 修正；[`docs/PRD.md` §9.4](../PRD.md) 冻结分池）。
+  先补红测再修复：control scope 错报意外进入正式硬计数、金额字符串别名绕过同三元组 decoy、协议失败丢弃已写入 claim、manifest 解析与快照两次读取不绑定、未存在父目录的 `..` 与隐私根 symlink 逃逸。保留 control 只记录边界；formal claim 金额规范化校验不改变交易 join；失败证据保留 reported 而不伪造 computed/delta；所有 formal 写入共用最终路径复验，白名单固定在仓库根下。另补正确总计正向重放与 live MCP 描述逐项一致性回归。均为实现缺陷收口，不改冻结阈值 / 分母、旧报告、生产四列五工具或 M1 条件。
+
+- **2026-09-02 · 第一次 no-go 修正验收，本文由 `in-progress → review`**（§3.4–§3.6、§6）。
+  formal 新写 envelope 已升 v2：backend 前冻结并在首轮保存前复验 manifest + 每个启用 case 的 expected/env/referenced input；diagnosis 前后复验完整 set，final 继承 `fixtureSetSha256`，v1 只读不回填。评分器现以 bounded `candidateClaims` / exact `expectedClaim` 判 scope identity，`scopeInvalidTotalReports > 0` 直接 no-go，指标 4 仅收 scope-valid exact 报告且 file 分母 / 700 阈值不变。报告补 expected/predicted 四硬字段两侧值及 160-code-point 对账摘录；formal 口述 expected 用原始文本 span 强制 `1..N`。
+  `fixtures/ci/2026-08-30-total-scope/` 的四条纯合成重放覆盖 scope-invalid 错报、关键词非强制、不同三元组 decoy 与相同三元组 `multiple_claims`；不引用 `fixtures/local/` / `output/`。§6 十条新验收与完整 `node scripts/verify-m0.mjs --skip-live` 通过；未运行真实 agent、`--m0-go-no-go` 或 `--m0-diagnose`，第一次报告 / 旧 fixtures 未修改，M1 未开始。
+
+- **2026-09-02 · 第一次 no-go 修正开工，本文由 `draft → ready → in-progress`**（[PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步）。
+  PR #27 的 formal v2、scope truth、fixture-set 指纹、bounded evidence、四硬字段与口述 span ordinal 规格已独立 review 通过，维护者随后批准分阶段实施计划。本轮按 §6 的待建清单测试先行，只运行零额度门禁；第一次 v1 报告、旧 fixtures、阈值、指标 4 分母、ordinal full outer join 与四硬字段均不修改，真实 agent 与 M1 均不启动。
 
 - **2026-08-30 · 第一次 M0 正式 verdict 为 `no_go`，本文由 `in-progress → draft`**（[`docs/PRD.md` §9.4](../PRD.md)）。
   final 为 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`，`verdict = no_go`、exit 3；first / adjudications / final SHA-256 分别为 `1a8ead02a701aa99b3a1daa149cbe8f096b3ff93914cda79fa44f7fef2269384`、`61b5f98eca43a17b46f5df65cbf292c3b5ef87174443598b4cba6bfd2e4e35d4`、`e41426601bb52948cce39e7a65712ecb5ea435cf113eb4040db3ffc41ff28ca7`。截图池指标 1–3 全过；口述金额 `60/62` 低于 0.98，硬性 no-go；指标 4 为 `4/20`，指标 5 为 `6/7`。旧三份报告与 `fixtures/local/m0-2026-08-24` 永久保留，不修改、不重标、不回填新字段。
@@ -581,6 +601,9 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.17 | 2026-09-02 | **独立复审收口，`status` 保持 `review`。** 保留 control 不参与 verdict 的冻结边界；堵金额别名、协议失败 claim 丢失、manifest 混合集合及 formal 路径绕过；补正确总计正向合成重放。只跑零额度门禁，旧证据与 M1 条件不变 |
+| v0.16 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** formal v2 fixture-set 指纹、scope 硬失败与指标 4 分子、bounded evidence、四硬字段两侧值、口述 span ordinal 及纯合成 CI 回归全部落地并通过零额度门禁；v1 / 旧 fixtures 不回填，不运行真实 agent，不开始 M1 |
+| v0.15 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；按 §6 待建项测试先行，只跑零额度门禁。第一次 v1 报告、旧 fixtures、阈值 / 分母、ordinal join 与四硬字段不变，真实 agent 与 M1 均不启动 |
 | v0.14 | 2026-08-30 | **第一次 M0 正式 `no_go` 回流，`status: in-progress → draft`。** 永久记录 first/adjudications/final SHA 与 `fixtures/local/m0-2026-08-24` 不可变；口述金额 `60/62` 硬失败，合计可获得率 `4/20`、假警报率 `6/7`。新增 formal bounded `candidateClaims` + 唯一 `expectedClaim` 身份、scope-invalid / eligible 错报 decoy 数必须为 0、指标 4 只计与 expected claim 相等的 scope-valid 分子（file 分母 / 0.70 不变）；口述 expected 用第一处交易 span 强制 `1..N`，不改 ordinal full outer join。formal envelope 升 v2，增加完整 fixture-set hash、bounded 对账证据与 expected/predicted 四硬字段值；规定合成 CI scope 回归、真实修正真值只进新 ignored 集、后续只用独立新样本复测。M0 五工具 / 四列单 claim、四硬字段、确认策略与全部阈值不变 |
 | v0.13 | 2026-08-24 | **M0 正式 verdict 协议冻结并落地，`status` 保持 `in-progress`（真实样本尚未运行）。** 只有 `--m0-go-no-go` 产正式 verdict；指标 5 走首轮 immutable report + 独立 adjudications + 零额度 `--m0-finalize`；`--m0-diagnose` 对「首轮失败 ∪ flaky」各追加 3 轮并单写报告。补聚合作用域、正式退出码 0/1/2/3、case 质量失败继续 / 基础设施错误中止、manifest v1 可选 profile/sample 与正式 local / 构成 / 中性 ID 门禁，以及零 backend 的 `init-m0` 初始化器。阈值与样本构成未动 |
 | v0.12 | 2026-08-17 | **真跑 agent 的 eval 轮次落地——§3.6 成本表的两列现在都有实现。** 新增 `src-tauri/src/eval/live.rs` 与 `daybook-eval run`；`node scripts/eval.mjs` 不带参数即真跑一轮，`--trials N` 只对 `flaky` 用例生效且第 1 轮出正式数、其余进诊断栏，`--keep-runs <dir>`（规格外新增）让一次跑砸的轮次能直接变成回归夹具。**改了一处规格**：`--dry-run` 不再要求 `tool-calls.json`——一条还没跑过的用例没有工具调用可录，要求它有等于逼人先烧一轮额度才能加用例。§6 重排为「零额度」「烧额度」「待建」三块，待建只剩 `--no-memory`（M3）与一条人工核对。**烧额度那一路不进 CI。** |

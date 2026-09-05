@@ -2,8 +2,8 @@
 title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑地图
 status: ready
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.27
+date: 2026-09-02
+version: v0.28
 ---
 
 # Daybook 总 PRD
@@ -262,7 +262,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 
 第 9 步用固定文本而非真实语音：转写由 macOS 系统听写完成、音频不出本机、应用零代码（[ADR-0005 §1](./adr/0005-voice-and-system-integration.md)），所以脚本的被测对象是「文本 → 多笔草稿」这一段，转写本身不在测试范围。
 
-**截至 2026-08-24 的实施快照（历史，不是当前 status）**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，**其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕**，01 当时的文档为 v0.26、回到 `review`。[00 地基](./prd/00-foundation.md) v0.20、[02 导入](./prd/02-ingest.md) v0.16、[03 审核与草稿区](./prd/03-review.md) v0.17 当时同为 `review`。**那轮人工验收当场抓到一个自动门禁抓不到的实现缺陷**：「已装未登录」报的是 `agent.spawn_failed` 而非 `agent.not_authenticated`——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr；当天修复并补了一条以真实输出为样本的自动验收（[01 §7](./prd/01-agent-runtime.md)）。**同日跑完的后两条**：「手工拆密封」通过（放开一个内置工具即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、任务不下发）；「真实解析中看子进程日志」**只在解析结束后成立**——会话日志随任务结果一次性落盘，进行中看不到，与「解析入口无禁用态视觉」一并记为未修、留 M1。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线。M1 开工前的 token design system、证据区域定位退路与前端状态管理已于 2026-08-24 定案：[`design.md`](../design.md) v0.5；截图不加 bbox；TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互（[03 §3.8/§5](./prd/03-review.md)）。参考设计稿本身仍待按已回流规格重画。**当前状态以 §9.4 与 [`docs/prd/INDEX.md`](./prd/INDEX.md) 为准：00 v0.21、01 v0.27、03 v0.18、07 v0.14 均为 `draft`，02 v0.17 保持 `review`；M1 不开始。**
+**截至 2026-08-24 的实施快照（历史，不是当前 status）**：§9.3 的实现链路与统一脚本已于 2026-08-13 落地，当时 M0 四份 sub-PRD 一并进入 `review`。**2026-08-17 又发现 [01 Agent 运行时 §3.5](./prd/01-agent-runtime.md) 把「找到一个 CLI 文件」与「解析已经就绪」混成同一个状态：探测完成前界面可能短暂显示 ready，且普通文件也会被当作合格安装。**01 的规格因此被证伪并重写；修正已在 v0.23 实现批次落地并通过自动验收，**其 §6 的 5 条人工验收于 2026-08-23 在维护者本机全部实测执行完毕**，01 当时的文档为 v0.26、回到 `review`。[00 地基](./prd/00-foundation.md) v0.20、[02 导入](./prd/02-ingest.md) v0.16、[03 审核与草稿区](./prd/03-review.md) v0.17 当时同为 `review`。**那轮人工验收当场抓到一个自动门禁抓不到的实现缺陷**：「已装未登录」报的是 `agent.spawn_failed` 而非 `agent.not_authenticated`——真实 CLI 未登录时 stderr 为 0 字节、原因只在 stdout 的 stream-json 里，而失败分类器只读 stderr；当天修复并补了一条以真实输出为样本的自动验收（[01 §7](./prd/01-agent-runtime.md)）。**同日跑完的后两条**：「手工拆密封」通过（放开一个内置工具即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、任务不下发）；「真实解析中看子进程日志」**只在解析结束后成立**——会话日志随任务结果一次性落盘，进行中看不到，与「解析入口无禁用态视觉」一并记为未修、留 M1。上述状态都**不替代下一节的真实样本度量，也不构成 M0 go**。当前三栏界面是满足闸门与可操作性的功能基线。M1 开工前的 token design system、证据区域定位退路与前端状态管理已于 2026-08-24 定案：[`design.md`](../design.md) v0.5；截图不加 bbox；TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互（[03 §3.8/§5](./prd/03-review.md)）。参考设计稿本身仍待按已回流规格重画。**当前状态以 §9.4 与 [`docs/prd/INDEX.md`](./prd/INDEX.md) 为准：第一次 no-go 修正实现与零额度门禁已完成，00 v0.23、01 v0.29、03 v0.20、07 v0.17 均为 `review`，02 v0.17 保持 `review`；独立新样本正式复测仍待再次明确授权，M1 不开始。**
 
 ### 9.4 M0 的 go / no-go（2026-08-10 新增）
 
@@ -276,7 +276,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 
 结果必须按冻结口径解释，不能事后重标来改 verdict：截图池指标 1–3 全过；口述池金额准确率 `60/62`，低于 0.98，触发硬性 no-go；声明合计可获得率 `4/20`；总额校验假警报率 `6/7`。六个假警报的主要模式是把**超出截图 viewport 的月度合计、分页合计、按日合计、单笔或子组合计**误当成覆盖当前来源全部适用交易的声明合计。`m0-utterance-017` 的期望 ordinal 与「口述中实际交易首次出现顺序」冲突，这说明旧样本的标注有缺陷；**但旧真值、旧报告与第一次 no-go 均不修改、不重新解释**。修正后的真值只能进入一个新的 ignored 样本集，后续正式复测必须使用另一批独立新样本；旧集只作 challenge / regression。
 
-这次结果证伪了 [00 地基](./prd/00-foundation.md)、[01 Agent 运行时](./prd/01-agent-runtime.md)、[03 审核与草稿区](./prd/03-review.md) 与 [07 评测](./prd/07-eval.md) 的合计范围 / 正式报告契约，四份已按 [`docs/prd/CLAUDE.md`](./prd/CLAUDE.md) 退回 `draft`。**M1 不得开始**，先完成 M0 no-go 修正、零额度门禁与独立样本复测。
+这次结果证伪了 [00 地基](./prd/00-foundation.md)、[01 Agent 运行时](./prd/01-agent-runtime.md)、[03 审核与草稿区](./prd/03-review.md) 与 [07 评测](./prd/07-eval.md) 的合计范围 / 正式报告契约，四份曾按 [`docs/prd/CLAUDE.md`](./prd/CLAUDE.md) 退回 `draft`。2026-09-02，关键词降级、current-source scope、formal v2 完整 fixture-set 指纹、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI fixture 已实现，完整 `node scripts/verify-m0.mjs --skip-live` 通过，四份回到 `review`；未运行真实 agent / 新 formal，第一次报告与旧 fixtures 未修改。**M1 不得开始**，仍须经再次明确授权后用独立新样本完成正式复测。
 
 **样本量**：**20–30 张截图 + 20 段口述**。截图覆盖不同版式与至少两种币种；口述覆盖不同长度、语序倒装、省略主语、口语数字（「一百八」「180」「一百八十块」）。**样本采集与标注就是 [07 评测](./prd/07-eval.md) 的 eval 集起点**，不是一次性工作。
 
@@ -330,7 +330,7 @@ M0 天生横跨多份 sub-PRD——walking skeleton 就是这样。各份取最�
 
 M0 继续接受**任意 viewport 的截图**：来源边界是导入后不可变的那份截图 / 转写文本，不要求整页、整月或完整账单。`report_source_total` 在 M0 只支持**一条**声明合计，且该合计必须精确覆盖当前不可变来源中的**全部适用交易**：`expense_total` 覆盖其中全部支出，`income_total` 覆盖其中全部收入，`net_change` 覆盖其中全部收入与支出。合计若还覆盖 viewport 外的月度交易、其他分页，或只覆盖按日 / 分类 / 单笔 / 其他子集，即为 **scope-invalid**，不得报告；多个局部 claim 也不得挑一个硬塞进单 claim 字段；若有效总计与 invalid decoy 恰好拥有同一 amount/currency/kind 三元组，现有四列无法审计身份，M0 保守地都不报告。合计词只是候选信号，不构成「必须报告」的证明。
 
-这条不提前实现多 claim 生产 schema：`parse_attempts.reported_total_*` 四列与 M0 五工具不变。正式评测在 `expected.json` 中独立标注合计范围资格；`eligible` 还必须列出 bounded `candidateClaims`、固定 expected claim 的 amount/currency/kind 身份，并保证该三元组在候选中唯一，并增加一条不属于十项阈值的 transcript 硬契约：**scope-invalid 合计成功报告数必须为 0；来源有有效总计与 decoy 小计时，错报 decoy 同样计入；大于 0 即 no-go。** 指标 4 的分母仍是正式截图池全部 `kind = file` 来源、阈值仍是 `≥ 0.70`；其分子只承认与 expected claim exact 匹配且实际得到 `passed` / `failed` 的来源，不能靠局部合计抬高覆盖率。
+这条不提前实现多 claim 生产 schema：`parse_attempts.reported_total_*` 四列与 M0 五工具不变。正式评测在 `expected.json` 中独立标注合计范围资格；`eligible` 还必须列出 bounded `candidateClaims`、固定 expected claim 的 amount/currency/kind 身份，并保证该三元组在候选中唯一，并增加一条不属于十项阈值的 transcript 硬契约：**正式判定集合的 scope-invalid 合计成功报告数必须为 0（control 仍只记录逐例证据，不参与 verdict）；来源有有效总计与 decoy 小计时，错报 decoy 同样计入；大于 0 即 no-go。** 指标 4 的分母仍是正式截图池全部 `kind = file` 来源、阈值仍是 `≥ 0.70`；其分子只承认与 expected claim exact 匹配且实际得到 `passed` / `failed` 的来源，不能靠局部合计抬高覆盖率。
 
 **beachhead 与样本构成同批冻结**，见 [07 评测 §3.4](./prd/07-eval.md)「M0 go / no-go 的样本构成」：beachhead = 交易列表类截图；非 beachhead 来源（单笔小票、月结单）采 3–5 张进对照栏、如实报数但不参与判定；口述定长度分布。**那一节是样本构成的权威出处，本节是阈值与口径的权威出处**，两边不复述对方。
 
@@ -434,6 +434,7 @@ v1 只需保证数据形状（一条时间轴 + 两个实体）不挡住这条�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.28 | 2026-09-02 | **第一次 no-go 修正实现完成，产品范围与冻结口径不变。** 00/01/03/07 已回到 `review`：关键词只作候选、current-source 全覆盖提示词、formal v2 完整 fixture-set 指纹、scope-invalid=0、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI scope 回归均落地，完整零额度门禁通过。未运行真实 agent / 新 formal，旧报告 / fixtures 不改；独立样本复测仍待授权，M1 不开始 |
 | v0.27 | 2026-08-30 | **记录第一次 M0 正式 `no_go` 并冻结修正边界。** final `no_go` / exit 3：截图指标 1–3 全过，口述金额 `60/62` 硬失败，声明合计可获得率 `4/20`、假警报率 `6/7`；首次报告、裁定、final 与 `fixtures/local/m0-2026-08-24` 永久保留，不改写、不重标。新增 M0 单 claim 的 current-source 全覆盖资格、bounded candidate + 唯一 expected claim 身份与 scope-invalid / decoy 错报数必须为 0 的正式硬契约；指标 4 分母 / `≥0.70`、十项阈值、ordinal full outer join、四硬字段均不变。正式报告须持久化完整 fixture-set 哈希、bounded 对账证据与 expected/predicted 硬字段差异；后续只用独立新样本正式复测，旧集只作 challenge/regression。00/01/03/07 因规格被证伪退回 `draft`，M1 不开始 |
 | v0.26 | 2026-08-24 | **冻结并落地 M0 正式 verdict 的可执行流程，阈值数字未动。** 只有 `--m0-go-no-go` 能产生 §9.4 verdict；不带参数的 live 保留为 ad-hoc 兼容入口。指标 5 改为「首轮报告永久保存且 incomplete → 独立 adjudications → `--m0-finalize` 零额度定案」；`--m0-diagnose` 只对首轮失败与预标 flaky case 的并集追加 3 轮并写独立报告，不覆盖首轮。补聚合作用域、case 质量失败继续 / 基础设施错误中止、正式 manifest 门禁与退出码 0/1/2/3。同步 [07 评测](./prd/07-eval.md) v0.13；产品阈值与样本构成不变 |
 | v0.25 | 2026-08-24 | **M1 前置 R1 / R3 决定同步，产品范围不变。** [03 审核](./prd/03-review.md) v0.17 实测否决截图 bbox：错误高亮会误导证据核对，M1 保留完整原件 + `evidence_text`；前端状态选 TanStack Query v5 管 IPC 投影、screen reducer / 局部 state 管瞬时交互，不引入 Zustand。§9.2 与实施状态不再把区域高亮写成必然的 M1 实现项 |
