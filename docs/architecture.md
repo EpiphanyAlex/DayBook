@@ -2,15 +2,15 @@
 title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.13
+date: 2026-09-05
+version: v0.14
 ---
 
 # 系统架构基线
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：第一次 M0 正式结果为 `no_go` / exit 3，正在修正且不开始 M1。** 结构本身仍已落地；被证伪的是单 claim 的范围资格与 formal 报告证据契约。[00 地基](./prd/00-foundation.md) v0.21、[01 Agent 运行时](./prd/01-agent-runtime.md) v0.27、[03 审核](./prd/03-review.md) v0.18、[07 评测](./prd/07-eval.md) v0.14 均退回 `draft`；[02 导入](./prd/02-ingest.md) v0.17 只同步共享 scope 语义，保持 `review`。旧报告与旧样本永久保留，后续只用独立新样本正式复测（[`docs/PRD.md` §9.4](./PRD.md)）。
+> **当前状态：第一次 M0 正式结果仍为 `no_go` / exit 3；修正实现与零额度门禁已完成，独立新样本正式复测尚未授权，M1 不开始。** 结构本身仍已落地；单 claim 范围资格与 formal 报告证据契约已按 PR #27 修正。[00 地基](./prd/00-foundation.md) v0.23、[01 Agent 运行时](./prd/01-agent-runtime.md) v0.29、[03 审核](./prd/03-review.md) v0.20、[07 评测](./prd/07-eval.md) v0.17 与 [02 导入](./prd/02-ingest.md) v0.17 当前均为 `review`。旧报告与旧样本永久保留，后续只用独立新样本正式复测（[`docs/PRD.md` §9.4](./PRD.md)）。
 
 ---
 
@@ -158,6 +158,7 @@ version: v0.13
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.14 | 2026-09-02 | **同步第一次 no-go 修正进入 review。** 关键词降级、current-source scope 与 formal v2 完整证据契约已落地并通过零额度门禁；00/01/03/07 回到 `review`。架构组件、六表五工具、旧证据不可变与 M1 延后均不变；独立新样本正式复测仍待授权 |
 | v0.13 | 2026-08-30 | **同步第一次 M0 正式 `no_go` 状态。** 00/01/03/07 因 claim scope 与 formal 证据契约退回 `draft`，02 保持 `review`；架构组件、六表五工具与 M1 已定边界不变，本轮不开始 M1 |
 | v0.12 | 2026-08-24 | **关闭 A4。** M1 前端采用 TanStack Query v5 管 Tauri IPC 权威快照、screen reducer / 局部 state 管瞬时交互；不引入 Zustand。§6 补「Query cache 不是第二份业务状态」与 mutation 定向失效边界；两条写入路径与 Rust 业务真值边界不变 |
 | v0.11 | 2026-08-23 | **同步 M0 当前状态：[01 Agent 运行时](./prd/01-agent-runtime.md) §6 的后两条人工验收实测执行完毕（→ v0.26），五条至此全部跑完，`status` 仍为 `review`。** 「手工拆密封」通过——在 `PATH` 上放一个追加内置工具的 `claude` 同名包装即触发 `agent.tool_surface_unsealed`，界面给专用文案、应用照常启动、新来源导入成功而任务不下发，与 §4 的 fail-closed 边界一致。「真实解析中看子进程日志」只在解析结束后成立——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。**架构边界一字未改** |

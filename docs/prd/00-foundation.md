@@ -1,9 +1,9 @@
 ---
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
-status: draft
+status: review
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.21
+date: 2026-09-02
+version: v0.23
 ---
 
 # 00 · 地基 Foundation
@@ -609,7 +609,7 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 - [ ] `rg -n 'SUM\(base_amount_minor\)' src-tauri/src` 的每处命中都伴随 `GROUP BY base_currency` 或单本位币断言
 - [ ] `cargo test foundation::draft_requires_evidence` 通过——`source_id` 或 `evidence_text` 为空时插入 `draft_transactions` 失败
 - [ ] `cargo test foundation::reported_total_all_or_nothing` 通过——`parse_attempts.reported_total_*` 四列只填一部分时 CHECK 拒绝
-- [ ] `cargo test foundation::m0_total_claim_schema_stays_single` 通过——M0 no-go 修正后仍只有 `parse_attempts.reported_total_*` 四列、一次尝试至多一条；没有提前新增 scope 列或 `reconciliation_claims` 表（§3.6「M0 单 claim 的范围资格」）
+- [x] `cargo test foundation::m0_total_claim_schema_stays_single` 通过——M0 no-go 修正后仍只有 `parse_attempts.reported_total_*` 四列、一次尝试至多一条；没有提前新增 scope 列或 `reconciliation_claims` 表（§3.6「M0 单 claim 的范围资格」）
 - [ ] `cargo test foundation::reported_total_lives_on_attempt` 通过——`sources` 表**不存在** `declared_total_*` 列；同一来源解析两次，两行 `parse_attempts` 各自带自己的 `reported_total_*`，第一次的值不被第二次覆盖（§3.6「声明合计归尝试，不归来源」） <!-- legacy -->
 - [ ] `cargo test ingest::utterance_source_roundtrip` 通过——`kind = utterance` 的来源，转写文本已落盘成 `.txt` 且 `evidence_relpath` 非空（闸门 2 对两种来源同一条实现路径）
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——未报告合计的 `utterance` 尝试，`reported_total_*` 全空、CHECK 通过、对账结果为 `not_applicable`
@@ -655,6 +655,8 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** `foundation::m0_total_claim_schema_stays_single` 与完整零额度门禁通过：生产仍只有 `parse_attempts.reported_total_*` 四列、一次尝试至多一条，没有新增 scope 列或多 claim 表；第一次 v1 报告与旧本机 fixtures 未修改，M1 未开始 | 本文 §6；[07 评测 §6](./07-eval.md)；`node scripts/verify-m0.mjs --skip-live` |
+| 2026-09-02（no-go 修正开工） | PR #27 的 current-source 单 claim 范围与保持现有 schema 的规格已独立 review 通过，本文先由 `draft → ready`；维护者随后批准分阶段实施计划，正式开始补测试与实现，故由 `ready → in-progress`。本轮只实现 M0 修正，不增加多 claim schema、不开始 M1 | [PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步 |
 | 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** 第一次正式结果为 `no_go` / exit 3；声明合计可获得率 `4/20`、假警报率 `6/7`，主要因为月度 viewport 外、分页、按日、单笔或子组合计被塞进单条 `reported_total_*`。被证伪的是「来源上出现一个合计即可报告」这条隐含范围，不是四列生命周期。M0 收窄为一条覆盖当前不可变来源全部适用交易的 claim；合计关键词降为候选信号；生产 schema、指标 4 分母 / 阈值与多 claim 的 M2 决策均不动。首次报告与 `fixtures/local/m0-2026-08-24` 永久保留 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[07 评测 §7](./07-eval.md) |
 | 2026-08-24（M1 前置） | **R6 随 [03 审核 §5](./03-review.md) R1 一并关闭为「不加截图坐标列」。** 产品密封链路的受控合成图仍出现危险误定位与相邻行侵入；同一 CLI 的 Sonnet 对照进一步说明该能力不具备跨模型稳定性。既然代码无法独立验证模型是否指到正确行，可空 bbox 也保护不了「有值但值错」；因此不做原计划的 `0002_*` 迁移，也不改 M0 五工具 | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[03 审核 §3.2/§5](./03-review.md) |
 | 2026-08-22（跨文档同步） | **权威错误码表新增 `agent.not_ready`。** [01 §3.5](./01-agent-runtime.md) 的状态矩阵把「已发现合格 CLI、尚未探测或探测中」定为 `error_code` 空的**非错误**态，但同一条规格又要求这一档 fail closed——用户显式发起解析时命令层必须返回一个码，而矩阵里没有。复用 `agent.backend_unavailable` 会把 v0.16 刚拆开的「安装资格 / 解析就绪度」两层重新合上，所以登记新码，只用于 probe 未开始 / 进行中 | 01 的 M0 修正实施计划（2026-08-22 获批）；[01 §3.5](./01-agent-runtime.md) 状态矩阵与 §6 `agent::readiness_blocks_attempt_and_task` |
@@ -683,6 +685,8 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.23 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 单 claim 四列不变的回归与完整零额度门禁通过；未运行真实 agent / formal，未修改第一次报告或旧 fixtures，未开始 M1 |
+| v0.22 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；先补保持单 claim schema 的回归，再改实现。M1 不开始 |
 | v0.21 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 定义 M0 单 claim 只认 current immutable source 全部适用交易；任意 viewport 仍支持，月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计均不得报告；有效 claim 与 invalid decoy 三元组相同时也因身份不可审计而拒报，关键词只作候选。`parse_attempts.reported_total_*` 四列与一次一条限制不变，不提前实现多 claim schema；新增保持单 claim schema 的验收。第一次 no-go、旧报告与 `fixtures/local/m0-2026-08-24` 不改 |
 | v0.20 | 2026-08-24 | **关闭 R6，`status` 仍为 `review`。** [03 审核](./03-review.md) R1 spike 未达到证据高亮的安全门槛，因此不新增截图 bbox 列、不创建 `0002_*` 迁移、不改 `draft_transaction`；M0 六表五工具与已实现 schema 一字未动 |
 | v0.19 | 2026-08-24 | **跟随 [04 §3.3](./04-transactions.md) v0.9，`status` 仍为 `review`（M2 表，M0 实现不受影响）。** `categories.name` 的注释由「默认值统一四个汉字」改为「两个汉字」，并注明唯一性只在同一 `scope` 内。**`UNIQUE(scope, normalized_name)` 这条约束本来就是对的、一个字没改**——变的是它从此**真的被用到**：四字命名下没有任何两条默认分类同名，`scope` 那一列在种入路径上从未被行使过；两字命名后「礼金」与「其他」两侧各一条，**种子数据本身就会去撞这个索引**。这一行存在的意义是提醒实现者别在种入时按 `name` 去查重 |

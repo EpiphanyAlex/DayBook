@@ -512,6 +512,43 @@ mod foundation {
     }
 
     #[test]
+    fn m0_total_claim_schema_stays_single() {
+        let directory = tempdir().unwrap();
+        let database = Database::open(directory.path()).unwrap();
+        database
+            .read(|connection| {
+                let columns = connection
+                    .prepare("PRAGMA table_info(parse_attempts)")?
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let reported = columns
+                    .iter()
+                    .filter(|name| name.starts_with("reported_total_"))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    reported,
+                    vec![
+                        "reported_total_minor",
+                        "reported_total_currency",
+                        "reported_total_kind",
+                        "reported_total_evidence_text",
+                    ],
+                    "M0 仍是单 claim 四列"
+                );
+                assert!(columns.iter().all(|name| !name.contains("scope")));
+                let claim_table_count: i64 = connection.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'reconciliation_claims'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(claim_table_count, 0, "M0 不提前建立多 claim schema");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn reported_total_lives_on_attempt() {
         let directory = tempdir().unwrap();
         let database = Database::open(directory.path()).unwrap();

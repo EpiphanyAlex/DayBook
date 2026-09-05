@@ -1,9 +1,9 @@
 ---
 title: 01 Agent 运行时 — MCP server、agent 启动器与可插拔后端
-status: draft
+status: review
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.27
+date: 2026-09-05
+version: v0.29
 ---
 
 # 01 · Agent 运行时
@@ -550,9 +550,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 - [ ] `cargo test agent::complete_source_writes_no_audit` 通过——`complete_source` 成功后 `audit_log` **不增加**行，而 `parse_attempts` 的两个字段已更新（§3.3）
 - [ ] `cargo test agent::report_total_requires_evidence_currency_and_kind` 通过——`report_source_total` 缺 `currency` / `kind` / `evidence_text` 任一时返回 `agent.tool_rejected` 且未写库（§3.2 可信性要求第 2 条）
 - [ ] `cargo test agent::report_total_accepts_only_once_per_attempt` 通过——**同一尝试内**第二次调用返回 `agent.tool_rejected`、首次写入的值不被覆盖；而**重试产生的新尝试可以重新回报**，两行 `parse_attempts` 各存各的（可信性要求第 5 条）
-- [ ] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——口述命中「总共 / 一共 / 合计 / 总计 / TOTAL」但该数字是月度、分页、按日、单笔或子组合计时，不调用 `report_source_total`、`unparsed_note` 可为空，`complete_source` 正常完成；恢复关键词强制闸门时该用例必须变红
-- [ ] `cargo test agent::prompt_requires_current_source_full_scope` 通过——生产提示词逐项写明任意 viewport 是来源边界、只报告覆盖当前来源全部适用交易且三元组在候选中唯一的单一 claim，并点名月度 viewport 外 / 分页 / 按日 / 分类 / 单笔语义 / 子组及相同三元组 decoy 均不得报告
-- [ ] `cargo test agent::scope_valid_utterance_total_can_still_be_reported` 通过——口述中存在一条覆盖整段全部适用交易的 scope-valid 合计时仍可调用一次 `report_source_total` 并正常完成；修正不得把所有口述来源一律排除
+- [x] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——口述命中「总共 / 一共 / 合计 / 总计 / TOTAL」但该数字是月度、分页、按日、单笔或子组合计时，不调用 `report_source_total`、`unparsed_note` 可为空，`complete_source` 正常完成；恢复关键词强制闸门时该用例必须变红
+- [x] `cargo test agent::prompt_requires_current_source_full_scope` 通过——生产提示词与 live MCP `report_source_total` 描述逐项写明任意 viewport 是来源边界、只报告覆盖当前来源全部适用交易且三元组在候选中唯一的单一 claim，并点名月度 viewport 外 / 分页 / 按日 / 分类 / 单笔语义 / 子组及相同三元组 decoy 均不得报告；MCP 描述残留「关键词均不可漏报」时必须变红
+- [x] `cargo test agent::scope_valid_utterance_total_can_still_be_reported` 通过——口述中存在一条覆盖整段全部适用交易的 scope-valid 合计时仍可调用一次 `report_source_total` 并正常完成；修正不得把所有口述来源一律排除
 - [ ] `cargo test agent::every_ledger_write_tool_writes_audit` 通过——每个影响账目或草稿内容的写入工具调用后 `audit_log` 恰好多一条且 `actor = "agent"`；只收束完成协议元数据的 `complete_source` 明确不写审计
 - [ ] `cargo test agent::timeout_voids_only_own_attempt` 通过——两个来源各自解析，其一超时后，**只有该 `attempt_id` 的草稿被置 `voided_at`**，另一来源的草稿不受影响（§5 R5 的会话粒度结论）
 - [ ] `cargo test agent::void_marks_not_deletes` 通过——作废后草稿行仍在且 `drafted_json` 完好（§3.4「作废是置标志，不是删行」）
@@ -581,6 +581,9 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-05（收口独立复审） | 先用红测抓到 live MCP 描述遗漏，再逐项补齐 current-source 范围及相同三元组 decoy；与生产提示词共同受 §6 回归约束。`status` 保持 `review`，五工具、参数与确认策略不变 | [PR #28](https://github.com/EpiphanyAlex/DayBook/pull/28)；本文 §6；[07 评测 §7](./07-eval.md) |
+| 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 合计关键词已降为提示词候选并从 `complete_source` 代码闸门删除；生产提示词明确 current-source 全覆盖、viewport / 分页 / 按日 / 分类 / 单笔 / 子组与同三元组 decoy；scope-valid 口述仍可报告。五工具、权限边界与生产单 claim 参数未改变；完整零额度门禁通过，未运行真实 agent | 本文 §6；[00 地基 §3.6](./00-foundation.md)；`node scripts/verify-m0.mjs --skip-live` |
+| 2026-09-02（no-go 修正开工） | PR #27 的关键词降级、current-source 全覆盖提示词与五工具不变规格已独立 review 通过，本文先由 `draft → ready`；维护者随后批准分阶段实施计划，正式开始测试先行实现，故由 `ready → in-progress`。本轮不运行任何真实解析，不改变五工具权限边界 | [PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步 |
 | 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** 正式样本中合计关键词强制闸门与提示词把月度 viewport 外、分页、按日、单笔 / 子组合计误报为来源合计，造成可获得率 `4/20`、假警报率 `6/7`。修正保留任意 viewport、五工具与一次一条 schema，只把 `report_source_total` 收窄为 current-source 全覆盖 claim；关键词降为候选，删除 `complete_source` 的关键词强制拒绝；同三元组 decoy 因现有四列无法审计身份而保守不报。指标、确认策略与工具权限不变；旧报告 / 旧样本不可修改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) 范围资格 |
 | 2026-08-23（人工验收） | **§6 人工验收后两条实测执行完毕，五条至此全部跑完；`status` 仍为 `review`（M0 的 go/no-go 与收尾三件事未动）。** ① **一次真实解析中的子进程日志**——一段口述来源经真实 CLI 2.1.241 解析出 3 条草稿，对账 `passed`（来源声明 49.30 AUD＝草稿合计 49.30 AUD），`completed_with_gaps` 的未读区域横幅照常显示；侧栏「本机解析日志」面板在**关掉**详细调试日志时渲染 trace 级摘要（`list_pending_sources` / `read_source` / `report_source_total` / 三条 `draft_transaction` / `complete_source · 通过 · 3 ms`），**打开**时渲染完整调用参数，落盘的 `*.trace.jsonl` 里只有 `argumentShape` 而无金额，与 [ADR-0007 本地可观测性与日志分级](../adr/0007-local-observability-and-log-tiers.md) 一致——**但解析进行中面板看不到本次会话的任何一条**，见下一行。② **手工拆密封**——产品代码一行未改，在 `PATH` 上放一个在 Daybook 的密封参数之后追加 `--tools Read` 的同名包装（等价于把「关掉内置工具」这一项关掉），probe 落 `agent.tool_surface_unsealed`，pill 显示「Claude Code 安全检查未通过」、侧栏显示「解析已被安全暂停／当前 CLI 暴露了额外工具、插件或 hook；恢复密封配置后再解析」，**且应用照常启动、既有草稿仍可审阅确认**；此时新导入一份口述来源，导入成功而**任务没有下发**（`parse_attempts` 计数全程恒为 1），来源上的「解析」入口 `enabled = false`、`AXPress` 不触发任何请求。**顺带取得的两条事实**：这台机器上 CLI 的凭证不在 `HOME` 里的普通配置文件（把 `~/.claude.json` 复制进受控 `HOME` 仍判未登录），所以真实解析只能靠还原**子进程**的 `HOME`；这个 webview 的辅助功能树完整暴露，`AXPress` / `set focused` 可直接驱动界面，比 `click at` 可靠 | 人工验收实测（2026-08-23）：真实 CLI 2.1.241 + 受控 `HOME` 下的桌面应用截图；`<数据目录>/logs/*.trace.jsonl`；`parse_attempts` 计数前后一致 |
 | 2026-08-23（人工验收，**未修，留 M1 审核界面切片**） | **解析进行中，UI 看不到这一次会话的子进程日志。** `src-tauri/src/agent/runtime.rs` 的 `write_session_logs` 是在 `AgentTaskResult` 回来之后**一次性**把整份 JSONL 写出去的，所以解析还在跑时该会话的日志文件根本不存在，`recent_agent_logs` 自然读不到：实测中途点「刷新日志」只看得到开机那条能力检查，解析结束后才跳到 17 条。**排障最想看的恰恰是卡住的那一次**，因此记在这里。不改的理由与同日那条「解析入口无禁用态视觉」同档——当前前端是功能基线、M1 才定设计稿与 token system（[`docs/PRD.md` §9](../PRD.md)），且它不构成闸门失效；改成边跑边追加要动日志落盘通道与相应测试，属于另一轮实现。**§3 决定与依据一字未改，本次没有证伪任何规格** | 人工验收实测（2026-08-23）：`src-tauri/src/agent/runtime.rs` 的 `write_session_logs` 调用点；解析中途与结束后各截一张日志面板 |
@@ -625,6 +628,8 @@ agent 起一个 shell → sqlite3 <数据目录>/daybook.db "INSERT INTO transac
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.29 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 关键词非强制、current-source 提示词与 scope-valid 口述三条回归通过；五工具及权限不变，只跑零额度门禁，不开始 M1 |
+| v0.28 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；先补关键词候选 / current-source scope 回归，再改完成前闸门与提示词。五工具与权限边界不变，不运行真实 agent |
 | v0.27 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** `report_source_total` 只接受 current immutable source 全部适用交易的一条 scope-valid claim；月度 viewport 外、分页、按日 / 分类、单笔语义 / 子组合计以及与有效 claim 同三元组的 decoy 不得报告。合计词降为候选信号，删除代码侧完成前强制闸门及 `unparsed_note` 逃生语义；五工具、参数 schema、一次一条、完成协议其他检查与权限边界不变。替换 3 条旧关键词验收 |
 | v0.26 | 2026-08-23 | **§6 人工验收后两条实测执行完毕，五条至此全部跑完；`status` 仍为 `review`。** 「手工拆密封」一条**通过**：不动产品代码、在 `PATH` 上放一个追加 `--tools Read` 的同名包装，probe 落 `agent.tool_surface_unsealed`，界面给出专用文案、应用照常启动、新来源导入成功而任务不下发（`parse_attempts` 不增）。「真实解析中看子进程日志」一条**部分满足**：解析结束后 trace / debug 两级都可见且分级正确，**解析进行中看不到**——会话日志随 `AgentTaskResult` 一次性落盘，记为未修、留 M1。§6 补记后两条的执行前提（受控 `HOME` 会让 CLI 未登录，需还原子进程 `HOME`）。**§3 决定与依据一字未改** |
 | v0.25 | 2026-08-23 | **§6 人工验收前三条实测执行完毕，`status` 由 `in-progress` 回到 `review`。** 三条里两条直接通过（三种安装资格指引各不相同且应用照常启动；延迟 probe 期间恒为「正在检查」、`parse_attempts` 不增、probe 成功后才 ready）；**「已装未登录」一条不通过并暴露一个实现缺陷**——失败分类器只读 stderr，而真实 CLI 未登录时 stderr 为空、原因只在 stdout 的 stream-json 里，界面因此报 `agent.spawn_failed`。已改为两个流合成一段信号交同一张词表判定，§6 新增 1 条自动验收（样本取自真实输出）。**§3 决定与依据一字未改**——本次没有证伪任何规格。另记一条**未修、留 M1** 的界面问题：检查中「解析」入口无禁用态视觉 |

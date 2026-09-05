@@ -114,8 +114,12 @@ impl ValidatedCase {
 
 impl Manifest {
     pub fn load(path: &Path) -> EvalResult<Self> {
-        let raw = std::fs::read_to_string(path)?;
-        let manifest: Self = serde_json::from_str(&raw)?;
+        Self::from_bytes(&std::fs::read(path)?)
+    }
+
+    /// formal 将解析结果与同次读取的原始字节绑定，不能二次读取后才冻结 manifest。
+    pub fn from_bytes(raw: &[u8]) -> EvalResult<Self> {
+        let manifest: Self = serde_json::from_slice(raw)?;
         if manifest.version != 1 {
             return Err(EvalError::Manifest(format!(
                 "不认识的 manifest version {}（当前只支持 1）",
@@ -261,6 +265,7 @@ impl Manifest {
                 &format!("用例 `{}` 的输入", case.id),
             )?;
             ensure_inside(&input, &directory, &format!("用例 `{}` 的输入", case.id))?;
+            expected.validate_formal(&case.expected_path, &input)?;
 
             let sample = case.sample.as_ref().ok_or_else(|| {
                 EvalError::Manifest(format!("正式用例 `{}` 缺 `sample` 元数据", case.id))
@@ -505,13 +510,19 @@ mod eval {
             };
             let items = (1..=item_count)
                 .map(|ordinal| {
-                    serde_json::json!({
+                    let mut item = serde_json::json!({
                         "sourceOrdinal": ordinal,
                         "occurredOn": "2026-08-24",
                         "amountMinor": "100",
                         "currency": currency,
                         "direction": "expense"
-                    })
+                    });
+                    if kind == "utterance" {
+                        let start = i64::from(ordinal - 1) * 3;
+                        item["evidenceSpanStart"] = serde_json::json!(start);
+                        item["evidenceSpanEnd"] = serde_json::json!(start + 3);
+                    }
+                    item
                 })
                 .collect::<Vec<_>>();
             std::fs::write(
@@ -519,6 +530,10 @@ mod eval {
                 serde_json::to_vec_pretty(&serde_json::json!({
                     "sourceKind": kind,
                     "statedItemCount": item_count,
+                    "reconciliationScope": {
+                        "status": "absent", "reason": "no_claim",
+                        "expectedClaim": null, "candidateClaims": []
+                    },
                     "items": items,
                 }))
                 .unwrap(),
@@ -529,7 +544,7 @@ mod eval {
                 if kind == "file" {
                     "png"
                 } else {
-                    "一段口述"
+                    "交易一交易二交易三交易四"
                 },
             )
             .unwrap();

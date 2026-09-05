@@ -62,7 +62,6 @@ pub struct DraftStore {
     assignment: Option<Assignment>,
     closed: AtomicBool,
     completion_rejections: AtomicU8,
-    total_marker_rejections: AtomicU8,
     trace_events: Mutex<Vec<Value>>,
     debug_events: Mutex<Vec<Value>>,
 }
@@ -74,7 +73,6 @@ impl DraftStore {
             assignment: None,
             closed: AtomicBool::new(false),
             completion_rejections: AtomicU8::new(0),
-            total_marker_rejections: AtomicU8::new(0),
             trace_events: Mutex::new(Vec::new()),
             debug_events: Mutex::new(Vec::new()),
         }
@@ -86,7 +84,6 @@ impl DraftStore {
             assignment: Some(assignment),
             closed: AtomicBool::new(false),
             completion_rejections: AtomicU8::new(0),
-            total_marker_rejections: AtomicU8::new(0),
             trace_events: Mutex::new(Vec::new()),
             debug_events: Mutex::new(Vec::new()),
         }
@@ -419,26 +416,6 @@ impl DraftStore {
         if args.item_count < 0 {
             return Err(tool_rejected("item_count 不能为负数"));
         }
-        // 合计词闸门（01 §3.2 可信性要求第 6 条）。词表只认字面量，认不出「一共去了三个地方」
-        // 这类非金额用法——所以 `unparsed_note` 是它的出口：说明了就放行，产出
-        // `completed_with_gaps`，审核界面显眼呈现那段说明。它挡的是**静默**漏报，写了说明就不静默。
-        if args.unparsed_note.trim().is_empty()
-            && self.explicit_utterance_total_is_unreported(&assignment)?
-        {
-            // 这条此前不计数、可无限拒绝：agent 找不到合计时只能挂到 180 秒硬超时。
-            let rejection = self.total_marker_rejections.fetch_add(1, Ordering::SeqCst) + 1;
-            if rejection >= 2 {
-                self.fail_protocol(&assignment)?;
-                return Err(AppError::new(
-                    "agent.protocol_violation",
-                    "口述含明显合计词，两次完成尝试都既未回报合计也未说明原因",
-                ));
-            }
-            return Err(tool_rejected(
-                "口述原文含明显合计词。若它确实是金额合计，先调用 report_source_total 再重试完成；\
-                 若不是（例如「一共去了三个地方」），在 unparsed_note 里说明后重试完成。",
-            ));
-        }
         let (ids, ordinals) = self.database.read(|connection| {
             let mut statement = connection.prepare(
                 "SELECT id, source_ordinal FROM draft_transactions
@@ -506,33 +483,6 @@ impl DraftStore {
         Ok(ToolOutput::json(json!({ "outcome": outcome })))
     }
 
-    fn explicit_utterance_total_is_unreported(&self, assignment: &Assignment) -> AppResult<bool> {
-        let (kind, evidence_relpath, reported_total): (String, String, Option<i64>) =
-            self.database.read(|connection| {
-                connection.query_row(
-                    "SELECT s.kind, s.evidence_relpath, p.reported_total_minor
-                     FROM sources s JOIN parse_attempts p ON p.source_id = s.id
-                     WHERE s.id = ?1 AND p.id = ?2",
-                    params![assignment.source_id, assignment.attempt_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-            })?;
-        if kind != "utterance" || reported_total.is_some() {
-            return Ok(false);
-        }
-        let relative = std::path::Path::new(&evidence_relpath);
-        if relative.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        }) {
-            return Err(AppError::storage("证据路径越出数据目录"));
-        }
-        let text = std::fs::read_to_string(self.database.root().join(relative))?;
-        Ok(has_explicit_total_marker(&text))
-    }
-
     fn fail_protocol(&self, assignment: &Assignment) -> AppResult<()> {
         void_attempt(
             &self.database,
@@ -543,15 +493,6 @@ impl DraftStore {
         self.closed.store(true, Ordering::SeqCst);
         Ok(())
     }
-}
-
-fn has_explicit_total_marker(text: &str) -> bool {
-    ["总共", "一共", "合计", "总计"]
-        .iter()
-        .any(|marker| text.contains(marker))
-        || text
-            .split(|character: char| !character.is_ascii_alphanumeric())
-            .any(|token| token.eq_ignore_ascii_case("total"))
 }
 
 fn json_shape(value: &Value) -> Value {
@@ -1159,101 +1100,138 @@ mod agent {
     }
 
     #[test]
-    fn explicit_utterance_total_must_be_reported() {
-        let fixture = Fixture::new("utterance", "昨天咖啡 5 澳元，总共 5 澳元");
-        let evidence = "昨天咖啡 5 澳元";
-        fixture
-            .store
-            .handle(
-                "draft_transaction",
-                fixture.draft(1, evidence, Some((0, evidence.chars().count() as i64))),
-            )
-            .unwrap();
+    fn total_markers_are_candidates_not_completion_gate() {
+        for text in [
+            "咖啡 1 澳元；本月总计 20 澳元",
+            "咖啡 1 澳元；分页合计 20 澳元",
+            "咖啡 1 澳元；今日合计 1 澳元，另有昨日交易",
+            "咖啡 1 澳元；单笔总共 1 澳元",
+            "咖啡 1 澳元；餐饮小计 1 澳元，另有交通支出",
+            "昨天一共去了三个地方，咖啡 1 澳元",
+        ] {
+            let fixture = Fixture::new("utterance", text);
+            let evidence = "咖啡 1 澳元";
+            let start = fixture
+                .text
+                .chars()
+                .collect::<String>()
+                .find(evidence)
+                .map(|byte| fixture.text[..byte].chars().count() as i64)
+                .unwrap();
+            let end = start + evidence.chars().count() as i64;
+            fixture
+                .store
+                .handle(
+                    "draft_transaction",
+                    fixture.draft(1, evidence, Some((start, end))),
+                )
+                .unwrap();
 
-        let error = fixture.complete(1, "").unwrap_err();
-        assert_eq!(error.code, "agent.tool_rejected");
-        assert!(!fixture.store.is_complete());
+            let completed = fixture.complete(1, "").unwrap();
+            assert_eq!(
+                completed.structured_content.unwrap()["outcome"],
+                "completed"
+            );
+            assert!(fixture.store.is_complete());
+            let reported: Option<i64> = fixture
+                .database
+                .read(|connection| {
+                    connection.query_row(
+                        "SELECT reported_total_minor FROM parse_attempts WHERE id = ?1",
+                        [&fixture.attempt_id],
+                        |row| row.get(0),
+                    )
+                })
+                .unwrap();
+            assert_eq!(
+                reported, None,
+                "关键词不能强制报告 scope-invalid claim：{text}"
+            );
+        }
+    }
 
+    #[test]
+    fn scope_valid_utterance_total_can_still_be_reported() {
+        let fixture = Fixture::new("utterance", "咖啡 1 澳元，面包 2 澳元；以上两笔总共 3 澳元");
+        for (ordinal, evidence) in [(1, "咖啡 1 澳元"), (2, "面包 2 澳元")] {
+            let byte_start = fixture.text.find(evidence).unwrap();
+            let start = fixture.text[..byte_start].chars().count() as i64;
+            let end = start + evidence.chars().count() as i64;
+            let mut draft = fixture.draft(ordinal, evidence, Some((start, end)));
+            let amount = if ordinal == 1 { "100" } else { "200" };
+            draft["amountMinor"] = json!(amount);
+            draft["baseAmountMinor"] = json!(amount);
+            fixture.store.handle("draft_transaction", draft).unwrap();
+        }
         fixture
             .store
             .handle(
                 "report_source_total",
                 json!({
                     "sourceId": fixture.source_id,
-                    "amountMinor": "100",
+                    "amountMinor": "300",
                     "currency": "AUD",
                     "kind": "expense_total",
-                    "evidenceText": "总共 5 澳元"
+                    "evidenceText": "以上两笔总共 3 澳元"
                 }),
             )
             .unwrap();
-        fixture.complete(1, "").unwrap();
-        assert!(fixture.store.is_complete());
-    }
-
-    #[test]
-    fn explicit_total_marker_is_escapable_with_note() {
-        // 「一共」说的是地点数量，不是金额合计——词表分辨不了，agent 必须有路可走。
-        let fixture = Fixture::new("utterance", "昨天一共去了三个地方，咖啡 5 元");
-        let evidence = "咖啡 5 元";
         assert_eq!(
-            fixture.text.chars().skip(11).take(6).collect::<String>(),
-            evidence
-        );
-        fixture
-            .store
-            .handle(
-                "draft_transaction",
-                fixture.draft(1, evidence, Some((11, 17))),
-            )
-            .unwrap();
-
-        assert_eq!(
-            fixture.complete(1, "").unwrap_err().code,
-            "agent.tool_rejected"
-        );
-        assert!(!fixture.store.is_complete());
-
-        let completed = fixture
-            .complete(
-                1,
-                "原文的「一共」指地点数量，不是金额合计，来源没有可回报的合计",
-            )
-            .unwrap();
-        assert!(fixture.store.is_complete());
-        assert_eq!(
-            completed.structured_content.unwrap()["outcome"],
-            "completed_with_gaps"
+            fixture.complete(2, "").unwrap().structured_content.unwrap()["outcome"],
+            "completed"
         );
     }
 
     #[test]
-    fn explicit_total_marker_gate_is_bounded() {
-        // 此前这条不计数：agent 交不出合计也说不出理由时，只能一直被拒到 180 秒硬超时。
-        let fixture = Fixture::new("utterance", "总共花了很多");
-        assert_eq!(
-            fixture.complete(0, "").unwrap_err().code,
-            "agent.tool_rejected"
-        );
-        assert_eq!(
-            fixture.complete(0, "").unwrap_err().code,
-            "agent.protocol_violation"
-        );
-        let (outcome, state): (String, String) = fixture
-            .database
-            .read(|connection| {
-                connection.query_row(
-                    "SELECT p.outcome, s.state FROM parse_attempts p
-                     JOIN sources s ON s.id = p.source_id WHERE p.id = ?1",
-                    [&fixture.attempt_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-            })
-            .unwrap();
-        assert_eq!(
-            (outcome.as_str(), state.as_str()),
-            ("protocol_violation", "failed")
-        );
+    fn prompt_requires_current_source_full_scope() {
+        let prompt = include_str!("../../prompts/m0-parse.md");
+        for required in [
+            "当前不可变来源",
+            "全部适用交易",
+            "任意 viewport",
+            "月度",
+            "分页",
+            "按日",
+            "分类",
+            "单笔",
+            "子组",
+            "相同 amount/currency/kind",
+            "候选信号",
+        ] {
+            assert!(
+                prompt.contains(required),
+                "生产提示词缺少范围约束：{required}"
+            );
+        }
+        assert!(prompt.contains("不调用 `report_source_total`"));
+        assert!(!prompt.contains("必须先调用 `report_source_total`"));
+
+        let mcp = include_str!("../mcp/mod.rs");
+        let description = mcp
+            .lines()
+            .find(|line| line.contains("description = \"仅当原件有唯一"))
+            .expect("report_source_total 的 live MCP 描述必须与生产提示词同口径");
+        for required in [
+            "当前不可变来源",
+            "全部适用交易",
+            "关键词只作候选",
+            "任意 viewport",
+            "月度",
+            "分页",
+            "按日",
+            "分类",
+            "单笔",
+            "子组",
+            "amount/currency/kind",
+            "decoy",
+            "都不报告",
+        ] {
+            assert!(
+                description.contains(required),
+                "MCP 描述缺范围约束：{required}"
+            );
+        }
+        assert!(!description.contains("均不可漏报"));
     }
 
     #[test]

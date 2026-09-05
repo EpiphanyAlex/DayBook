@@ -159,6 +159,15 @@ pub async fn run_trial(
     let predicted = predictions_from_drafted_json(&database, &attempt_id)?;
     let join = ordinal_full_outer_join(&expected.items, &predicted);
     let (check, substring_violations) = if execution_error.is_some() {
+        // 作废草稿不等于撤销一次成功的合计报告；scope transcript 必须保留该写入。
+        let (reported_minor, reported_currency, reported_kind, reported_evidence) =
+            database.read(|connection| {
+                connection.query_row(
+                    "SELECT reported_total_minor, reported_total_currency, reported_total_kind, reported_total_evidence_text FROM parse_attempts WHERE id = ?1",
+                    [&attempt_id],
+                    |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?)),
+                )
+            })?;
         (
             TotalCheck {
                 attempt_id: attempt_id.clone(),
@@ -166,11 +175,11 @@ pub async fn run_trial(
                 source_kind: expected.source_kind.clone(),
                 reconciliation_status: "error".to_owned(),
                 confirmation_policy: "single_only".to_owned(),
-                reported_total_minor: None,
+                reported_total_minor: reported_minor.map(crate::money::DecimalI64),
                 calculated_total_minor: None,
-                reported_total_currency: None,
-                reported_total_kind: None,
-                reported_total_evidence_text: None,
+                reported_total_currency: reported_currency,
+                reported_total_kind: reported_kind,
+                reported_total_evidence_text: reported_evidence,
                 unavailable_draft_ids: Vec::new(),
                 outcome: Some("case_quality_failure".to_owned()),
                 unparsed_note: None,

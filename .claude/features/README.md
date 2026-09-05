@@ -90,4 +90,4 @@ M0 端到端实现已落地，当前速查：
 - [`ingest-screenshot.md`](./ingest-screenshot.md)
 - [`total-cross-check.md`](./total-cross-check.md)
 - [`review-and-confirm.md`](./review-and-confirm.md)
-- [`eval-harness.md`](./eval-harness.md) —— 评测与夹具重放（**只写了已落地的零额度那一半**；真跑 agent 的轮次与夹具导出器待建）
+- [`eval-harness.md`](./eval-harness.md) —— 评测与夹具重放、夹具导出器及 formal v2；当前只允许零额度验收，真实复测仍待授权

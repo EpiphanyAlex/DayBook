@@ -1,0 +1,15 @@
+{
+  "_":"完全合成：有效总计与无效按日小计拥有相同三元组，M0 四列无法审计身份。",
+  "sourceKind":"file",
+  "reconciliationScope":{
+    "status":"scope_invalid","reason":"multiple_claims","expectedClaim":null,
+    "candidateClaims":[
+      {"amountMinor":"300","currency":"AUD","kind":"expense_total","scope":"valid","reason":"current_source_all_applicable"},
+      {"amountMinor":"300","currency":"AUD","kind":"expense_total","scope":"invalid","reason":"day_group"}
+    ]
+  },
+  "items":[
+    {"sourceOrdinal":1,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","direction":"expense","merchant":"EPSILON"},
+    {"sourceOrdinal":2,"occurredOn":"2026-08-30","amountMinor":"200","currency":"AUD","direction":"expense","merchant":"ZETA"}
+  ]
+}

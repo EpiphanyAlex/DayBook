@@ -1,0 +1,9 @@
+{
+  "calls":[
+    {"tool":"read_source","arguments":{"sourceId":"44444444-4444-4444-8444-444444444444"}},
+    {"tool":"draft_transaction","arguments":{"sourceId":"44444444-4444-4444-8444-444444444444","evidenceText":"2026-08-30 GAMMA 1.00 AUD","sourceOrdinal":1,"evidenceSpan":null,"occurredOn":"2026-08-30","amountMinor":"100","currency":"AUD","baseAmountMinor":"100","baseCurrency":"AUD","ratePpm":"1000000","direction":"expense","merchant":"GAMMA","category":null,"channel":null,"confidence":99}},
+    {"tool":"draft_transaction","arguments":{"sourceId":"44444444-4444-4444-8444-444444444444","evidenceText":"2026-08-30 DELTA 2.00 AUD","sourceOrdinal":2,"evidenceSpan":null,"occurredOn":"2026-08-30","amountMinor":"200","currency":"AUD","baseAmountMinor":"200","baseCurrency":"AUD","ratePpm":"1000000","direction":"expense","merchant":"DELTA","category":null,"channel":null,"confidence":99}},
+    {"tool":"report_source_total","arguments":{"sourceId":"44444444-4444-4444-8444-444444444444","amountMinor":"100","currency":"AUD","kind":"expense_total","evidenceText":"CATEGORY SUBTOTAL 1.00 AUD"}},
+    {"tool":"complete_source","arguments":{"sourceId":"44444444-4444-4444-8444-444444444444","itemCount":2,"unparsedNote":""}}
+  ]
+}

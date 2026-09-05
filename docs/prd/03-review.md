@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: draft
+status: review
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.18
+date: 2026-09-05
+version: v0.20
 ---
 
 # 03 · 审核与草稿区
@@ -417,8 +417,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 - [ ] `cargo test review::total_check_unavailable_on_transfer` 通过——含 `direction = transfer` 的条目时 `reconciliation_status == unavailable`，**不是把它按支出算进去**
 - [ ] `cargo test review::utterance_yields_user_attested_batch` 通过——`kind = utterance` 且未报合计时 `reconciliation_status == not_applicable` 且 `confirmation_policy == user_attested_batch`，**批量确认可用**
 - [ ] `cargo test review::utterance_with_stated_total_reconciles` 通过——口述里报了一条覆盖整段全部适用交易、且三元组在候选中唯一的 scope-valid 合计时，`reconciliation_status` 为 `passed` / `failed`（不是 `not_applicable`），而 `confirmation_policy` 仍是 `user_attested_batch`（§3.3「两个维度」）
-- [ ] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——月度 viewport 外、分页、按日、单笔或子组「总共 / 合计」不报告也能正常完成，不能被关键词闸门逼进 `reported_total_*`（[01 §3.2](./01-agent-runtime.md)）
-- [ ] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——正式真值标为 scope-invalid 的 case 成功报告任意合计都会触发硬 no-go，即使该数字碰巧与草稿和相等；生产侧没有 scope 字段不能让 formal 契约静默消失
+- [x] `cargo test agent::total_markers_are_candidates_not_completion_gate` 通过——月度 viewport 外、分页、按日、单笔或子组「总共 / 合计」不报告也能正常完成，不能被关键词闸门逼进 `reported_total_*`（[01 §3.2](./01-agent-runtime.md)）
+- [x] `cargo test eval::formal_scope_invalid_total_reports_must_be_zero` 通过——正式判定集合中真值标为 scope-invalid 的 case 成功报告任意合计都会触发硬 no-go（control 仍只记录），即使该数字碰巧与草稿和相等；生产侧没有 scope 字段不能让 formal 契约静默消失
 - [ ] `cargo test review::file_source_never_user_attested` 通过——`kind = file` 在任何输入下都拿不到 `user_attested_batch`，也拿不到 `not_applicable`
 - [ ] `cargo test review::file_without_total_is_unavailable_not_na` 通过——**只有一条草稿**且没报合计的 `file` 来源，结果是 `unavailable` + `single_only`（**不是 `not_applicable`**）——§3.3「`file` 为什么永远不判 `not_applicable`」
 - [ ] `cargo test review::batch_gate_reads_policy_not_status` 通过——批量确认的准入只看 `confirmation_policy`；构造一个 `reconciliation_status == passed` 但策略为 `single_only` 的输入，批量仍被拒（§3.3「两个维度」）
@@ -508,6 +508,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 生产 `total_check` 的三条等式、对账四态、确认策略三态与无 force 旁路均未修改；关键词非强制完成和 formal `scopeInvalidTotalReports == 0` 两条新验收通过，范围资格仍由提示词 + formal 真值负责。完整零额度门禁通过，M1 界面切片未开始 | 本文 §6；[01 Agent 运行时 §3.2](./01-agent-runtime.md)；[07 评测 §3.4](./07-eval.md) |
+| 2026-09-02（no-go 修正开工） | PR #27 的 claim 范围前置与既有对账 / 确认策略保持不变规格已独立 review 通过，本文先由 `draft → ready`；维护者随后批准分阶段实施计划，正式开始测试先行实现，故由 `ready → in-progress`。本轮不改三条等式、确认策略、无旁路约束或 M1 界面切片 | [PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步 |
 | 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** `6/7` 对账假警报证明「任何来源上的合计都可送进现有等式」这个隐含前提错误：月度 viewport 外、分页、按日、单笔 / 子组合计的等式语义与 current source 不同。新增「先判 claim 范围」：M0 只支持当前不可变来源全部适用交易的一条 claim；任意 viewport 仍接受，同三元组 decoy 因现有四列无法审计身份而保守不报；生产 schema 与确认策略不改，范围资格由提示词 + formal candidate/expected claim 真值检验。指标 4 分母 / 阈值、现有 total_check 等式、四硬字段与无 force 旁路均不改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) |
 | 2026-08-24（M1 前置） | **R1 与 R3 关闭。** R1 的产品密封链路探针在受控合成图上仍出现危险误定位与相邻行侵入，且同一 CLI 的 Sonnet 对照大幅退化；错误高亮属于证据闸门风险，因此 M1 不加坐标列，安全退回「完整原件 + `evidence_text`」。R3 定为 **TanStack Query v5 + screen reducer / local state**：Query 只缓存 Rust 可重取投影，用户选择/焦点/编辑留在 reducer；明确修复当前迟到响应覆盖与刷新后重新全选两类风险，不引入 Zustand | [R1 spike](../spikes/2026-08-24-r1-evidence-region.md)；[`docs/architecture.md` §8](../architecture.md) A4；当前 `src/App.tsx::refreshSelected` 实现审查 |
 | 2026-08-17（跨文档同步） | **[05 事项](./05-items.md) v0.8 将自然语言回溯从「只新建事项」扩为「可修改已有事项」**，因此本文 §3.6 增加 M3 create/update 共用审核闸门、目标消歧、mixed batch 与字段差异契约。该扩展只影响尚未实现的 M3；M0/M1 已验收的交易闸门、状态与 `status: review` 均未被证伪 | [`docs/PRD.md` §5.2](../PRD.md) v0.21；[05 事项 §3.4](./05-items.md) |
@@ -538,6 +540,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.20 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 关键词非强制与 formal scope-invalid=0 回归通过；既有 total-check 等式、确认策略、无 force 旁路与 M1 UI 均不变 |
+| v0.19 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；新增 formal scope 回归但保持现有 total-check 等式、确认策略与无 force 旁路。M1 不开始 |
 | v0.18 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 总额校验新增 claim 范围前置：只认 current immutable source 全部适用交易；月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计不得进入等式；同三元组 decoy 也因身份不可审计而拒报。生产 schema、对账四态、确认策略三态、无 force、现有三条等式均不改；新增 formal scope-invalid=0 的验收，替换口述关键词强制验收 |
 | v0.17 | 2026-08-24 | **关闭 M1 前置 R1 / R3，`status` 仍为 `review`。** R1 实测结论为「agent 截图坐标不够稳定」：不加 bbox schema/迁移，M1 保留完整原件 + `evidence_text` 的安全退路；R3 选定 TanStack Query v5 管 IPC 权威快照、screen reducer / 局部 state 管瞬时交互，不引入 Zustand。§3.8 固定 query key、桌面 IPC 默认项、mutation 失效边界与「排除集合」选择语义；§6 新增迟到响应与选择意图两条 M1 验收；规格不变式新增「不得把 M0 推迟区域高亮写成 M1 必做」防回退规则 |
 | v0.16 | 2026-08-24 | **关闭 R4 与 R8，`status` 仍为 `review`。** ① §6 新增「**40 笔 30 秒怎么测**」——R4 提的方差问题是真的，所以协议的每一条都在砍一个方差来源：应用自埋 `performance.now()` 计时（人的反应时间不进区间、界面响应时间全进）、夹具固定数据且**必须含异常项**（异常项的处理成本才是这一屏的真实成本）、按键脚本固定操作以剔除执行者判断速度、`pointerdown` 计数**由代码判**「不碰鼠标」、7 轮丢首轮取中位数。通过判据两条，第二条 **IQR ≤ 中位数 20%** 是给协议自身的自检——方差比效应还大时不许宣布通过。② R8 关闭：设计事实源定为 [`design.md`](../../design.md) v0.5，已接进 [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) §10–§11。③ §3.4 的记忆冲突例子随 [04 §3.3](./04-transactions.md) 两字分类改名（食品杂货 / 日用家居 → 买菜 / 日用） |

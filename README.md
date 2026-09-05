@@ -14,9 +14,9 @@
 
 ## 当前状态
 
-**第一次 M0 正式 go/no-go 已完成，结果为 `no_go` / exit 3（2026-08-29/30）；当前只做 M0 修正，不开始 M1。** 已落地的 Tauri / React / Rust 端到端链路仍在：六表地基、五工具密封 agent、截图与口述导入、审核确认与总额交叉校验。正式结果中截图池指标 1–3 全过，但口述金额准确率为 `60/62`，触发硬性 no-go；声明合计可获得率 `4/20`、假警报率 `6/7`。详见 [`docs/PRD.md` §9.4](./docs/PRD.md)。
+**第一次 M0 正式 go/no-go 结果仍为 `no_go` / exit 3（2026-08-29/30）；修正实现与零额度门禁已完成，独立新样本正式复测尚未授权，M1 不开始。** 已落地的 Tauri / React / Rust 端到端链路仍在：六表地基、五工具密封 agent、截图与口述导入、审核确认与总额交叉校验。第一次正式结果中截图池指标 1–3 全过，但口述金额准确率为 `60/62`，触发硬性 no-go；声明合计可获得率 `4/20`、假警报率 `6/7`。详见 [`docs/PRD.md` §9.4](./docs/PRD.md)。
 
-被证伪的是 M0 单 claim 的范围与正式报告证据契约：月度 viewport 外、分页、按日、单笔 / 子组合计被误当成来源级合计。[00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[03 审核与草稿区](./docs/prd/03-review.md)、[07 评测](./docs/prd/07-eval.md) 已退回 `draft`；[02 导入](./docs/prd/02-ingest.md) 保持 `review`。第一次报告与旧本机样本永久保留、不修改、不重标；后续正式复测只使用独立新样本。**当前界面仍是功能基线，不是设计定稿。** M1 已定的 token system、完整原件证据退路与 TanStack Query + reducer 状态边界不变，但本轮不实施。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
+被证伪的是 M0 单 claim 的范围与正式报告证据契约：月度 viewport 外、分页、按日、单笔 / 子组合计被误当成来源级合计。修正已将关键词降为候选、提示词限定为 current-source 全覆盖，并为 formal v2 增加完整 fixture-set 指纹、scope-invalid 硬失败、bounded 对账证据、四硬字段两侧值与口述 span ordinal；纯合成 CI 回归也已落地。[00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[03 审核与草稿区](./docs/prd/03-review.md)、[07 评测](./docs/prd/07-eval.md) 与 [02 导入](./docs/prd/02-ingest.md) 当前均为 `review`。第一次报告与旧本机样本永久保留、不修改、不重标；后续正式复测只使用独立新样本。**当前界面仍是功能基线，不是设计定稿。** M1 已定的 token system、完整原件证据退路与 TanStack Query + reducer 状态边界不变，但本轮不实施。状态总览见 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
 
 **阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。
 
@@ -62,7 +62,7 @@ node scripts/check-readme-sync.mjs  # README.en.md 不落后于 README.md
 node scripts/check-spec-invariants.mjs  # 现行章节不得残留已被推翻的结论
 ```
 
-第一次正式 `no_go` 的修正阶段只允许零额度门禁：
+独立新样本正式复测再次获得明确授权前，只允许零额度门禁：
 
 ```bash
 node scripts/verify-m0.mjs --skip-live  # 跳过真实 CLI；这不是完整 M0 通过
