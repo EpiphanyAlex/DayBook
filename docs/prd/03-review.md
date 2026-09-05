@@ -3,7 +3,7 @@ title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核�
 status: review
 owner: "@maintainer"
 date: 2026-09-05
-version: v0.20
+version: v0.21
 ---
 
 # 03 · 审核与草稿区
@@ -363,6 +363,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 **默认全选保存为「排除集合」，不能每次重取都重新全选。** 当前 M0 `refreshSelected()` 每次刷新都用全部草稿重建选择集；用户取消一条后只要改了另一条，刷新就会把被排除项重新选中。M1 reducer 按 `(source_id, attempt_id)` 保存用户明确排除的 ID；首次加载与之后新增草稿默认选中，重取不得抹掉人的排除意图。
 
+**M1 运行事件的显示边界（2026-09-05，未实施）**：依据 [01 Agent 运行时 §3.4/§6.2](./01-agent-runtime.md) 的 pi 设计回流，运行事件只驱动进度展示或 query 定向失效，不直接改写来源状态、草稿事实、对账结果与确认策略。来源事件按 `(source_id, attempt_id, agent_session_id)` 隔离；旧 attempt 的迟到事件不得覆盖当前尝试，重复进度不重复计数。面板卸载/消费失败不触发取消或重试；重新订阅或发现事件缺口时从 Rust 重取，快照与事件的衔接协议由 [01 §5 R9](./01-agent-runtime.md) 在 M1 开工前定案。请求被接受、草稿生成、解析完成、人工确认入账须分别显示，不以 CLI「完成」文本或最后一帧进度推断入账；高频进度可合并发布，截断须明示，终态不能被旧进度回退。此处不新增前端业务 store；当前 `review` 仍指 M0 已启动切片。
+
 否决另外三种组合：
 
 - 只用 `useState` / `useReducer` + Context 管全部状态：仍要自己写异步去重、迟到响应隔离与 mutation 失效，且 Context 没有行级 selector；
@@ -455,6 +457,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 #### M1 必过（在 M0 全部通过之上）
 
+- [ ] **运行事件与快照验收（零额度，测试命令随 M1 实现补回）**：按 [01 §6.2](./01-agent-runtime.md) 注入旧 attempt 迟到/重复事件、重新订阅与高频输出；当前来源和尝试不串写，草稿数不重复累计，终态不回退，截断有标识。关闭面板不取消解析，重新订阅后的显示与 Rust 快照一致，用户排除集合不丢失；仅收到请求接收或 CLI 完成事件时不得显示已入账。
+
 - [ ] `npm test -- review/sorting` 通过——异常前置的六级排序按 §3.4 优先级
 - [ ] `npm test -- review/sorting-utterance` 通过——`utterance` 来源的条目排在总额 `failed` 之后、跨图重复之前（§3.4 第 2 档）
 - [ ] `npm test -- review/keyboard` 通过——§3.5 全部快捷键有对应处理，且默认全选
@@ -508,6 +512,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-05（pi 设计回流） | M1 运行事件只驱动显示或 query 失效；补旧 attempt 迟到隔离、重复进度、重新订阅、截断和请求/入账区分的 UI 边界与零额度验收。状态方案不变，`review` 仍指 M0，M1 未实施 | [01 Agent 运行时 §3.4/§6.2](./01-agent-runtime.md) 的固定版本 pi 源码参考与运行契约；本文 §3.8 |
 | 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 生产 `total_check` 的三条等式、对账四态、确认策略三态与无 force 旁路均未修改；关键词非强制完成和 formal `scopeInvalidTotalReports == 0` 两条新验收通过，范围资格仍由提示词 + formal 真值负责。完整零额度门禁通过，M1 界面切片未开始 | 本文 §6；[01 Agent 运行时 §3.2](./01-agent-runtime.md)；[07 评测 §3.4](./07-eval.md) |
 | 2026-09-02（no-go 修正开工） | PR #27 的 claim 范围前置与既有对账 / 确认策略保持不变规格已独立 review 通过，本文先由 `draft → ready`；维护者随后批准分阶段实施计划，正式开始测试先行实现，故由 `ready → in-progress`。本轮不改三条等式、确认策略、无旁路约束或 M1 界面切片 | [PR #27](https://github.com/EpiphanyAlex/DayBook/pull/27)；[`docs/PRD.md` §9.4](../PRD.md) 防滥用流程第 4 步 |
 | 2026-08-30（第一次 M0 正式 no-go） | **本文由 `review → draft`。** `6/7` 对账假警报证明「任何来源上的合计都可送进现有等式」这个隐含前提错误：月度 viewport 外、分页、按日、单笔 / 子组合计的等式语义与 current source 不同。新增「先判 claim 范围」：M0 只支持当前不可变来源全部适用交易的一条 claim；任意 viewport 仍接受，同三元组 decoy 因现有四列无法审计身份而保守不报；生产 schema 与确认策略不改，范围资格由提示词 + formal candidate/expected claim 真值检验。指标 4 分母 / 阈值、现有 total_check 等式、四硬字段与无 force 旁路均不改 | [`docs/PRD.md` §9.4](../PRD.md) 第一次正式结果；[00 地基 §3.6](./00-foundation.md) |
@@ -540,6 +545,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.21 | 2026-09-05 | 同步 M1 运行事件与 Rust 权威快照边界、任务身份隔离及 UI 故障验收；保持 Query cache + screen reducer，当前 M0 `review` 与确认策略不变 |
 | v0.20 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 关键词非强制与 formal scope-invalid=0 回归通过；既有 total-check 等式、确认策略、无 force 旁路与 M1 UI 均不变 |
 | v0.19 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；新增 formal scope 回归但保持现有 total-check 等式、确认策略与无 force 旁路。M1 不开始 |
 | v0.18 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 总额校验新增 claim 范围前置：只认 current immutable source 全部适用交易；月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计不得进入等式；同三元组 decoy 也因身份不可审计而拒报。生产 schema、对账四态、确认策略三态、无 force、现有三条等式均不改；新增 formal scope-invalid=0 的验收，替换口述关键词强制验收 |

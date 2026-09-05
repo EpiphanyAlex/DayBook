@@ -3,7 +3,7 @@ title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
 date: 2026-09-05
-version: v0.42
+version: v0.44
 ---
 
 # sub-PRD 索引
@@ -14,18 +14,20 @@ version: v0.42
 
 ## 状态总览
 
+**运行时后续安排（未实施）**：[01 Agent 运行时](./01-agent-runtime.md) §3.4/§6.2 将实时事件、有界输出与收尾列入 M1 审核界面的运行时改进；§3.5/§6.3 规定第二后端接入时统一公共进程生命周期。pi 设计回流的任务事件身份、终态封闭、快照重取与节流验收同步 [03 审核 §3.8/§6](./03-review.md)。当前 01/03 的 `review` 只覆盖 M0 已启动切片，M1 未开始，正式复测仍待授权。
+
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
 | 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.23 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.29 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端接口 | **`review`** | v0.31 |
 | 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`review`** | v0.17 |
-| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`review`** | v0.20 |
+| 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`review`** | v0.21 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.9 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.9 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.8 |
 | 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放 | **`review`** | v0.17 |
 
-**第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，并在 PR #27 的规格独立 review 通过与维护者批准实施后，于 2026-09-02 依次转为 `ready → in-progress → review`，2026-09-05 收口复审后当前版本分别为 v0.23 / v0.29 / v0.20 / v0.17；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。M1 不开始。
+**第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，并在 PR #27 的规格独立 review 通过与维护者批准实施后，于 2026-09-02 依次转为 `ready → in-progress → review`，2026-09-05 收口复审与运行时后续设计回流后当前版本分别为 v0.23 / v0.31 / v0.21 / v0.17；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。M1 不开始。
 
 > **那轮人工验收抓到一个自动门禁抓不到的缺陷**（2026-08-23，[01 §7](./01-agent-runtime.md)）：「已装未登录」报的是 `agent.spawn_failed` 而不是 `agent.not_authenticated`——**真实 CLI 未登录时 stderr 是 0 字节，原因只写在 stdout 的 stream-json 里**，而失败分类器只读 stderr。规格没错、实现错了，当天改完并补了一条以真实输出为样本的自动验收。**它再次说明同一件事：M0 的门禁只测库、确定性链路与外部 MCP 链路，凡是「真机上那一眼」的问题都只能靠人工验收捞。**
 
@@ -127,6 +129,8 @@ version: v0.42
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.44 | 2026-09-05 | 01→v0.31、03→v0.21：pi 的事件与结果分离、任务身份、被动观察、有界节流和故障验收回流 M1；仍未实施，M0 `review` 与正式 `no_go` 不变 |
+| v0.43 | 2026-09-05 | 01 Agent 运行时升至 v0.30，登记 M1 实时事件与有界收尾、第二后端公共执行边界及分层验收；当前 M0 `review` 与正式 `no_go` 不变，后续切片未实施 |
 | v0.42 | 2026-09-05 | **独立复审收口同步。** 07→v0.17，保持 `review`；修复 control 聚合越界、claim 金额别名、失败尝试证据丢失、manifest 字节绑定与 formal 路径绕过，补正向合成重放。冻结口径与 M1 条件不变 |
 | v0.41 | 2026-09-02 | **第一次 no-go 修正完成并进入 review。** 00→v0.23 / 01→v0.29 / 03→v0.20 / 07→v0.16，四份均由 `in-progress → review`。关键词降级、current-source scope、formal v2 完整 fixture-set 指纹、scope 硬失败、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI fixture 全部落地；完整 `verify-m0 --skip-live` 通过。未运行真实 agent / 新 formal，旧报告与 fixtures、冻结口径、五工具边界均不变，M1 未开始 |
 | v0.40 | 2026-09-02 | **第一次 no-go 修正开工。** PR #27 的 00/01/03/07 规格已独立 review 通过，维护者批准分阶段实施；四份由 `draft → ready → in-progress`，版本分别升为 v0.22 / v0.28 / v0.19 / v0.15。只做 M0 测试先行修正与零额度门禁，不改冻结口径、不运行真实 agent、不开始 M1 |
