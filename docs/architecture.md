@@ -3,14 +3,14 @@ title: Daybook 系统架构基线
 status: ready
 owner: "@maintainer"
 date: 2026-09-05
-version: v0.14
+version: v0.15
 ---
 
 # 系统架构基线
 
 > 本文描述 Daybook 的**结构**：有哪些组件、各自负责什么、数据怎么流动、边界画在哪。
 > **不可逆的决定在 [`docs/adr/`](./adr/)，本文不重新论证，只标依据。** 具体表结构、字段名、命令签名属于 [`docs/prd/`](./prd/) 各 sub-PRD 的范围。
-> **当前状态：第一次 M0 正式结果仍为 `no_go` / exit 3；修正实现与零额度门禁已完成，独立新样本正式复测尚未授权，M1 不开始。** 结构本身仍已落地；单 claim 范围资格与 formal 报告证据契约已按 PR #27 修正。[00 地基](./prd/00-foundation.md) v0.23、[01 Agent 运行时](./prd/01-agent-runtime.md) v0.29、[03 审核](./prd/03-review.md) v0.20、[07 评测](./prd/07-eval.md) v0.17 与 [02 导入](./prd/02-ingest.md) v0.17 当前均为 `review`。旧报告与旧样本永久保留，后续只用独立新样本正式复测（[`docs/PRD.md` §9.4](./PRD.md)）。
+> **当前状态：第一次 M0 正式结果仍为 `no_go` / exit 3；修正实现与零额度门禁已完成，独立新样本正式复测尚未授权，M1 不开始。** 结构本身仍已落地；单 claim 范围资格与 formal 报告证据契约已按 PR #27 修正。[00 地基](./prd/00-foundation.md) v0.23、[01 Agent 运行时](./prd/01-agent-runtime.md) v0.31、[03 审核](./prd/03-review.md) v0.21、[07 评测](./prd/07-eval.md) v0.17 与 [02 导入](./prd/02-ingest.md) v0.17 当前均为 `review`。旧报告与旧样本永久保留，后续只用独立新样本正式复测（[`docs/PRD.md` §9.4](./PRD.md)）。
 
 ---
 
@@ -132,6 +132,8 @@ version: v0.14
 - 前端不含业务规则——总额校验、状态机、确认条件全在 Rust 侧。
 - **M1 状态边界**（2026-08-24，A4 关闭）：TanStack Query v5 只缓存可从 Rust/Tauri 重取的权威投影，screen reducer / 局部 state 只存选择、焦点、编辑缓冲等瞬时 UI 意图；mutation 成功后定向失效重取，不把来源状态、草稿事实或对账结果复制成前端业务 store。详细 query key 与桌面 IPC 默认项见 [03 审核 §3.8](./prd/03-review.md)
 
+**M1 运行事件边界（未实施）**：进度事件按来源、attempt 与会话身份隔离，仅驱动 UI 显示或定向失效；重新订阅重取 Rust 权威快照，终态不能被迟到进度回退。请求接收、解析完成与人工确认入账分别取证；高频进度可合并发布，必需协议事件与持久化工具调用不能因此丢失。具体边界、参数待决与零额度验收只有 [01 Agent 运行时 §3.4/§5 R9/§6.2](./prd/01-agent-runtime.md) 一份定义，前端落实见 [03 审核 §3.8](./prd/03-review.md)。
+
 ## 7. Agent 运行时边界
 
 - MCP server 走 **stdio**、用 **`rmcp`**、**不开端口**（[ADR-0003](./adr/0003-agent-runtime-and-pluggable-backend.md) §1）。✅ **进程归属已于 2026-08-12 由 R6 spike 定案：独立 MCP helper 二进制**——由 agent CLI 自己 `fork/exec`，helper 与 Tauri 主进程之间走 **Unix domain socket**（不是 TCP 端口，仍不开 localhost API）。**helper 不碰数据库**，全部 SQLite 写入留在主进程一处。见 [`01-agent-runtime` §3.1](./prd/01-agent-runtime.md) 与 [spike 记录](./spikes/2026-08-12-r6-agent-runtime.md)。
@@ -158,6 +160,7 @@ version: v0.14
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.15 | 2026-09-05 | 同步 M1 运行事件投影与终态边界，引用 01 的 pi 设计回流和 03 的 UI 契约；01→v0.31、03→v0.21，当前 M0 状态不变，后续设计未实施 |
 | v0.14 | 2026-09-02 | **同步第一次 no-go 修正进入 review。** 关键词降级、current-source scope 与 formal v2 完整证据契约已落地并通过零额度门禁；00/01/03/07 回到 `review`。架构组件、六表五工具、旧证据不可变与 M1 延后均不变；独立新样本正式复测仍待授权 |
 | v0.13 | 2026-08-30 | **同步第一次 M0 正式 `no_go` 状态。** 00/01/03/07 因 claim scope 与 formal 证据契约退回 `draft`，02 保持 `review`；架构组件、六表五工具与 M1 已定边界不变，本轮不开始 M1 |
 | v0.12 | 2026-08-24 | **关闭 A4。** M1 前端采用 TanStack Query v5 管 Tauri IPC 权威快照、screen reducer / 局部 state 管瞬时交互；不引入 Zustand。§6 补「Query cache 不是第二份业务状态」与 mutation 定向失效边界；两条写入路径与 Rust 业务真值边界不变 |
