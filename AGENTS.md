@@ -6,7 +6,7 @@
 
 **[`CLAUDE.md`](./CLAUDE.md) 是唯一事实源，动手前必须完整读一遍。** 本文**不复述**它的 17 条实施约束——摘要会漂移：上一版这里抄的「数据不出本机」就漏掉了 `CLAUDE.md` 约束 2 里「用户自己的 agent CLI 与其模型服务商之间的通信是唯一允许的出站流量」这条例外，摘要读者因此得到了一条比原文更严格、也更错的规则。
 
-Daybook 是一个 **macOS 本地优先、不用逐条填表的 AI 个人事务助理**，把用户零散的钱和事整理成账目与安排。**「个人事务」在 v1 只指交易与事项两个实体**；「回溯优先」是设计原则，不是品类名称。AI 的角色是**考古学家，不是输入框**。**当前状态**：第一次 M0 正式结果仍为 `no_go` / exit 3；修正实现与零额度门禁已完成，但独立新样本正式复测尚未授权，M1 不开始。[00 地基](./docs/prd/00-foundation.md) v0.23、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.31、[03 审核](./docs/prd/03-review.md) v0.21、[07 评测](./docs/prd/07-eval.md) v0.17 与 [02 导入](./docs/prd/02-ingest.md) v0.17 当前均为 `review`。已落地关键词降级、current-source scope、formal v2 完整 fixture-set 指纹、scope 硬失败、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI 回归；旧报告与 `fixtures/local/m0-2026-08-24` 永久保留。独立复测前只跑零额度门禁，真实 agent 与新 formal 需再次明确授权。当前前端仍是功能基线；M1 的 token system、证据退路与状态管理决定不变但本轮不实施。
+Daybook 是一个 **macOS 本地优先、不用逐条填表的 AI 个人事务助理**，把用户零散的钱和事整理成账目与安排。**「个人事务」在 v1 只指交易与事项两个实体**；「回溯优先」是设计原则，不是品类名称。AI 的角色是**考古学家，不是输入框**。**当前状态**：第一次 M0 正式结果仍为 `no_go` / exit 3；修正实现与零额度门禁已完成，但独立新样本正式复测尚未授权。[00 地基](./docs/prd/00-foundation.md) v0.23、[01 Agent 运行时](./docs/prd/01-agent-runtime.md) v0.32、[03 审核](./docs/prd/03-review.md) v0.22、[07 评测](./docs/prd/07-eval.md) v0.18 与 [02 导入](./docs/prd/02-ingest.md) v0.17 当前均为 `review`。已落地关键词降级、current-source scope、formal v2 完整 fixture-set 指纹、scope 硬失败、bounded evidence、四硬字段两侧值、口述 span ordinal 与纯合成 CI 回归；旧报告与 `fixtures/local/m0-2026-08-24` 永久保留。真实 agent 与新 formal 仍需再次明确授权，授权前只跑零额度门禁。维护者只开放 [03 审核 §3.9](./docs/prd/03-review.md) 的有限 M1 并行范围：已定案 design token、TanStack Query + reducer、完整原件 + `evidence_text` 安全退路；本次只改文档、尚未实现。独立复测由该有限切片的开工门槛改为 M1 整体验收门槛；实时事件与其余 M1、M2–M4 均未开放。
 
 ## 干活的顺序
 

@@ -2,14 +2,16 @@
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
 status: review
 owner: "@maintainer"
-date: 2026-09-05
-version: v0.17
+date: 2026-09-06
+version: v0.18
 ---
 
 # 07 · 评测 Eval
 
 > 回答一个 `docs/PRD.md` 认定为生死攸关、却此前无人负责的问题：**agent 读得准不准，怎么知道？**
 > 依据：[ADR-0002 AI 永不直接写入](../adr/0002-ai-never-writes-directly.md)、[ADR-0007 本地可观测性与日志分级](../adr/0007-local-observability-and-log-tiers.md)、[`docs/PRD.md` §9.1](../PRD.md)。
+
+> **当前门槛作用域**（2026-09-06）：第一次正式 `no_go`、冻结阈值与独立新样本要求全部不变。维护者只把正式复测从 design token、Query + reducer 与完整原件证据这个[有限 M1 并行切片](../PRD.md)的开工门槛移到 M1 整体验收门槛；formal final 仍须另获授权并按既有规则得到退出码 0、`verdict = go | conditional_go`，才能满足整体门槛。
 
 ## 1. 问题
 
@@ -518,6 +520,9 @@ fixtures/local/<date>-<slug>/
 
 ## 7. 回流记录
 
+- **2026-09-06 · 有限 M1 并行决定，`status` 保持 `review`**（[`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)）。
+  独立新样本 formal 从有限切片开工门槛改为 M1 整体验收门槛；正式授权、命令、样本构成、阈值、分母、ordinal join、scope 硬失败与报告契约均不变。只有 design token、Query + reducer 与完整原件证据可先行，不能借此运行真实 agent、重写旧报告或把第一次 `no_go` 解释成已通过。
+
 - **2026-09-05 · 收口独立复审，`status` 保持 `review`**（本节首次 no-go 修正；[`docs/PRD.md` §9.4](../PRD.md) 冻结分池）。
   先补红测再修复：control scope 错报意外进入正式硬计数、金额字符串别名绕过同三元组 decoy、协议失败丢弃已写入 claim、manifest 解析与快照两次读取不绑定、未存在父目录的 `..` 与隐私根 symlink 逃逸。保留 control 只记录边界；formal claim 金额规范化校验不改变交易 join；失败证据保留 reported 而不伪造 computed/delta；所有 formal 写入共用最终路径复验，白名单固定在仓库根下。另补正确总计正向重放与 live MCP 描述逐项一致性回归。均为实现缺陷收口，不改冻结阈值 / 分母、旧报告、生产四列五工具或 M1 条件。
 
@@ -601,6 +606,7 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.18 | 2026-09-06 | 把独立新样本 formal 明确为 M1 整体验收门槛而非有限切片开工门槛；正式授权、冻结阈值与全部评测契约不变，第一次 `no_go` 永久保留 |
 | v0.17 | 2026-09-05 | **独立复审收口，`status` 保持 `review`。** 保留 control 不参与 verdict 的冻结边界；堵金额别名、协议失败 claim 丢失、manifest 混合集合及 formal 路径绕过；补正确总计正向合成重放。只跑零额度门禁，旧证据与 M1 条件不变 |
 | v0.16 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** formal v2 fixture-set 指纹、scope 硬失败与指标 4 分子、bounded evidence、四硬字段两侧值、口述 span ordinal 及纯合成 CI 回归全部落地并通过零额度门禁；v1 / 旧 fixtures 不回填，不运行真实 agent，不开始 M1 |
 | v0.15 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；按 §6 待建项测试先行，只跑零额度门禁。第一次 v1 报告、旧 fixtures、阈值 / 分母、ordinal join 与四硬字段不变，真实 agent 与 M1 均不启动 |

@@ -2,7 +2,9 @@
 
 > 归档：[`desktop-v9.dc.html`](./desktop-v9.dc.html) —— 九个屏 · 1440 × 900 · 导入于 2026-08-23
 > 出处：Claude Design 项目「Daybook 桌面端 Token 设计系统」`b57b93f0-3547-496b-bf08-c7d73692ef15` 的「Daybook 桌面端设计稿 v9.dc.html」
-> **状态：参考稿初版，已于 2026-08-24 评审并逐条回流（见下方偏差清单）。** 它**仍不是像素级实现依据**——评审产出的是规格改动，不是把这九个屏定成实现目标；第 1、3、6 条的规格已改而设计稿尚未重画。[`docs/prd/INDEX.md`](../prd/INDEX.md) 要求的「M1 开工前确定设计稿与 token design system」中，**token 那一半已完成**（[`design.md`](../../design.md) v0.5 定稿）。
+> **状态：当前页面布局参考。** 维护者于 2026-09-06 重新指定 v9 为现行页面稿；重新提供的上游文件在删除 `support.js`、改接仓库图标并去掉本归档说明后，与 [`desktop-v9.dc.html`](./desktop-v9.dc.html) 正文逐字一致（规范化正文 SHA-256：`59d97870f1617e2c216233385d641a920851255f790b908182716af9730c6407`）。它**仍不是像素级或产品范围依据**：[`design.md`](../../design.md) v0.5 是 token 事实源，现行 sub-PRD 是行为与里程碑事实源；下方第 1、3、6 条已按评审改规格而稿子尚未重画，冲突时不得照抄页面。
+>
+> [`docs/PRD.md`](../PRD.md) 2026-09-06 开放的有限 M1 并行切片只以 01–03b 的布局层级为参考，并且只实现当前 M0 主路径的 design token、Query + reducer 状态边界与完整原件证据。02 里画出的事项草稿仍属 M3，03 的实时事件、04–07 的账目 / 统计 / 事项 / 设置能力也未因这份页面稿成为当前参考而提前开放。
 
 ## 一句话
 
@@ -84,5 +86,5 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 - [`design.md`](../../design.md) —— token 体系（色阶、字号、间距、组件规格），**v0.5 已定稿**（2026-08-24）；本设计稿的取色来源，也是它两个 hex 该改回去的依据
 - [`assets/brand/README.md`](../../assets/brand/README.md) —— 图标与加载动画的事实源，设计稿的 `ink-800` / `paper-500` 争议直接来自这里的色板
-- [`docs/prd/INDEX.md`](../prd/INDEX.md) —— 各能力规格与状态；「M1 开工前先确定设计稿与 token design system」写在这里
+- [`docs/prd/INDEX.md`](../prd/INDEX.md) —— 各能力规格、有限 M1 并行边界与当前状态
 - [`.claude/rules/frontend.md`](../../.claude/rules/frontend.md) —— 前端实现细则；审核界面的键盘流与「并排的必须是原件」，以及本次接入的 §10 三类输入与 §11 design token 判据
