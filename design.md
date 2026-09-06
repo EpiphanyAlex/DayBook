@@ -477,7 +477,7 @@ components:
 
 > 出处：Claude Design 项目「Daybook桌面端设计」的 `Daybook Token System v3.dc.html`（v0.4 · 全亮），2026-08-14 落到本仓库。
 > **两边同步。** 本文与设计稿都是 v0.4，意图色六列、品类措辞一致；差异出现时以本文为准，并回流设计稿。
-> **状态：已评审定稿（2026-08-24），v0.5。** 三条「待澄清」已拍定并落进正文（见「已澄清」），`ink-800` / `paper-500` 的取值口径定为 OKLCH 规整值。**本文现在是 M1 前端实现的判据**，已接进 [`.claude/rules/frontend.md`](./.claude/rules/frontend.md)。当前 `src/` 的界面仍是 M0 功能基线，**尚未按本文实现**——「定稿」说的是规格定了，不是实现跟上了。
+> **状态：已评审定稿（2026-08-24），v0.5。** 三条「待澄清」已拍定并落进正文（见「已澄清」），`ink-800` / `paper-500` 的取值口径定为 OKLCH 规整值。**本文现在是 M1 前端实现的判据**，已接进 [`.claude/rules/frontend.md`](./.claude/rules/frontend.md)。有限 M1 已在 `src/styles/tokens.css` 与 `src/styles.css` 实现本文 token 和当前主路径，正在完成零额度视觉验收；其余 M1 与后续页面仍未开放。
 > 图形的事实源在 [`assets/brand/README.md`](./assets/brand/README.md)，不在这里——本文只取它的颜色。
 
 ## Overview

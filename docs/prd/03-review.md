@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: review
+status: in-progress
 owner: "@maintainer"
 date: 2026-09-06
-version: v0.22
+version: v0.23
 ---
 
 # 03 · 审核与草稿区
@@ -26,7 +26,7 @@ version: v0.22
 
 **范围**：`draft_*` 表与事实表的隔离 · 确认动作（单条 / 批量） · 证据链呈现（原文并排） · 总额交叉校验 · 异常前置排序 · 键盘流 · 行内编辑 · 虚拟滚动 · 每次纠正的审计与记忆投递 · M2 分类体系操作的影响预览与确认。
 
-**M0 的界面是功能基线，不是设计定稿。** 它只锁定信息架构、可信闸门、状态反馈、可访问性与可操作性；当前 `src/styles.css` 的局部变量不是已定案 token 的实现。M1 的设计输入已经确定：token 事实源是 [`design.md`](../../design.md) v0.5，当前页面布局参考是 [`docs/design/desktop-v9.dc.html`](../design/desktop-v9.dc.html)，且规格与 token 冲突时不得照抄参考稿。维护者于 2026-09-06 只开放 §3.9 的有限 M1 并行切片；完整键盘流、虚拟滚动、运行事件、异常排序与「40 笔 30 秒」仍属于 M1 整体范围。这个分期不允许任何切片省掉原件同屏、报警可见、禁用态和键盘可达等既有功能要求。
+**M0 的界面是功能基线，不是设计定稿。** 它只锁定信息架构、可信闸门、状态反馈、可访问性与可操作性；旧 M0 的局部 CSS 变量不具备 token 事实源地位；本批已迁移至 `src/styles/tokens.css` 的三层 token，有限切片验收中。M1 的设计输入已经确定：token 事实源是 [`design.md`](../../design.md) v0.5，当前页面布局参考是 [`docs/design/desktop-v9.dc.html`](../design/desktop-v9.dc.html)，且规格与 token 冲突时不得照抄参考稿。维护者于 2026-09-06 只开放 §3.9 的有限 M1 并行切片；完整键盘流、虚拟滚动、运行事件、异常排序与「40 笔 30 秒」仍属于 M1 整体范围。这个分期不允许任何切片省掉原件同屏、报警可见、禁用态和键盘可达等既有功能要求。
 
 **非目标**：
 
@@ -361,7 +361,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 本地 IPC 不是网络请求，默认项必须显式覆盖：`staleTime: Infinity`、`retry: false`、`refetchOnWindowFocus: false`、`refetchOnReconnect: false`；只有 mutation、Tauri event 或明确用户动作触发失效。Tauri `invoke` 目前不能用 `AbortSignal` 终止 Rust command，但 query key 能保证来源 A 的迟到结果留在 A 的缓存里，**不能覆盖已经切到的来源 B**。
 
-**默认全选保存为「排除集合」，不能每次重取都重新全选。** 当前 M0 `refreshSelected()` 每次刷新都用全部草稿重建选择集；用户取消一条后只要改了另一条，刷新就会把被排除项重新选中。M1 reducer 按 `(source_id, attempt_id)` 保存用户明确排除的 ID；首次加载与之后新增草稿默认选中，重取不得抹掉人的排除意图。
+**默认全选保存为「排除集合」，不能每次重取都重新全选。** M0 旧实现 `refreshSelected()` 每次刷新都用全部草稿重建选择集；用户取消一条后只要改了另一条，刷新就会把被排除项重新选中。M1 reducer 按 `(source_id, attempt_id)` 保存用户明确排除的 ID；首次加载与之后新增草稿默认选中，重取不得抹掉人的排除意图。
 
 **M1 运行事件的显示边界（2026-09-05，未实施）**：依据 [01 Agent 运行时 §3.4/§6.2](./01-agent-runtime.md) 的 pi 设计回流，运行事件只驱动进度展示或 query 定向失效，不直接改写来源状态、草稿事实、对账结果与确认策略。来源事件按 `(source_id, attempt_id, agent_session_id)` 隔离；旧 attempt 的迟到事件不得覆盖当前尝试，重复进度不重复计数。面板卸载/消费失败不触发取消或重试；重新订阅或发现事件缺口时从 Rust 重取，快照与事件的衔接协议由 [01 §5 R9](./01-agent-runtime.md) 在运行事件切片开工前定案。请求被接受、草稿生成、解析完成、人工确认入账须分别显示，不以 CLI「完成」文本或最后一帧进度推断入账；高频进度可合并发布，截断须明示，终态不能被旧进度回退。此处不新增前端业务 store；该运行事件切片不属于 §3.9 的有限并行范围。
 
@@ -373,7 +373,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 ### 3.9 有限 M1 并行切片（2026-09-06 维护者决定）
 
-依据 [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)，独立新样本正式复测不再阻止本节的三个既定边界开始实现，但仍阻止 M1 整体进入 `review`。本次只回流规格与准备计划，尚未开始实现；frontmatter `review` 仍指已经启动并验收过的 M0 切片。后续真正写代码时，本文按 [`docs/prd/CLAUDE.md`](./CLAUDE.md) 的跨里程碑状态规则转为有限 M1 `in-progress`。
+依据 [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)，独立新样本正式复测不再阻止本节的三个既定边界开始实现，但仍阻止 M1 整体进入 `review`。维护者已确认实施计划，当前正在实施本节三项；frontmatter `in-progress` 只指有限 M1 切片，遵守 [`docs/prd/CLAUDE.md`](./CLAUDE.md) 的跨里程碑状态规则。
 
 | 可实施边界 | 必须保持的契约 | 不得顺带带入 |
 |---|---|---|
@@ -536,6 +536,8 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-06（有限 M1 实现） | Query v5 只保存 Rust 投影，草稿查询包含 source/attempt 身份（包括空数组）；mutation 成功与读取失败分开，旧回调不抢来源焦点或清除后来输入。排除集合按 attempt 隔离。完整原件与抽取声明独立展示；口述 span 必须逐字匹配，失败禁批量背书但保留合法单条确认。差额只对 Rust 返回的两侧整数作 BigInt 展示，不重算 policy。未改 Rust、schema 或 IPC 契约；唯一新依赖 `@tanstack/react-query` v5（锁定 5.102.8）及 core 运行时源码未见网络传输或遥测，所有查询仍经 `call<T>` | 本文 §3.2/§3.8–§3.9；[审核速查](../../.claude/features/review-and-confirm.md) |
+| 2026-09-06（有限 M1 开工） | 已确认计划开始实施，状态转为有限 M1 `in-progress`；真实调用仍关闭 | 本文 §3.9/§6；[`docs/PRD.md`](../PRD.md) 有限 M1 边界 |
 | 2026-09-06（有限 M1 并行决定） | 维护者将独立新样本正式复测从 M1 开工门槛改为整体验收门槛，只开放 design token、TanStack Query + reducer 状态边界、完整原件 + `evidence_text` 安全退路；当前页面参考重新指定为归档 v9。实时事件、排序、键盘流、虚拟滚动与 40 笔跑测仍关闭；本次只改文档，`review` 继续指 M0 已验收切片 | [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)；本文 §3.9/§6；[`docs/design/README.md`](../design/README.md) |
 | 2026-09-05（pi 设计回流） | M1 运行事件只驱动显示或 query 失效；补旧 attempt 迟到隔离、重复进度、重新订阅、截断和请求/入账区分的 UI 边界与零额度验收。状态方案不变，`review` 仍指 M0，M1 未实施 | [01 Agent 运行时 §3.4/§6.2](./01-agent-runtime.md) 的固定版本 pi 源码参考与运行契约；本文 §3.8 |
 | 2026-09-02（no-go 修正验收） | **本文由 `in-progress → review`。** 生产 `total_check` 的三条等式、对账四态、确认策略三态与无 force 旁路均未修改；关键词非强制完成和 formal `scopeInvalidTotalReports == 0` 两条新验收通过，范围资格仍由提示词 + formal 真值负责。完整零额度门禁通过，M1 界面切片未开始 | 本文 §6；[01 Agent 运行时 §3.2](./01-agent-runtime.md)；[07 评测 §3.4](./07-eval.md) |
@@ -570,6 +572,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.23 | 2026-09-06 | 已确认有限 M1 计划开工，`in-progress` 仅覆盖 §3.9 三项 |
 | v0.22 | 2026-09-06 | **开放有限 M1 并行切片，`status` 仍为 M0 `review`。** 只允许 design token、Query + reducer 状态边界与完整原件证据退路，新增零额度切片验收并把 formal 独立新样本复测写成 M1 整体追加门槛；页面参考为归档 v9，实时事件与其余 M1 能力仍未开放，本次未实现 |
 | v0.21 | 2026-09-05 | 同步 M1 运行事件与 Rust 权威快照边界、任务身份隔离及 UI 故障验收；保持 Query cache + screen reducer，当前 M0 `review` 与确认策略不变 |
 | v0.20 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 关键词非强制与 formal scope-invalid=0 回归通过；既有 total-check 等式、确认策略、无 force 旁路与 M1 UI 均不变 |

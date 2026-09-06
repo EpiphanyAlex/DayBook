@@ -57,6 +57,18 @@ export function formatMoney(amount: MinorUnits | number | null, currency: string
   return `${sign}${value} ${currency}`
 }
 
+/** 只格式化 Rust 返回的两侧之差；差可达 2×10^15，BigInt 不引入金额浮点。 */
+export function formatDifference(calculated: number | null, reported: number | null, currency: string | null): string {
+  if (calculated === null || reported === null || currency === null) return '—'
+  for (const value of [calculated, reported]) {
+    if (!Number.isSafeInteger(value) || Math.abs(value) > 1e15) throw new RangeError('金额超出支持范围')
+  }
+  const difference = BigInt(calculated) - BigInt(reported)
+  const exponent = currencyExponent(currency)
+  const digits = (difference < 0n ? -difference : difference).toString().padStart(exponent + 1, '0')
+  return `${difference < 0n ? '−' : ''}${exponent ? `${digits.slice(0, -exponent)}.${digits.slice(-exponent)}` : digits} ${currency}`
+}
+
 /** 把用户输入的主单位小数转成最小单位整数；不合法返回 null，由调用方决定怎么提示。 */
 export function parseMoneyInput(value: string, currency: string): number | null {
   const normalized = value.trim().replace(/,/g, '')
