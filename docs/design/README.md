@@ -50,7 +50,7 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 | 06b | 事项 · 变更审核 | create / update 混合批；目标已确定 / 需选目标；计划层与结果层分开显示 | 与 [03 §3.6](../prd/03-review.md) + [05 §3.4](../prd/05-items.md) 的 M3 契约一致 |
 | 07 | 设置 | 常用设定 · 类别与清单 · 解析与模型 · 数据与隐私 | 内容分散在 00 / 01 / 04 / 05，见下表第 1、2、4、5 条 |
 
-**有限 M1 已迁移 01–03b 的当前主路径层级、token 与完整原件证据，正在验收**；仍不是九个屏全量实现。04–07 依赖的后端能力尚不存在。
+**有限 M1 已迁移 01–03b 的当前主路径层级、token 与完整原件证据，已通过零额度自动与合成视觉验收**；仍不是九个屏全量实现。04–07 依赖的后端能力尚不存在。
 
 ## Token 核对：24 个里 22 个逐字一致
 
@@ -64,6 +64,21 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 **这不是两套配色，是同一套的两个取值口径。** 上游的 Token System v3（= `design.md` v0.4 的来源）自己写明：「取色来源 · 图标里已有的四种颜色：`#4E2F1C` 棕墨 → `ink.800 / 900`；`#C4B79C` 麻 → `paper.500`」——**图标色是推导起点，token 是 OKLCH 规整后的落点**，而九个屏画的时候用回了起点。`ink-800` 承担所有标题、导航当前项与结构线，这个差别在整屏上看得出来。
 
 **口径已于 2026-08-24 定：以 OKLCH 规整值为准，设计稿改这两个 hex。** 决定性理由是上面那句引文自己给的——**`#4E2F1C` 被同时指派给 `ink.800` 与 `ink.900` 两档，一个 hex 充不了两档**，所以「用回原色」在这套体系里不可表达。详见下表第 6 条。
+
+## 有限 M1 验收截图（2026-09-06）
+
+基线为 `f0b0162`，前后使用同一组纯合成数据与 mock IPC，1440×900、100% 缩放。独立入口为 `src/test/visual/limitedM1.html?scenario=review`（`npm run dev` 后打开），生产入口不引用它；启动探测、解析与拖放均由 mock 封闭，未知 IPC 直接失败。此次未启动真实桌面壳或调用 agent。
+
+| 主路径场景 | 迁移前 | 迁移后 |
+|---|---|---|
+| 首次输入 | [基线](./limited-m1/before-empty.png) | [token 与 composer](./limited-m1/after-empty.png) |
+| 解析状态 | [基线](./limited-m1/before-parsing.png) | [状态与停止入口](./limited-m1/after-parsing.png) |
+| 普通审核 | [基线](./limited-m1/before-review.png) | [完整口述、当前声明与全部草稿](./limited-m1/after-review.png) |
+| 对账异常 | [基线](./limited-m1/before-failed.png) | [差额、声明与口述背书](./limited-m1/after-failed.png) |
+
+补充检查：[截图对账通过](./limited-m1/after-file-passed.png)、[截图不符](./limited-m1/after-file-failed.png)、[截图无法校验](./limited-m1/after-file-unavailable.png)、[缺三元组与遗漏](./limited-m1/after-gaps.png)、[取消第一条后编辑第二条](./limited-m1/after-interaction.png)、[长列表滚到底部](./limited-m1/after-long-scrolled.png)。对应 `scenario` 为 `file-passed`、`file-failed`、`file-unavailable`、`gaps`、`review`、`long`。
+
+人工逐图检查与 DOM 尺寸检查通过：无水平溢出；来源栏 252px、审核栏 432px；完整截图按比例落在原件区域内，口述全文不截断；草稿滚到底部时确认按钮底部约 857px。取消第一条后编辑第二条、失效重取完成，选择仍为 `[未选、已选]`。已显示的正常文字最低对比度 4.75:1、信息字号不低于 11px。图像内容不参与文字 token 对比度计算。有限切片完成不代表 M0 放行或 M1 整体验收，范围与自动验收记录见 [03 审核 §6–§7](../prd/03-review.md)。
 
 ## 设计稿领先于规格的地方（**已于 2026-08-24 全部评审并回流**）
 

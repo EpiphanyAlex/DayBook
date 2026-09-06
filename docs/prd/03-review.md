@@ -1,9 +1,9 @@
 ---
 title: 03 审核与草稿区 — 草稿区、证据链、总额校验与审核界面
-status: in-progress
+status: done
 owner: "@maintainer"
 date: 2026-09-06
-version: v0.23
+version: v0.24
 ---
 
 # 03 · 审核与草稿区
@@ -26,7 +26,7 @@ version: v0.23
 
 **范围**：`draft_*` 表与事实表的隔离 · 确认动作（单条 / 批量） · 证据链呈现（原文并排） · 总额交叉校验 · 异常前置排序 · 键盘流 · 行内编辑 · 虚拟滚动 · 每次纠正的审计与记忆投递 · M2 分类体系操作的影响预览与确认。
 
-**M0 的界面是功能基线，不是设计定稿。** 它只锁定信息架构、可信闸门、状态反馈、可访问性与可操作性；旧 M0 的局部 CSS 变量不具备 token 事实源地位；本批已迁移至 `src/styles/tokens.css` 的三层 token，有限切片验收中。M1 的设计输入已经确定：token 事实源是 [`design.md`](../../design.md) v0.5，当前页面布局参考是 [`docs/design/desktop-v9.dc.html`](../design/desktop-v9.dc.html)，且规格与 token 冲突时不得照抄参考稿。维护者于 2026-09-06 只开放 §3.9 的有限 M1 并行切片；完整键盘流、虚拟滚动、运行事件、异常排序与「40 笔 30 秒」仍属于 M1 整体范围。这个分期不允许任何切片省掉原件同屏、报警可见、禁用态和键盘可达等既有功能要求。
+**M0 的界面是功能基线，不是设计定稿。** 它只锁定信息架构、可信闸门、状态反馈、可访问性与可操作性；旧 M0 的局部 CSS 变量不具备 token 事实源地位；本批已迁移至 `src/styles/tokens.css` 的三层 token，有限切片已通过零额度验收。M1 的设计输入已经确定：token 事实源是 [`design.md`](../../design.md) v0.5，当前页面布局参考是 [`docs/design/desktop-v9.dc.html`](../design/desktop-v9.dc.html)，且规格与 token 冲突时不得照抄参考稿。维护者于 2026-09-06 只开放 §3.9 的有限 M1 并行切片；完整键盘流、虚拟滚动、运行事件、异常排序与「40 笔 30 秒」仍属于 M1 整体范围。这个分期不允许任何切片省掉原件同屏、报警可见、禁用态和键盘可达等既有功能要求。
 
 **非目标**：
 
@@ -373,7 +373,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 ### 3.9 有限 M1 并行切片（2026-09-06 维护者决定）
 
-依据 [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)，独立新样本正式复测不再阻止本节的三个既定边界开始实现，但仍阻止 M1 整体进入 `review`。维护者已确认实施计划，当前正在实施本节三项；frontmatter `in-progress` 只指有限 M1 切片，遵守 [`docs/prd/CLAUDE.md`](./CLAUDE.md) 的跨里程碑状态规则。
+依据 [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)，独立新样本正式复测不再阻止本节的三个既定边界开始实现，但仍阻止 M1 整体进入 `review`。维护者已确认实施计划，本节三项已通过自动与合成浏览器视觉验收，经 `in-progress → review` 并完成回流、索引与 feature 速查后进入 `done`；frontmatter `done` 只指有限 M1 切片，遵守 [`docs/prd/CLAUDE.md`](./CLAUDE.md) 的跨里程碑状态规则。
 
 | 可实施边界 | 必须保持的契约 | 不得顺带带入 |
 |---|---|---|
@@ -473,13 +473,13 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 ##### 有限并行切片必过（零额度；允许先实现）
 
-- [ ] `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 全绿
-- [ ] `npm test -- review/design-tokens` 通过——当前 M0 主路径组件只消费 semantic token；禁用态不另造底色、草稿不获得事实色、信息文字不低于 11px，且三类输入职责不串用（§2、§3.9）
-- [ ] `npm test -- review/query-race` 通过——来源 A 的 IPC 晚于来源 B 返回时，A 的结果只进入 A 的 query cache，不覆盖当前来源 B
-- [ ] `npm test -- review/selection-intent` 通过——用户取消选择一条后，编辑另一条触发失效重取；被取消项仍不选中，新出现草稿默认选中（§3.8「排除集合」）
-- [ ] `npm test -- review/evidence-original` 通过——`file` 显示完整来源图且 `utterance` 显示整段转写；当前草稿的 `evidence_text` 同屏，但截图不渲染 bbox / 推断区域，口述只按有效 code-point span 高亮
-- [ ] **人工视觉验收（不调用 agent）**：用合成 fixture / mock IPC 在 1440 × 900 依次打开首次输入、解析状态、普通审核与对账异常四态；布局层级以 [`desktop-v9.dc.html`](../design/desktop-v9.dc.html) 01–03b 为参考，色值、字号、禁用态、草稿状态与输入职责逐项以 [`design.md`](../../design.md) v0.5 为准。完整原件、当前 `evidence_text`、合计证据 / 差额与确认按钮满足 §3.2–§3.3 的同屏要求；页面中不得出现 04–07 的未来能力
-- [ ] `node scripts/verify-m0.mjs --skip-live` 退出码 0；该结果只证明零额度回归，不构成 M0 或 M1 整体通过
+- [x] `npm run lint` · `npm run typecheck` · `npm test` · `npm run build` 全绿
+- [x] `npm test -- review/design-tokens` 通过——当前 M0 主路径组件只消费 semantic token；禁用态不另造底色、草稿不获得事实色、信息文字不低于 11px，且三类输入职责不串用（§2、§3.9）
+- [x] `npm test -- review/query-race` 通过——来源 A 的 IPC 晚于来源 B 返回时，A 的结果只进入 A 的 query cache，不覆盖当前来源 B
+- [x] `npm test -- review/selection-intent` 通过——用户取消选择一条后，编辑另一条触发失效重取；被取消项仍不选中，新出现草稿默认选中（§3.8「排除集合」）
+- [x] `npm test -- review/evidence-original` 通过——`file` 显示完整来源图且 `utterance` 显示整段转写；当前草稿的 `evidence_text` 同屏，但截图不渲染 bbox / 推断区域，口述只按有效 code-point span 高亮
+- [x] **人工视觉验收（不调用 agent）**：用合成 fixture / mock IPC 在 1440 × 900 依次打开首次输入、解析状态、普通审核与对账异常四态；布局层级以 [`desktop-v9.dc.html`](../design/desktop-v9.dc.html) 01–03b 为参考，色值、字号、禁用态、草稿状态与输入职责逐项以 [`design.md`](../../design.md) v0.5 为准。完整原件、当前 `evidence_text`、合计证据 / 差额与确认按钮满足 §3.2–§3.3 的同屏要求；页面中不得出现 04–07 的未来能力
+- [x] `node scripts/verify-m0.mjs --skip-live` 退出码 0；该结果只证明零额度回归，不构成 M0 或 M1 整体通过
 
 ##### M1 整体追加必过（有限切片通过仍不等于整体验收）
 
@@ -536,6 +536,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 日期 | 回流内容 | 依据 |
 |---|---|---|
+| 2026-09-06（有限 M1 验收与收尾） | 四个独立选择器真实执行：query-race 5、selection-intent 3、evidence-original 6、design-tokens 14；另有 mutation-failure 8 条通过，无 skip/todo。前端四门禁、Rust fmt / clippy / tests、外部 MCP→UDS→SQLite 与四项文档检查通过，`verify-m0 --skip-live` exit 0。1440×900 / 100% 缩放的四态及 file passed/failed/unavailable、缺三元组与遗漏、长列表检查通过；无水平溢出，rail 252px、tray 432px，最低文字对比度 4.75:1，信息字号 ≥11px。取消第一条后编辑第二条仍为 [未选、已选]，滚动草稿到底部后确认按钮底部约 857px。只用纯合成 mock，未启动真实桌面壳或调用 agent；首次 no_go 与旧证据不变 | [四态前后截图及补充场景](../design/README.md#有限-m1-验收截图2026-09-06)；本文 §6 有限切片清单 |
 | 2026-09-06（有限 M1 实现） | Query v5 只保存 Rust 投影，草稿查询包含 source/attempt 身份（包括空数组）；mutation 成功与读取失败分开，旧回调不抢来源焦点或清除后来输入。排除集合按 attempt 隔离。完整原件与抽取声明独立展示；口述 span 必须逐字匹配，失败禁批量背书但保留合法单条确认。差额只对 Rust 返回的两侧整数作 BigInt 展示，不重算 policy。未改 Rust、schema 或 IPC 契约；唯一新依赖 `@tanstack/react-query` v5（锁定 5.102.8）及 core 运行时源码未见网络传输或遥测，所有查询仍经 `call<T>` | 本文 §3.2/§3.8–§3.9；[审核速查](../../.claude/features/review-and-confirm.md) |
 | 2026-09-06（有限 M1 开工） | 已确认计划开始实施，状态转为有限 M1 `in-progress`；真实调用仍关闭 | 本文 §3.9/§6；[`docs/PRD.md`](../PRD.md) 有限 M1 边界 |
 | 2026-09-06（有限 M1 并行决定） | 维护者将独立新样本正式复测从 M1 开工门槛改为整体验收门槛，只开放 design token、TanStack Query + reducer 状态边界、完整原件 + `evidence_text` 安全退路；当前页面参考重新指定为归档 v9。实时事件、排序、键盘流、虚拟滚动与 40 笔跑测仍关闭；本次只改文档，`review` 继续指 M0 已验收切片 | [`docs/PRD.md`「有限 M1 并行开发边界」](../PRD.md)；本文 §3.9/§6；[`docs/design/README.md`](../design/README.md) |
@@ -572,6 +573,7 @@ Query cache 是**可失效、可重取的只读投影缓存**，不是第二份�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.24 | 2026-09-06 | 有限 M1 三项完成，自动与合成浏览器视觉验收通过，回流与收尾完成后由 in-progress 经 review 转 done；M0 no_go、M1 整体追加验收与未开放范围不变 |
 | v0.23 | 2026-09-06 | 已确认有限 M1 计划开工，`in-progress` 仅覆盖 §3.9 三项 |
 | v0.22 | 2026-09-06 | **开放有限 M1 并行切片，`status` 仍为 M0 `review`。** 只允许 design token、Query + reducer 状态边界与完整原件证据退路，新增零额度切片验收并把 formal 独立新样本复测写成 M1 整体追加门槛；页面参考为归档 v9，实时事件与其余 M1 能力仍未开放，本次未实现 |
 | v0.21 | 2026-09-05 | 同步 M1 运行事件与 Rust 权威快照边界、任务身份隔离及 UI 故障验收；保持 Query cache + screen reducer，当前 M0 `review` 与确认策略不变 |

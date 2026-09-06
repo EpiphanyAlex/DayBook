@@ -53,7 +53,7 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 
 ## 已知边界与坑
 
-- **有限 M1 三项已实现，正在验收**：[03 §3.9/§6](../../docs/prd/03-review.md) 的 token、Query + reducer 与完整原件证据；第一次 M0 `no_go` 与其余未开放范围保持不变。
+- **有限 M1 三项已实现并通过零额度验收**：[03 §3.9/§6](../../docs/prd/03-review.md) 的 token、Query + reducer 与完整原件证据；第一次 M0 `no_go` 与其余未开放范围保持不变。
 - **M1 运行事件投影未实施，且不在有限三项内**：[03 §3.8/§6](../../docs/prd/03-review.md) 与 [01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md) 已规定旧 attempt 事件隔离、重复进度不累计、重新订阅重取快照、展示截断明示；事件只驱动显示或 query 失效，不决定来源状态、确认策略与入账。面板关闭不取消解析，不抹掉用户的排除集合。
 - 原件整体可见，但没有截图区域高亮。2026-08-24 的 R1 产品链路 spike 证明 agent bbox 会误指相邻行，已决定**不**在 M1 增加伪精确高亮；当前完整原件 + `evidence_text` 并列就是截图来源的安全退路（[实测](../../docs/spikes/2026-08-24-r1-evidence-region.md)）。虚拟滚动与完整键盘流仍未实现。
 - 三栏迁移以 [`design.md`](../../design.md) v0.5 为 token 事实源；[v9 页面参考](../../docs/design/README.md) 只提供 01–03b 层级，未来导航与能力未带入。
