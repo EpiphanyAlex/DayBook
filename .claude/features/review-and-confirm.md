@@ -1,6 +1,6 @@
 # 审核与确认
 
-> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-09-05
+> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-09-06
 
 ## 一句话
 
@@ -46,10 +46,10 @@ list_review_sources / list_active_drafts / read_evidence / check_source_total
 
 ## 已知边界与坑
 
-- **M1 运行事件投影未实施**：[03 §3.8/§6](../../docs/prd/03-review.md) 与 [01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md) 已规定旧 attempt 事件隔离、重复进度不累计、重新订阅重取快照、展示截断明示；事件只驱动显示或 query 失效，不决定来源状态、确认策略与入账。面板关闭不取消解析，不抹掉用户的排除集合。
-
+- **2026-09-06 的有限 M1 三项已获准但尚未实现**：[03 §3.9/§6](../../docs/prd/03-review.md) 只开放 design token、Query + reducer 与完整原件证据；本文件仍描述当前 M0 代码实况。
+- **M1 运行事件投影未实施，且不在有限三项内**：[03 §3.8/§6](../../docs/prd/03-review.md) 与 [01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md) 已规定旧 attempt 事件隔离、重复进度不累计、重新订阅重取快照、展示截断明示；事件只驱动显示或 query 失效，不决定来源状态、确认策略与入账。面板关闭不取消解析，不抹掉用户的排除集合。
 - 原件整体可见，但没有截图区域高亮。2026-08-24 的 R1 产品链路 spike 证明 agent bbox 会误指相邻行，已决定**不**在 M1 增加伪精确高亮；当前完整原件 + `evidence_text` 并列就是截图来源的安全退路（[实测](../../docs/spikes/2026-08-24-r1-evidence-region.md)）。虚拟滚动与完整键盘流仍未实现。
-- 三栏界面是 M0 功能基线，尚未按已定稿的 [`design.md`](../../design.md) v0.5 重做；`src/styles.css` 的 `:root` 变量不是 token design system。
+- 三栏界面是 M0 功能基线，尚未按已定稿的 [`design.md`](../../design.md) v0.5 与当前 [v9 页面参考](../../docs/design/README.md) 重做；`src/styles.css` 的 `:root` 变量不是 token design system。
 - `evidence_text` 是 agent 的抽取声明，不是独立证据，所以截图或口述全文默认可见。
 - 当前界面是证据检查台，不是传统记账表单；金额汇总不在 React 内计算。
 - **改金额时不要再把本位币金额当独立输入**：v0.11 的 `edit_draft` 那样写，于是「把 AI 读错的 1680 改回 168」必然返回 `data.money_inconsistent`，而当时的验收测试改的是 `merchant`，门禁全绿。见 [03 §3.5](../../docs/prd/03-review.md)「本位币金额是导出值」。
