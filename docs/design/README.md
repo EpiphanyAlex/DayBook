@@ -65,18 +65,15 @@ CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 **口径已于 2026-08-24 定：以 OKLCH 规整值为准，设计稿改这两个 hex。** 决定性理由是上面那句引文自己给的——**`#4E2F1C` 被同时指派给 `ink.800` 与 `ink.900` 两档，一个 hex 充不了两档**，所以「用回原色」在这套体系里不可表达。详见下表第 6 条。
 
-## 有限 M1 验收截图（2026-09-06）
+## 有限 M1 验收记录（2026-09-06）
 
 基线为 `f0b0162`，前后使用同一组纯合成数据与 mock IPC，1440×900、100% 缩放。独立入口为 `src/test/visual/limitedM1.html?scenario=review`（`npm run dev` 后打开），生产入口不引用它；启动探测、解析与拖放均由 mock 封闭，未知 IPC 直接失败。此次未启动真实桌面壳或调用 agent。
 
-| 主路径场景 | 迁移前 | 迁移后 |
-|---|---|---|
-| 首次输入 | [基线](./limited-m1/before-empty.png) | [token 与 composer](./limited-m1/after-empty.png) |
-| 解析状态 | [基线](./limited-m1/before-parsing.png) | [状态与停止入口](./limited-m1/after-parsing.png) |
-| 普通审核 | [基线](./limited-m1/before-review.png) | [完整口述、当前声明与全部草稿](./limited-m1/after-review.png) |
-| 对账异常 | [基线](./limited-m1/before-failed.png) | [差额、声明与口述背书](./limited-m1/after-failed.png) |
+已检查首次输入、解析状态、普通审核与对账异常四态，对应 `scenario` 为 `empty`、`parsing`、`review`、`failed`。
 
-补充检查：[截图对账通过](./limited-m1/after-file-passed.png)、[截图不符](./limited-m1/after-file-failed.png)、[截图无法校验](./limited-m1/after-file-unavailable.png)、[缺三元组与遗漏](./limited-m1/after-gaps.png)、[取消第一条后编辑第二条](./limited-m1/after-interaction.png)、[长列表滚到底部](./limited-m1/after-long-scrolled.png)。对应 `scenario` 为 `file-passed`、`file-failed`、`file-unavailable`、`gaps`、`review`、`long`。
+补充检查：截图对账通过、不符、无法校验，缺三元组与遗漏，取消第一条后编辑第二条，长列表滚到底部。对应 `scenario` 为 `file-passed`、`file-failed`、`file-unavailable`、`gaps`、`review`、`long`。
+
+验收截图属于本机生成产物，保存在已被 Git 忽略的 `output/playwright/limited-m1/`，不随源码提交。仓库保留合成 fixture、视觉入口与验收结论，供后续复验。
 
 人工逐图检查与 DOM 尺寸检查通过：无水平溢出；来源栏 252px、审核栏 432px；完整截图按比例落在原件区域内，口述全文不截断；草稿滚到底部时确认按钮底部约 857px。取消第一条后编辑第二条、失效重取完成，选择仍为 `[未选、已选]`。已显示的正常文字最低对比度 4.75:1、信息字号不低于 11px。图像内容不参与文字 token 对比度计算。有限切片完成不代表 M0 放行或 M1 整体验收，范围与自动验收记录见 [03 审核 §6–§7](../prd/03-review.md)。
 
