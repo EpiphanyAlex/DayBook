@@ -57,6 +57,7 @@ pnpm-debug.log*
 
 # ── 本地 UI 验证产物 ─────────────────────────────────────
 /.playwright-mcp/
+/.playwright-cli/
 /output/
 
 # ── pi agent 的本机工具目录 ─────────────────────────────

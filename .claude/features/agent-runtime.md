@@ -65,6 +65,8 @@ AgentRuntime::parse_source
 
 ## 已知边界与坑
 
+- 有限 M1 的前端状态/日志读取集中在 `src/review/queries.ts`，启动 `probeOnce` 按 QueryClient 去重；probe/parse/cancel 仍是动作，不是自动重取 queryFn。窗口聚焦、重连与 StrictMode 再挂载不增加探测。
+
 - **pi 参考已回流 M1、未实现，且不在 2026-09-06 有限并行范围内**（[01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md)）：任务事件携带来源/attempt/session 身份，终态拒绝迟到写入；请求接收、起草、解析完成与入账分别取证。UI 观察不掌握执行权，重新订阅重取 Rust 快照，高频进度可合并但不能丢终态或完整 debug 调用。R9 在运行事件切片开工前确定容量、时限与快照衔接；验收使用假 CLI 和可控存储失败。固定 pi 提交与适用范围见该规格，不新增自动重放或 pi 后端。
 
 - **后续安排已定、尚未实施**（[01 §3.4/§3.5/§6](../../docs/prd/01-agent-runtime.md)，2026-09-06 边界重申）：M1 运行时仍要补实时事件、有界输出缓冲与有界收尾，参数在该切片开工前按 R9 审定，用假 CLI 做零额度验收；第二后端接入时才统一公共进程执行逻辑，保留后端专属认证与密封探测。当前仍是 `ClaudeCodeBackend::run_sealed` 管进程、会话结束后落日志；M0 正式复测未完成，获准先行的仅是 03 审核的 design token、Query + reducer 与完整原件证据。

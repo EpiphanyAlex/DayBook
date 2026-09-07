@@ -1,6 +1,6 @@
 # 导入截图与口述
 
-> 规格：[02 导入](../../docs/prd/02-ingest.md) · 最后更新：2026-08-13
+> 规格：[02 导入](../../docs/prd/02-ingest.md) · 最后更新：2026-09-06
 
 ## 一句话
 
@@ -47,6 +47,9 @@
 - **`sources.state` 只有一处写入点**：`ingest::apply_transition`（收在调用方的事务里）。`agent/runtime.rs`、`domain/draft.rs::void_attempt`、`domain/confirm.rs::update_source_reviewed`、启动恢复扫描全部走它，`ingest::source_state_has_one_writer` 守着别处不许再写。转移表含 `parsed → parsing`（重新解析）与 `failed → failed`（作废是会被触发两次的补偿动作）。
 
 ## 已知边界与坑
+
+- 有限 M1 的来源列表与原件由 `src/review/queries.ts` 缓存；导入后定向重读，解析/停止结束（含失败）按 Rust 最新 attempt 重读，不由 Promise 成败推断来源终态。
+- 口述提交捕获输入与来源选择代次，完成不清除后来输入，也不抢回后来选择的来源。原有主动解析语义保留，未加自动重试或事件订阅。
 
 - M0 不支持 HEIC/PDF；必须明确报 `ingest.unsupported_format`。
 - `parsed` 的判据不是退出码 0，而是成功调用 `complete_source` 后正常退出。

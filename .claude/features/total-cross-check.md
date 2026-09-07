@@ -1,6 +1,6 @@
 # 总额交叉校验
 
-> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-09-02
+> 规格：[03 审核与草稿区](../../docs/prd/03-review.md) · 最后更新：2026-09-06
 
 ## 一句话
 
@@ -13,7 +13,7 @@ agent report_source_total
   → parse_attempts.reported_total_*
   → domain::confirm::total_check(attempt_id)
   → reconciliation_status + confirmation_policy
-  → src/App.tsx ReconciliationCard / 批量按钮 gate
+  → src/review/queries.ts → ReconciliationCard.tsx / App.tsx 批量按钮 gate
 ```
 
 ## 关键文件
@@ -23,7 +23,7 @@ agent report_source_total
 | `src-tauri/src/domain/confirm.rs::total_check` | 尝试范围求和、币种选择、合计类型等式、两维结果 |
 | `src-tauri/src/domain/confirm.rs::confirm_batch` | 服务端重新校验策略，不信任 UI 按钮状态 |
 | `src/review/policy.ts` | 前端只读取 `confirmationPolicy` 与口述三项展示 attestation |
-| `src/App.tsx::ReconciliationCard` | 显示声明值、计算值、来源合计原文与报警 |
+| `src/review/ReconciliationCard.tsx` | 显示 Rust 声明值、计算值、来源合计原文与报警；`src/lib/money.ts::formatDifference` 只作两侧整数差额展示 |
 
 ## 业务规则
 
