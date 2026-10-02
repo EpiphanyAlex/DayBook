@@ -4,6 +4,7 @@
 - **状态**：已接受
 - **决策者**：@maintainer
 - **相关**：[ADR-0001 本地优先桌面平台](./0001-local-first-desktop-platform.md)、[ADR-0002 AI 永不直接写入](./0002-ai-never-writes-directly.md)、[`docs/prd/01-agent-runtime.md`](../prd/01-agent-runtime.md)
+- **2026-10-02 修订**：按[总 PRD「近期后端优先级」](../PRD.md#codex-model-priority)，下一步优先 Codex 适配及 Claude Code / Codex 的统一模型选择，其他模型后延。§4 同步排期与实现状态，外部 CLI、凭证、出站及 MCP 权限边界不变；不新建重复 ADR。
 - **2026-08-08 修订**：仓库转为公开，决策者署名改为非具名 handle。**决策内容未变**——§2 论证「不按业务领域拆 agent」的跨域例句保留，它是该决定的载重论据。
 - **2026-08-09 修订（二）**：§4 后端清单**删除「用户自备 API key」**——它要求应用存凭证、带 endpoint、自发 HTTPS、代理鉴权，与本节后半句及 [`CLAUDE.md`](../../CLAUDE.md) 约束 2 正面冲突，且产品用不上（用户已有付费订阅的 CLI）。后端形态收窄为「用户预先配置好的外部进程」。**应用直连模型 API 需新写 ADR。** 同日「理由」一节删除无出处的政策时间线——已接受的 ADR 不以未核实观察为依据；论据改为「厂商政策会变」，现行条款核实要求见 [`docs/PRD.md` §12](../PRD.md)。
 - **2026-08-12 修订（R6 spike 结论回写）**：§1 挂起的进程归属**已定案——独立 MCP helper 二进制 + Unix domain socket**。同时 §4 的可插拔后端**从「接口先摆着」提为「第二个实现要真能跑」**：R6 第 ③ 项核实厂商现行条款的结果不是绿灯（详见「后果」一节新增段落与 [`docs/PRD.md` §12](../PRD.md)）。实测记录：[`docs/spikes/2026-08-12-r6-agent-runtime.md`](../spikes/2026-08-12-r6-agent-runtime.md)。
@@ -77,7 +78,7 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端
 
 支持的后端形态：`claude -p` / `codex exec` / 用户自己跑的本地模型进程。**共同点是它们都是用户预先装好、预先登录好的独立进程**，应用只负责 spawn 它、喂任务、收结果。
 
-**v1 只实现 Claude Code 一种，但接口从第一天就存在。**
+**当前已实现 Claude Code；近期优先新增 Codex 适配与统一模型选择，尚未实施。** Gemini、Grok、DeepSeek 等其他模型后续再接入。统一选择区分外部后端与该后端可用模型，共用 Daybook 的业务状态机、MCP 工具与审核闸门；模型与工具调用循环继续由所选 CLI 承担，本轮不叠加 Pi agent 或中转网关。范围与待决契约见 [01 Agent 运行时 §3.5 / R10](../prd/01-agent-runtime.md#codex-model-selection)。`codex exec` 仅为形态示例，具体传输方式须在实施前验证后确定。
 
 **应用不打包任何厂商凭证、不存储用户的 API key、不提供第三方登录、不代理厂商鉴权、不自己发出站请求。** 用户使用的是自己已安装并登录的 CLI；模型服务商的流量由该 CLI 自行发起，应用不代理、不转发、不记录（[ADR-0001](./0001-local-first-desktop-platform.md)）。
 
@@ -118,7 +119,7 @@ MCP server 走 **stdio**，用 **`rmcp`**（官方 Rust SDK）实现，不开端
 
 - 用户必须自己装好并登录 Claude Code 或 Codex——**这是一道真实的准入门槛**，产品不做任何简化（简化就意味着代理鉴权，违反本 ADR）
 - 受制于用户订阅的用量限制。核心操作（多图 + 长上下文 + 多轮推理）恰好最烧额度（[`docs/PRD.md` §12](../PRD.md)）
-- 不同后端的能力差异（尤其视觉解析）会导致体验不一致，v1 不做能力探测与降级
+- 不同后端的能力差异（尤其视觉解析）会影响可用性；必须遵守 [01 Agent 运行时 §3.5/§3.7](../prd/01-agent-runtime.md) 的就绪与密封探测边界，能力未确认不能冒充可用，失败时不静默切换后端或模型
 - **多一个进程与一条本机 IPC**：MCP helper 是独立二进制，要处理版本同步（helper 与主进程的协议）与 socket 路径长度限制。这是 §1 定案换来「全部 SQLite 写入收敛在主进程一处」的代价（[R6 spike](../spikes/2026-08-12-r6-agent-runtime.md)）
 
 **「换后端」这条退路的成色，2026-08-12 重新评估过：**

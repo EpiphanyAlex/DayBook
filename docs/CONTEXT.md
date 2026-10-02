@@ -2,8 +2,8 @@
 title: Daybook 术语表
 status: ready
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.14
+date: 2026-10-02
+version: v0.15
 ---
 
 # 术语表
@@ -92,7 +92,7 @@ version: v0.14
 | **完成协议 / `complete_source`** | agent 必须显式声明「这个来源我读完了」，附条目数与未解析区域。**没调即协议失败，来源不判为 `parsed`**——退出码 0 证明不了它没读一半就走 | [`01-agent-runtime` §3.2](./prd/01-agent-runtime.md) |
 | **smart agent, dumb tools** | 工具设计原则：**推理、编排、判断留给 agent；工具只做执行。** 但 **dumb ≠ gullible**——拒绝畸形输入（缺原文片段、三元组不自洽）不是智能，是类型 | [ADR-0006](./adr/0006-smart-agent-dumb-tools.md) |
 | **子 agent** | **只用于上下文隔离**（如解析超长截图），**不用于业务分工**。产品运行时不引入多 agent 自主编排。**与开发期 subagent 同名但不同层** | [ADR-0003 §2](./adr/0003-agent-runtime-and-pluggable-backend.md) · [`.claude/agents/README.md`](../.claude/agents/README.md) |
-| **可插拔后端** | agent 后端的抽象接口。**后端只能是用户已配置好的外部进程**：`claude -p` / `codex exec` / 本地模型进程——应用不存凭证、不发出站请求。v1 只实现 Claude Code，但接口从第一天存在。**它是本机概念，不是远程服务端** | [ADR-0003 §4](./adr/0003-agent-runtime-and-pluggable-backend.md) |
+| **可插拔后端** | agent 后端的抽象接口。**后端只能是用户已配置好的外部进程**：`claude -p` / `codex exec` / 本地模型进程——应用不存凭证、不发出站请求。当前实现 Claude Code，近期优先补 Codex 与统一模型选择，尚未实施（[01 Agent 运行时 §3.5](./prd/01-agent-runtime.md#codex-model-selection)）。**它是本机概念，不是远程服务端** | [ADR-0003 §4](./adr/0003-agent-runtime-and-pluggable-backend.md) |
 | **日志分级** | 落盘，两级：`trace`（只记形状，无金额/原文/prompt）与 `debug`（含完整 prompt 与工具调用参数，供夹具重放） | [ADR-0007](./adr/0007-local-observability-and-log-tiers.md) |
 
 ## 记忆与评测
@@ -120,6 +120,7 @@ version: v0.14
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.15 | 2026-10-02 | 可插拔后端词条区分当前实现与 Codex / 统一模型选择近期计划，删除只做 Claude Code 的过时范围描述 |
 | v0.14 | 2026-08-30 | **第一次 M0 正式 no-go 后同步术语。** 来源明确为任意 viewport 的不可变字节边界；声明合计收窄为 current-source 全部适用交易的一条 scope-valid claim，新增 scope-invalid 定义、formal bounded candidates / 唯一 expected claim 身份与 =0 契约；澄清 file / utterance 的 `unavailable` / `not_applicable` kind 边界；eval 口述 ordinal 改准为实际交易首次出现 span（join 不变），新增 `fixtureSetSha256` 词条。生产单 claim 四列与确认策略不变 |
 | v0.13 | 2026-08-24 | **随参考设计稿评审同步（[`docs/design/README.md`](./design/README.md) 八条决定）。** 新增 **整理记录** 词条（含显式否掉的那个读法）；**其他分类** 改为「两侧各有一条名为『其他』的分类，同名而不同实体，脱离 scope 上下文必须标注方向」——默认分类命名由四字改两字后，「其他支出 / 其他收入」这两个名字不再存在；**事项清单** 补 5 个默认清单与「与账目分类是两套东西」。**不复制默认分类清单本身**，仍以 [04 §3.3](./prd/04-transactions.md) 为准 |
 | v0.12 | 2026-08-23 | **补账目分类领域语言。** 新增分类、未分类、其他分类、转账、分类体系操作与商户分类规则；只给定义并链接 [04 交易](./prd/04-transactions.md) / [06 记忆](./prd/06-memory.md)，不复制默认分类清单、生命周期或数据表细节 |
