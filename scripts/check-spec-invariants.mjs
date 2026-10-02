@@ -30,6 +30,14 @@ const SELF = 'scripts/check-spec-invariants.mjs'
 // 每条规则都要写清「防的是哪一次回退」——说不出来的规则不该加。
 const RULES = [
   {
+    // 2026-10-02 将 Codex 与统一模型选择提前为近期优先项时，01 非目标、
+    // ADR、架构、术语与中英文 README 仍保留「v1 只做 Claude」的旧范围。
+    id: 'claude-only-v1-scope',
+    re: /v1\s*只实现\s*Claude Code|v1\s*实现 Claude Code 以外的后端|only Claude Code implemented in v1|实现推到\s*M4|第二后端接入（未实施，默认 M4）/i,
+    why: 'Codex 适配与统一模型选择已列为近期优先项，其他模型后延（总 PRD「近期后端优先级」、01 §3.5）',
+    fix: '区分当前已实现的 Claude Code 与待实施的 Codex 切片；历史结论放入回流/变更记录或标记 legacy',
+  },
+  {
     // 防的是 2026-08-14 定位回写时发现的三处真实漂移：AGENTS.md、品牌说明与
     // 应用空状态仍把「回溯记录器」当作品类，尽管总 PRD 已改为「个人事务助理」。
     id: 'retroactive-recorder-positioning',

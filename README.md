@@ -18,6 +18,8 @@
 
 被证伪的是 M0 单 claim 的范围与正式报告证据契约：月度 viewport 外、分页、按日、单笔 / 子组合计被误当成来源级合计。修正已将关键词降为候选、提示词限定为 current-source 全覆盖，并为 formal v2 增加完整 fixture-set 指纹、scope-invalid 硬失败、bounded 对账证据、四硬字段两侧值与口述 span ordinal；纯合成 CI 回归也已落地。[00 地基](./docs/prd/00-foundation.md)、[01 Agent 运行时](./docs/prd/01-agent-runtime.md)、[03 审核与草稿区](./docs/prd/03-review.md)、[07 评测](./docs/prd/07-eval.md) 与 [02 导入](./docs/prd/02-ingest.md) 除 03 为有限 M1 `done` 外，其余保持 `review`。第一次报告与旧本机样本永久保留、不修改、不重标；后续正式复测只使用独立新样本。**有限 M1 三项前端迁移已落地并通过零额度验收；归档 v9 仅用于当前主路径的布局层级。** 维护者已批准有限 M1 并行开发，但仅限已定案 design token、完整原件 + `evidence_text` 安全退路与 TanStack Query + reducer 状态边界；有限 M1 三项已完成零额度验收。独立复测不再是这三个项目的开工门槛，但仍是 M1 整体验收门槛；其余 M1 与 M2–M4 未开放。准确边界见 [`docs/PRD.md`「有限 M1 并行开发边界」](./docs/PRD.md) 与 [`docs/prd/INDEX.md`](./docs/prd/INDEX.md)。
 
+**近期优先级（2026-10-02）**：当前后端为 Claude Code；下一步优先 Codex 适配与统一模型选择，Gemini、Grok、DeepSeek 等后延。Codex 与统一选择尚未实施；继续使用用户已登录的外部 CLI，不增加 Pi agent 或中转网关。推进顺序为合成材料验证 Codex 权限与接入、统一选择、同一批截图对比；完整实时进度界面后延。范围见[总 PRD](./docs/PRD.md#codex-model-priority)与 [01 Agent 运行时](./docs/prd/01-agent-runtime.md#codex-model-selection)。
+
 **阻塞 M0 的 spike 已于 2026-08-12 做完**：MCP server 跑在独立 helper 二进制里，经 Unix domain socket 连回主进程（[`docs/prd/01-agent-runtime.md` §3.1](./docs/prd/01-agent-runtime.md)，实测记录见 [`docs/spikes/`](./docs/spikes/)）。
 
 ---
@@ -137,7 +139,7 @@ Daybook 的前提相反：**主路径不要求逐条填表；生活可以先发�
 | 桌面壳 | Tauri 2 | v1 |
 | 核心 | Rust —— `rusqlite` + 进程管理 + 文件监听 | v1 |
 | Agent 工具面 | Rust MCP server（`rmcp` 官方 SDK） | v1 |
-| Agent 后端 | 可插拔接口，**后端只能是你已配置好的外部进程**：`claude -p` / `codex exec` / 本地模型进程 | v1 建接口，v1 只实现 Claude Code |
+| Agent 后端 | 可插拔接口，**后端只能是你已配置好的外部进程**：`claude -p` / `codex exec` / 本地模型进程 | 当前已实现 Claude Code；近期优先 Codex 与统一模型选择（未实施） |
 | 照片库读取 | Swift sidecar（PhotoKit，无 UI 独立二进制） | v1.1 |
 | 语音 | v1 用 macOS 系统听写（零代码）→ v1.1 换 Swift sidecar | v1 + v1.1 |
 

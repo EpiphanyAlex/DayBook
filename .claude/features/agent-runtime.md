@@ -1,10 +1,12 @@
 # Agent 运行时
 
-> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-09-05
+> 规格：[01 Agent 运行时](../../docs/prd/01-agent-runtime.md) · 最后更新：2026-10-02
 
 ## 一句话
 
 Tauri 主进程密封启动用户本机的 Claude Code；CLI 只看见五个 Daybook MCP 工具，helper 经带会话令牌的 Unix socket 把调用转回主进程。
+
+**近期计划（未实施）**：[产品范围](../../docs/PRD.md#codex-model-priority)优先 Codex 适配与统一模型选择，其他模型后延；外部 CLI 承担模型循环，Daybook 共用业务 harness，不增加 Pi agent。接入方式与设置/评测契约待 [01 的 R10](../../docs/prd/01-agent-runtime.md#codex-model-selection) 评审。[多后端执行与通信边界](../../docs/prd/01-agent-runtime.md#runtime-harness)：共用执行、统一内部事件、能力管理及无 GUI 验证随接入落实，双向 RPC 随方案选择，完整实时 UI 仍后延；先合成权限验证，再做统一选择与 [07 截图专项](../../docs/prd/07-eval.md#backend-screenshot-comparison)。下文仍描述当前 Claude Code 实现。
 
 ## 数据流
 
@@ -65,11 +67,13 @@ AgentRuntime::parse_source
 
 ## 已知边界与坑
 
+- `AgentBackend` 上的 `clippy::double_must_use` 局部豁免用于兼容 `async-trait 0.1.91` 自动生成的 `#[must_use]` 与 Clippy 1.99 的重复属性检查；不改变异步执行或错误处理，升级宏后应复核移除。
+
 - 有限 M1 的前端状态/日志读取集中在 `src/review/queries.ts`，启动 `probeOnce` 按 QueryClient 去重；probe/parse/cancel 仍是动作，不是自动重取 queryFn。窗口聚焦、重连与 StrictMode 再挂载不增加探测。
 
 - **pi 参考已回流 M1、未实现，且不在 2026-09-06 有限并行范围内**（[01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md)）：任务事件携带来源/attempt/session 身份，终态拒绝迟到写入；请求接收、起草、解析完成与入账分别取证。UI 观察不掌握执行权，重新订阅重取 Rust 快照，高频进度可合并但不能丢终态或完整 debug 调用。R9 在运行事件切片开工前确定容量、时限与快照衔接；验收使用假 CLI 和可控存储失败。固定 pi 提交与适用范围见该规格，不新增自动重放或 pi 后端。
 
-- **后续安排已定、尚未实施**（[01 §3.4/§3.5/§6](../../docs/prd/01-agent-runtime.md)，2026-09-06 边界重申）：M1 运行时仍要补实时事件、有界输出缓冲与有界收尾，参数在该切片开工前按 R9 审定，用假 CLI 做零额度验收；第二后端接入时才统一公共进程执行逻辑，保留后端专属认证与密封探测。当前仍是 `ClaudeCodeBackend::run_sealed` 管进程、会话结束后落日志；M0 正式复测未完成，获准先行的仅是 03 审核的 design token、Query + reducer 与完整原件证据。
+- **后续安排已定、尚未实施**（[01 §3.4/§3.5/§6](../../docs/prd/01-agent-runtime.md)，2026-09-06 边界重申）：M1 运行时仍要补实时事件、有界输出缓冲与有界收尾，参数在该切片开工前按 R9 审定，用假 CLI 做零额度验收；第二后端接入时才统一公共进程执行逻辑，保留后端专属认证与密封探测。当前仍是 `ClaudeCodeBackend::run_sealed` 管进程、会话结束后落日志；M0 正式复测未完成，已获准实施的有限切片仍仅是 03 审核的 design token、Query + reducer 与完整原件证据；Codex 与统一模型选择按上方近期计划准备规格，尚未实施。
 
 - **`AgentBackend::status()` 是 `async` 的**，因为安装资格里含一次 `--version` 子进程。写测试 fake 时别忘了这个 `async`，也别在 fake 里自己编 `ready`——`AgentRuntime` 会覆盖它。
 - **测试里解析之前要先 `runtime.probe(...)`**（`runtime.rs` 的 `probed()` 助手）。修正前 `parse_source` 自己顺手探一次，所以老用例不用管就绪度；现在不探就是 `agent.not_ready`。

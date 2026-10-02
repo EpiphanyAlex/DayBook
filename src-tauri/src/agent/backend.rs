@@ -124,6 +124,9 @@ pub struct AgentTaskResult {
     pub debug_events: Vec<Value>,
 }
 
+// async-trait 0.1.91 为返回 Future 的 trait 方法自动添加 #[must_use]，触发 Clippy 1.99。
+// 仅在此 trait 兼容宏生成的重复属性；升级宏后应复核并移除。
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait AgentBackend: Send + Sync {
     fn id(&self) -> &'static str;
