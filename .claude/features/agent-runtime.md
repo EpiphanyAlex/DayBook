@@ -67,6 +67,8 @@ AgentRuntime::parse_source
 
 ## 已知边界与坑
 
+- `AgentBackend` 上的 `clippy::double_must_use` 局部豁免用于兼容 `async-trait 0.1.91` 自动生成的 `#[must_use]` 与 Clippy 1.99 的重复属性检查；不改变异步执行或错误处理，升级宏后应复核移除。
+
 - 有限 M1 的前端状态/日志读取集中在 `src/review/queries.ts`，启动 `probeOnce` 按 QueryClient 去重；probe/parse/cancel 仍是动作，不是自动重取 queryFn。窗口聚焦、重连与 StrictMode 再挂载不增加探测。
 
 - **pi 参考已回流 M1、未实现，且不在 2026-09-06 有限并行范围内**（[01 §3.4/§6.2](../../docs/prd/01-agent-runtime.md)）：任务事件携带来源/attempt/session 身份，终态拒绝迟到写入；请求接收、起草、解析完成与入账分别取证。UI 观察不掌握执行权，重新订阅重取 Rust 快照，高频进度可合并但不能丢终态或完整 debug 调用。R9 在运行事件切片开工前确定容量、时限与快照衔接；验收使用假 CLI 和可控存储失败。固定 pi 提交与适用范围见该规格，不新增自动重放或 pi 后端。
