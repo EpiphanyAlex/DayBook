@@ -94,6 +94,8 @@ pub fn export_fixture(
             backend_id: attempt.backend_id.clone(),
             backend_version: attempt.backend_version.clone().unwrap_or_default(),
             model_id: attempt.model_id.clone(),
+            requested_model_mode: attempt.requested_model_mode.clone(),
+            requested_model_id: attempt.requested_model_id.clone(),
             prompt_hash: attempt.prompt_hash.clone(),
             effective_capability_hash: attempt.effective_capability_hash.clone(),
         },
@@ -163,6 +165,8 @@ struct AttemptRow {
     backend_id: String,
     backend_version: Option<String>,
     model_id: Option<String>,
+    requested_model_mode: Option<String>,
+    requested_model_id: Option<String>,
     prompt_hash: String,
     tool_surface_version: String,
     effective_capability_hash: String,
@@ -174,7 +178,7 @@ fn load_attempt(database: &Database, agent_session_id: &str) -> EvalResult<Attem
         connection
             .query_row(
                 "SELECT id, source_id, backend_id, backend_version, model_id, prompt_hash,
-                        tool_surface_version, effective_capability_hash, app_version
+                        tool_surface_version, effective_capability_hash, app_version, requested_model_mode, requested_model_id
                  FROM parse_attempts WHERE agent_session_id = ?1
                  ORDER BY started_at DESC LIMIT 1",
                 [agent_session_id],
@@ -185,6 +189,8 @@ fn load_attempt(database: &Database, agent_session_id: &str) -> EvalResult<Attem
                         backend_id: row.get(2)?,
                         backend_version: row.get(3)?,
                         model_id: row.get(4)?,
+                        requested_model_mode: row.get(9)?,
+                        requested_model_id: row.get(10)?,
                         prompt_hash: row.get(5)?,
                         tool_surface_version: row.get(6)?,
                         effective_capability_hash: row.get(7)?,
@@ -583,7 +589,7 @@ mod eval {
         export_fixture(data.path(), &session, &out_dir).unwrap();
         let env = FixtureEnv::load(&out_dir.join("env.json")).unwrap();
         assert_eq!(env.app_version, "0.1.0");
-        assert_eq!(env.schema_version, 1);
+        assert_eq!(env.schema_version, crate::db::LATEST_SCHEMA_VERSION as u32);
         assert_eq!(env.attempt.backend_id, "claude-code");
         assert_eq!(env.attempt.backend_version, "1.2.3");
         assert_eq!(env.attempt.model_id.as_deref(), Some("test-model"));

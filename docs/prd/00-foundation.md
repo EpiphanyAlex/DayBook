@@ -1,9 +1,9 @@
 ---
 title: 00 地基 Foundation — 数据层、SQLite schema、迁移与错误契约
-status: review
+status: in-progress
 owner: "@maintainer"
-date: 2026-09-02
-version: v0.23
+date: 2026-10-04
+version: v0.25
 ---
 
 # 00 · 地基 Foundation
@@ -150,6 +150,8 @@ base_amount_minor = round_half_even(
 3. **跨越切换点的汇总按 `base_currency` 分组呈现，不静默相加。** 把两种本位币的金额加在一起会得到一个无意义的数字——与总额校验的 `unavailable` 不伪装成通过是同一条原则。
 
 **M0 设置落点（2026-08-13 实施回流）**：当前本位币不新增第七张业务表，写入数据目录下的 `preferences.json`。首次解析前必须由用户明确选择 ISO 4217 币种；未选择时解析返回 `data.base_currency_required`，不得从系统地区或来源币种静默猜测。任务下达把这个值作为代码侧上下文明确告诉 agent；同币种交易按 `base_amount_minor = amount_minor`、`base_currency = currency`、`rate_ppm = 1000000` 填全。切换偏好只影响之后的新解析，已确认交易逐行冻结不变。
+
+**统一后端/模型设置（[01 Agent 运行时 §3.5](./01-agent-runtime.md#codex-model-selection)，待实施）**仍使用 `preferences.json`，不建账本事实表；旧文件缺键时按 `claude-code` + `auto` 解释，写入时原子替换文件并保留其余偏好。只保存用户选择，不保存 CLI 账号、凭证、额度或可用模型清单。读写 IPC 的选择枚举和分层状态由 01 负责；本文件规定持久化位置与旧偏好兼容。
 
 > **给实现者**：不要写「假设全库只有一个本位币」的查询。任何汇总类 SQL 必须 `GROUP BY base_currency` 或显式断言结果集只含一种本位币。
 
@@ -331,7 +333,9 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 | `agent_session_id` | TEXT | 非空 | 一个来源一次尝试一个会话（[01 §5](./01-agent-runtime.md) R5） |
 | `backend_id` | TEXT | 非空 | `claude-code` / `codex` / …（[01 §3.5](./01-agent-runtime.md)） |
 | `backend_version` | TEXT | 可空 | 后端 CLI 自报的版本；取不到为空 |
-| `model_id` | TEXT | 可空 | 后端报告的模型标识 |
+| `model_id` | TEXT | 可空 | 后端报告的**实际**模型标识；未知保持 NULL，旧行不回填 |
+| `requested_model_mode` | TEXT | 可空 | **已由 `0002_agent_selection.sql` 迁移**：`auto` / `specific`；旧行 NULL 表示历史请求选择未知，不根据当前设置推断 |
+| `requested_model_id` | TEXT | 可空 | **已由 `0002_agent_selection.sql` 迁移**：仅 `specific` 非空；与 `requested_model_mode` 成对校验 |
 | `prompt_hash` | TEXT | 非空 | 本次所用提示词模板的 SHA-256——**提示词是程序记忆**（[01 §3.6](./01-agent-runtime.md)），改了必须能看出来 |
 | `tool_surface_version` | TEXT | 非空 | **我们期望的**工具面版本，由代码给出 |
 | `effective_capability_hash` | TEXT | 非空 | **实测到的** capability manifest 指纹（[01 §3.7](./01-agent-runtime.md)）。**覆盖工具型与非工具型两类条目**——hook / 插件 / 权限模式没有名字、没有参数 schema，但同样是能力。**只哈希「工具名 + server + 参数 schema」不够**：那样一个改写每次调用的 `PreToolUse` hook 挂上去，指纹一个字节都不变 |
@@ -347,6 +351,8 @@ CREATE UNIQUE INDEX sources_idem_key  ON sources(idempotency_key) WHERE idempote
 | **`reported_total_evidence_text`** | TEXT | 可空 | 合计在来源上的原文片段——**校验基准本身也必须可核对**（[03 审核 §3.3](./03-review.md)） |
 
 **CHECK 约束**：`reported_total_*` **四者要么全空、要么全非空**。缺任一即视为「本次尝试未取到合计」。
+
+统一选择切片迁移后，`requested_model_mode` 与 `requested_model_id` 的合法组合为 `(NULL, NULL)`（迁移前历史行及旧夹具重放）、`(auto, NULL)`、`(specific, 非空 ID)`；生产新解析 attempt 必须写入 `auto` 或 `specific`。迁移的触发器只检查组合合法性，生产路径负责禁止历史组合；旧夹具重放保留未知请求身份，不凭空补为自动。`backend_id`、CLI 版本、请求选择和实报 `model_id` 在 spawn 前/结束时分别冻结，失败尝试也保留请求身份。`audit_log.actor = agent` 的 `agent_session_id` 关联唯一 attempt，不逐条重复模型字段；评测通过 attempt 取归因（[07 §3.8](./07-eval.md#backend-screenshot-comparison)）。
 
 **列级写入权限**：agent 经 MCP 工具对**本表**只能写六列——`reported_total_*` 四列（`report_source_total`）与 `reported_item_count` / `unparsed_note`（`complete_source`），且**只能写自己那一行**；本表其余列由 Rust 侧代码写。
 
@@ -544,6 +550,12 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 | `agent.completion_mismatch` | [01](./01-agent-runtime.md) | `complete_source` 自报条目数 ≠ 实际草稿数（2026-08-10 新增）。**这是可补救的工具级拒绝**，不封闭会话——agent 补齐或修正后可再调（[01 §3.2](./01-agent-runtime.md)） |
 | `agent.memory_lookup_incomplete` | [01](./01-agent-runtime.md) | `complete_source` 时发现起草出的商户有未经 `query_memory` 查过的（**M3**，[06 记忆 §3.4](./06-memory.md)）。同样可补救，返回体带缺的键 |
 | `agent.tool_surface_unsealed` | [01](./01-agent-runtime.md) | 启动前的 readiness probe **无法证明完整 capability manifest 与预期严格相等**：结构化清单缺失/不可读、缺项、多项，或出现非预期 hook / 插件 / 权限模式（[01 §3.7](./01-agent-runtime.md)）——**拒绝下发任务**，不降级运行 |
+| `agent.model_unavailable` | [01](./01-agent-runtime.md) | 用户明确选定的模型被所选 CLI 拒绝或不可用；不自动改用别的模型/后端 |
+| `agent.model_mismatch` | [01](./01-agent-runtime.md) | 明确请求模型后，CLI 实报另一个模型；本次不记为所选模型成功，不自动回退 |
+| `agent.model_identity_unverified` | [01](./01-agent-runtime.md) | 明确请求模型后无法从 CLI 结构化结果确认实际模型；不猜测为所选模型已执行 |
+| `agent.backend_protocol_error` | [01](./01-agent-runtime.md) | 结构化 RPC/事件不符合已验证协议，包含错配 ID、未知终态或不可解析的必需字段；不得从自由文本猜成功 |
+| `agent.transport_closed` | [01](./01-agent-runtime.md) | CLI 连接 EOF、管道错误或后代持管道超出收尾 deadline；区别于合法终态，已产生草稿按 attempt 作废 |
+| `agent.output_limit_exceeded` | [01](./01-agent-runtime.md) | 必需协议消息超过单条/队列上限；不能截断后继续判成功，草稿按 attempt 作废 |
 | `agent.spawn_failed` | [01](./01-agent-runtime.md) | 子进程起不来 |
 | `agent.tool_rejected` | [01](./01-agent-runtime.md) | 工具参数不合法（如缺 `evidence_text`） |
 | `review.total_mismatch` | [03](./03-review.md) | 总额校验 `failed` 时批量确认被拒 |
@@ -685,6 +697,8 @@ slice_by_code_points(转写文本, start, end) == evidence_text
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.25 | 2026-10-04 | `0002_agent_selection.sql` 与偏好兼容迁移已落地；生产 attempt 冻结请求/实际模型，旧行及旧夹具重放的未知值保留；零额度切片 `in-progress`，Codex 真实解析仍阻塞 |
+| v0.24 | 2026-10-02 | 统一后端/模型选择沿用本机偏好，冻结请求与实际模型身份；新增兼容旧行的待迁移 attempt 字段及后端错误分类，依据 [01 §3.5](./01-agent-runtime.md#codex-model-selection) 与 [Codex 零额度 spike](../spikes/2026-10-02-codex-app-server-feasibility.md)，尚未实施 |
 | v0.23 | 2026-09-02 | **第一次 no-go 修正验收，`status: in-progress → review`。** 单 claim 四列不变的回归与完整零额度门禁通过；未运行真实 agent / formal，未修改第一次报告或旧 fixtures，未开始 M1 |
 | v0.22 | 2026-09-02 | **第一次 no-go 修正开工，`status: draft → ready → in-progress`。** PR #27 的规格已独立 review 通过，维护者批准分阶段实施；先补保持单 claim schema 的回归，再改实现。M1 不开始 |
 | v0.21 | 2026-08-30 | **第一次 M0 正式 no-go 回流，`status: review → draft`。** 定义 M0 单 claim 只认 current immutable source 全部适用交易；任意 viewport 仍支持，月度 viewport 外、分页、按日 / 分类 / 单笔语义 / 子组合计均不得报告；有效 claim 与 invalid decoy 三元组相同时也因身份不可审计而拒报，关键词只作候选。`parse_attempts.reported_total_*` 四列与一次一条限制不变，不提前实现多 claim schema；新增保持单 claim schema 的验收。第一次 no-go、旧报告与 `fixtures/local/m0-2026-08-24` 不改 |

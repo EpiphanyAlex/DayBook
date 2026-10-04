@@ -23,6 +23,7 @@
 //!   会就地改掉当前值，读当前值算出来的错误率恒为零
 //! - **人的修改** = `audit_log` 里 `actor = "human"` 的行，不参与准确率计算
 
+pub mod comparison;
 pub mod expected;
 pub mod export;
 pub mod formal;

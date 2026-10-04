@@ -714,6 +714,8 @@ mod eval {
                 backend_id: "scripted".to_owned(),
                 backend_version: Some("1".to_owned()),
                 model_id: Some("model".to_owned()),
+                requested_model_mode: None,
+                requested_model_id: None,
                 prompt_hash: "0".repeat(64),
                 tool_surface_version: "1".to_owned(),
                 app_version: "0.1.0".to_owned(),

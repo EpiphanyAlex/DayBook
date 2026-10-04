@@ -21,7 +21,7 @@
 
 正式首轮只能用 `--m0-go-no-go --manifest <fixtures/local/.../manifest.json>`；新报告为 **formal v2**，在 backend 前冻结完整 `fixtureSetSha256`，逐 case 保存错误项的 expected/predicted 四硬字段与最多 160 code points 的对账摘录，并以 `scopeInvalidTotalReports == 0` 作为独立硬契约。指标 5 待人工裁定时报告仍永久保存、状态为 incomplete / exit 2。裁定写进独立 sidecar，再由 `--m0-finalize` 零额度生成 final。`--m0-diagnose <首轮报告>` 会烧额度，只对「首轮失败 ∪ 预标 flaky」每例追加 3 轮，并写独立诊断报告，不覆盖首轮。第一次 formal v1 报告保持只读，不回填，也不能冒充 v2 继续 finalize / diagnosis。
 
-**近期计划（2026-10-02，未实施/未运行）**：[07 评测 §3.8](../../docs/prd/07-eval.md#backend-screenshot-comparison)登记 Claude Code / Codex 的同集 9 图/56 笔截图专项，须先通过 [01 的合成权限与接入验收](../../docs/prd/01-agent-runtime.md#runtime-harness)。当前 eval 仍只有 Claude Code 实现，统一选择与报告元数据待 01/07 的 R10；不增加新口述，不替代正式 M0。下文命令和数据流仍描述当前实现，不能据此假定已有 Codex 参数。
+**近期切片（2026-10-04）**：生产与 eval 已共用 `--backend` / `--model-id` 选择及请求/实际模型归因；旧报告缺字段时保持未知，诊断启动前校验首轮选择。[07 评测 §3.8](../../docs/prd/07-eval.md#backend-screenshot-comparison) 的同集 9 图/56 笔截图专项已有独立零额度冻结/报告结构，完整运行器尚未实施或运行，须先通过 [01 的真实密封权限门槛](../../docs/prd/01-agent-runtime.md#runtime-harness)。Codex 当前始终未就绪；不增加新口述，不替代正式 M0。
 
 ## 数据流
 

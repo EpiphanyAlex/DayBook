@@ -5,12 +5,13 @@ import { DraftCard } from './review/DraftCard'
 import { ReconciliationCard } from './review/ReconciliationCard'
 import { initialScreen, screenReducer, attemptKey } from './review/screenReducer'
 import { useReviewMutation } from './review/mutations'
-import { keys, sourcesOptions, agentOptions, foundationOptions, logsOptions, useReviewQueries, refreshSources as reloadSources, refreshReview, probeOnce } from './review/queries'
-import type { ReviewSource, ReviewDraft, FoundationStatus, ImportResult } from './review/types'
+import { keys, sourcesOptions, agentOptions, agentSelectionOptions, foundationOptions, logsOptions, useReviewQueries, refreshSources as reloadSources, refreshReview, probeOnce } from './review/queries'
+import type { AgentSelection, BackendStatus, ReviewSource, ReviewDraft, FoundationStatus, ImportResult } from './review/types'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import iconUrl from '../assets/brand/icon.svg'
 import { backendPresentation } from './agent/presentation'
+import { AgentSettings } from './agent/AgentSettings'
 import { runQueueContinuing } from './ingest/queue'
 import { AppError, call } from './lib/bridge'
 import { formatMoney, parseMoneyInput, parseRateInput } from './lib/money'
@@ -55,10 +56,12 @@ export function App() {
   const [baseCurrencyInput, setBaseCurrencyInput] = useState<string | null>(null)
   const foundationQuery = useQuery({ ...foundationOptions, enabled: isTauri() })
   const backendQuery = useQuery({ ...agentOptions, enabled: isTauri() })
+  const agentSelectionQuery = useQuery({ ...agentSelectionOptions, enabled: isTauri() })
   const sourcesQuery = useQuery({ ...sourcesOptions, enabled: isTauri() })
   const logsQuery = useQuery({ ...logsOptions, enabled: isTauri() })
   const foundation = foundationQuery.data ?? null
   const backend = backendQuery.data ?? null
+  const agentSelection = agentSelectionQuery.data ?? null
   const sources = sourcesQuery.data ?? []
   const agentLogs = logsQuery.data ?? []
   const selectedId = ui.selectedId ?? sources[0]?.id ?? null
@@ -97,6 +100,23 @@ export function App() {
   const refreshAgentLogs = useCallback(async () => {
     await client.invalidateQueries({ queryKey: keys.logs })
   }, [client])
+
+  const saveAgentSelection = async (selection: AgentSelection) => {
+    try {
+      const status = await call<BackendStatus>('set_agent_selection', { selection })
+      client.setQueryData(keys.agentSelection, selection)
+      client.setQueryData(keys.agent, status)
+      setNotice('解析引擎与模型已保存。检查解析器后可用于后续尝试。')
+    } catch (error) { setNotice(errorMessage(error)) }
+  }
+
+  const checkAgent = async () => {
+    try {
+      const status = await call<BackendStatus>('probe_agent')
+      client.setQueryData(keys.agent, status)
+      setNotice(status.ready ? '解析器安全检查通过。' : '解析器尚未就绪，请查看状态说明。')
+    } catch (error) { setNotice(errorMessage(error)) }
+  }
   useEffect(() => {
     if (isTauri()) void probeOnce(client).catch(error => setNotice(errorMessage(error)))
   }, [client])
@@ -382,6 +402,8 @@ export function App() {
               <p>{agentView.instruction}</p>
             </aside>
           )}
+
+          <AgentSettings selection={agentSelection} status={backend} disabled={!agentSelection || !isTauri()} onSave={saveAgentSelection} onProbe={checkAgent} />
 
           {sources.length > 0 && baseCurrencyForm}
 

@@ -215,7 +215,7 @@ pub fn attribution_of(database: &Database, attempt_id: &str) -> EvalResult<Attri
     Ok(database.read(|connection| {
         connection.query_row(
             "SELECT backend_id, backend_version, model_id, prompt_hash,
-                    tool_surface_version, app_version
+                    tool_surface_version, app_version, requested_model_mode, requested_model_id
              FROM parse_attempts WHERE id = ?1",
             [attempt_id],
             |row| {
@@ -223,6 +223,8 @@ pub fn attribution_of(database: &Database, attempt_id: &str) -> EvalResult<Attri
                     backend_id: row.get(0)?,
                     backend_version: row.get(1)?,
                     model_id: row.get(2)?,
+                    requested_model_mode: row.get(6)?,
+                    requested_model_id: row.get(7)?,
                     prompt_hash: row.get(3)?,
                     tool_surface_version: row.get(4)?,
                     app_version: row.get(5)?,

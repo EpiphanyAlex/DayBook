@@ -9,7 +9,9 @@ pub mod money;
 
 use std::sync::Arc;
 
-use agent::{backend::BackendStatus, runtime::AgentRuntime};
+#[cfg(test)]
+use agent::runtime::AgentRuntime;
+use agent::{backend::BackendStatus, selection::AgentSelection, service::AgentService};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use db::{Database, FoundationStatus};
 use domain::confirm::{
@@ -24,7 +26,7 @@ use tauri::Manager;
 #[derive(Debug)]
 struct AppState {
     database: Arc<Database>,
-    agent: Arc<AgentRuntime>,
+    agent: Arc<AgentService>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,8 +87,20 @@ async fn agent_status(state: tauri::State<'_, AppState>) -> AppResult<BackendSta
 /// 失败的完整 detail 留在 trace 日志里，UI 文案本来就按 `code` 分支。
 #[tauri::command]
 async fn probe_agent(state: tauri::State<'_, AppState>) -> AppResult<BackendStatus> {
-    let _ = state.agent.probe(Arc::clone(&state.database)).await;
-    Ok(state.agent.status().await)
+    Ok(state.agent.probe(Arc::clone(&state.database)).await)
+}
+
+#[tauri::command]
+fn agent_selection(state: tauri::State<'_, AppState>) -> AppResult<AgentSelection> {
+    state.database.agent_selection()
+}
+
+#[tauri::command]
+async fn set_agent_selection(
+    state: tauri::State<'_, AppState>,
+    selection: AgentSelection,
+) -> AppResult<BackendStatus> {
+    state.agent.select(&state.database, selection).await
 }
 
 #[tauri::command]
@@ -236,8 +250,8 @@ pub fn run() {
             agent::runtime::cleanup_expired_logs(&database)?;
             ingest::recover_interrupted(&database)?;
             app.manage(AppState {
+                agent: Arc::new(AgentService::new(database.agent_selection()?)),
                 database,
-                agent: Arc::new(AgentRuntime::claude_default()),
             });
             Ok(())
         })
@@ -248,6 +262,8 @@ pub fn run() {
             reveal_data_directory,
             agent_status,
             probe_agent,
+            agent_selection,
+            set_agent_selection,
             import_source_file,
             submit_utterance,
             parse_source,

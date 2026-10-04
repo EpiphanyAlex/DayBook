@@ -2,8 +2,8 @@
 title: Daybook 总 PRD — 产品范围、成功标准、非目标与里程碑地图
 status: ready
 owner: "@maintainer"
-date: 2026-10-02
-version: v0.34
+date: 2026-10-04
+version: v0.35
 ---
 
 # Daybook 总 PRD
@@ -219,7 +219,7 @@ Claude Code、Codex 本身已具备多轮推理、工具调用、上下文管理
 <a id="codex-model-priority"></a>
 ### 近期后端优先级
 
-**近期范围为 Codex 适配与 Claude Code / Codex 的统一模型选择。** 当前仅 Claude Code 已实现；Gemini、Grok、DeepSeek 及本地模型延期，接入方式与时间未定。Codex 与统一选择先于 M4 实施，其余后端扩展和打包仍归 M4。
+**近期范围为 Codex 适配与 Claude Code / Codex 的统一模型选择。** 当前只有 Claude Code 可以执行解析；Codex 的只读适配已实现、解析保持未就绪；Gemini、Grok、DeepSeek 及本地模型延期，接入方式与时间未定。Codex 与统一选择先于 M4 实施，其余后端扩展和打包仍归 M4。
 
 后端遵守 [ADR-0003：Agent 运行时与可插拔后端](./adr/0003-agent-runtime-and-pluggable-backend.md)：用户在官方 CLI 自行登录，Daybook 不保存厂商凭证；模型调用由外部 CLI 执行，共用 Daybook 的 MCP 工具与业务校验。近期范围不含 Pi agent、中转网关或应用直连模型 API。
 
@@ -231,7 +231,7 @@ Claude Code、Codex 本身已具备多轮推理、工具调用、上下文管理
 
 后续其他模型可评估 Pi 外部进程方案，仍须通过 Daybook 的视觉、MCP 与密封能力验证；当前不指定多供应商依赖。
 
-**实施状态与前置条件**：Codex 与统一选择尚未实施，具体契约见 [01 的 R10 / §6.3](./prd/01-agent-runtime.md#codex-model-selection)。边界规格与实施计划须在开工前完成评审。01 的 `review` 仅覆盖已启动的 M0 切片；其余 M1、M2 批量与多币种、M3 事项与记忆以及 M4 打包不在当前实施范围。真实 CLI 调用与独立正式复测须明确授权；第一次 M0 `no_go` 与冻结验收规则保持不变。
+**实施状态与前置条件**：已按审核过的计划启动零额度切片：共用有界子进程/RPC、Claude Code 固定模型选择与归因、Codex 只读账号/额度/模型查询和生产/eval 统一选择已经实现，见 [01 的 R10 / §6.3](./prd/01-agent-runtime.md#codex-model-selection)。Codex 0.154.0 尚无完整有效能力面的可信证明，解析保持 `ready=false`；真实图片/五工具验证与 [07 截图专项](./prd/07-eval.md#backend-screenshot-comparison)仍未执行。其余 M1、M2 批量与多币种、M3 事项与记忆以及 M4 打包不在当前实施范围。真实 CLI 模型调用与独立正式复测须再次明确授权；第一次 M0 `no_go` 与冻结验收规则保持不变。
 
 ### 9.1 为什么 M0 优先
 
@@ -469,6 +469,7 @@ v1 只需保证数据形状（一条时间轴 + 两个实体）不挡住这条�
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.35 | 2026-10-04 | 零额度切片已启动：共用进程/RPC、统一选择和评测归因落地；Codex 真实解析及截图专项仍受密封能力门槛阻塞，首次 M0 `no_go` 不变 |
 | v0.34 | 2026-10-02 | 近期后端章节改为范围、交付门槛与实施状态，移除会话过程叙述；功能决定不变 |
 | v0.33 | 2026-10-02 | 规定 Codex → 统一选择 → 同集截图专项对比的交付顺序，登记 运行时边界与延期边界；不新增 PRD/ADR，不启动真实调用 |
 | v0.32 | 2026-10-02 | 登记范围：近期优先 Codex 适配与统一模型选择，其他模型后延；沿用外部 CLI 架构，尚未启动实现或真实复测 |
