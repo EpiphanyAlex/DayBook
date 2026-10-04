@@ -9,12 +9,20 @@ export interface FoundationStatus {
 }
 
 export interface BackendStatus {
+  backendId: 'claude-code' | 'codex'
   available: boolean
   availabilityReason: string | null
   authenticated: boolean | null
   ready: boolean
   errorCode: string | null
   version: string | null
+  quota: 'available' | 'exhausted' | 'unknown'
+  models: { modelId: string; displayName: string; supportsImages: boolean | null }[] | null
+}
+
+export interface AgentSelection {
+  backendId: 'claude-code' | 'codex'
+  modelSelection: { mode: 'auto' } | { mode: 'specific'; modelId: string }
 }
 
 export interface ReviewSource {

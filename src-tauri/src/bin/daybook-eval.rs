@@ -30,7 +30,10 @@ use std::{
 use time::{macros::format_description, OffsetDateTime};
 
 use daybook_lib::{
-    agent::runtime::AgentRuntime,
+    agent::{
+        runtime::AgentRuntime,
+        selection::{AgentSelection, ModelSelection},
+    },
     domain::confirm,
     eval::{
         expected::{evaluate_scope, ExpectedSet},
@@ -108,11 +111,11 @@ const USAGE: &str = "用法：\n  \
     daybook-eval validate       --manifest <path> [--root <path>]\n  \
     daybook-eval replay-score   --manifest <path> [--root <path>] [--out <path>]\n  \
     daybook-eval export-fixture --session <agent_session_id> [--data-dir <path>] [--root <path>] [--slug <name>] [--out <path>]\n  \
-    daybook-eval run            --manifest <path> [--root <path>] [--trials <n>] [--keep-runs <dir>] [--out <path>]\n  \
+    daybook-eval run            --manifest <path> [--root <path>] [--trials <n>] [--keep-runs <dir>] [--backend claude-code|codex] [--model-id <fixed-id>] [--out <path>]\n  \
     daybook-eval init-m0        --root <repo> --out <fixtures/local/...> [--screenshots <n>] [--controls <n>]\n  \
-    daybook-eval m0-go-no-go    --manifest <fixtures/local/.../manifest.json> --root <repo> --out <first.json>\n  \
+    daybook-eval m0-go-no-go    --manifest <fixtures/local/.../manifest.json> --root <repo> --out <first.json> [--backend claude-code|codex] [--model-id <fixed-id>]\n  \
     daybook-eval m0-finalize    --report <first.json> [--out <final.json>]\n  \
-    daybook-eval m0-diagnose    --report <first.json> --root <repo> [--out <diagnosis.json>]\n\
+    daybook-eval m0-diagnose    --report <first.json> --root <repo> [--out <diagnosis.json>] [--backend claude-code|codex] [--model-id <fixed-id>]\n\
 \n  \
     `run` 与 `m0-go-no-go` / `m0-diagnose` 会烧订阅额度；validate、replay-score、\n  \
     export-fixture、init-m0、m0-finalize 都是零额度。";
@@ -157,6 +160,24 @@ fn parse_flags(arguments: &[String]) -> EvalResult<Flags> {
         index += 2;
     }
     Ok(flags)
+}
+
+fn selection_from_flags(flags: &Flags) -> EvalResult<AgentSelection> {
+    let selection = AgentSelection {
+        backend_id: flags
+            .get("backend")
+            .cloned()
+            .unwrap_or_else(|| "claude-code".to_owned()),
+        model_selection: flags
+            .get("model-id")
+            .map_or(ModelSelection::Auto, |model_id| ModelSelection::Specific {
+                model_id: model_id.clone(),
+            }),
+    };
+    selection
+        .validate()
+        .map_err(|error| EvalError::Usage(error.message))?;
+    Ok(selection)
 }
 
 fn manifest_options(flags: &Flags) -> EvalResult<Options> {
@@ -266,6 +287,7 @@ fn init_m0(flags: &Flags) -> EvalResult<()> {
 
 /// 唯一能产生 docs/PRD.md §9.4 正式 verdict 的首轮入口。
 fn m0_go_no_go(flags: &Flags) -> EvalResult<u8> {
+    let selection = selection_from_flags(flags)?;
     if flags.contains_key("trials") || flags.contains_key("keep-runs") {
         return Err(EvalError::Usage(
             "M0 正式首轮每 case 恰好 1 轮；不得传 --trials / --keep-runs。三轮只经 --m0-diagnose"
@@ -299,7 +321,7 @@ fn m0_go_no_go(flags: &Flags) -> EvalResult<u8> {
     let async_runtime = tokio::runtime::Runtime::new()
         .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
     let report = async_runtime.block_on(async {
-        let agent = AgentRuntime::claude_default();
+        let agent = AgentRuntime::for_selection(selection);
         formal::run_first(&agent, &cases).await
     })?;
     let written = m0::save_first(
@@ -359,6 +381,7 @@ fn m0_finalize(flags: &Flags) -> EvalResult<u8> {
 
 /// 对首轮失败与预标 flaky case 的并集各追加 3 轮，单写诊断报告。
 fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
+    let selection = selection_from_flags(flags)?;
     let first_path = flags
         .get("report")
         .map(PathBuf::from)
@@ -368,6 +391,7 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
     let first_bytes = std::fs::read(&first_path)?;
     let first = m0::read_first(&first_path)?;
+    ensure_diagnosis_selection(&first.evaluation, &selection)?;
     m0::ensure_private_report_path(&root, &first_path)?;
     let targets = m0::diagnosis_targets(&first);
     if targets.is_empty() {
@@ -397,7 +421,7 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
     let async_runtime = tokio::runtime::Runtime::new()
         .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
     let diagnosis = async_runtime.block_on(async {
-        let agent = AgentRuntime::claude_default();
+        let agent = AgentRuntime::for_selection(selection);
         formal::run_diagnosis(&agent, &cases, &targets, &first.report_id, &fixture_set).await
     })?;
     m0::ensure_fixture_set_for_first(&root, &first, &cases)?;
@@ -415,6 +439,45 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
     Ok(0)
 }
 
+fn ensure_diagnosis_selection(
+    evaluation: &serde_json::Value,
+    selection: &AgentSelection,
+) -> EvalResult<()> {
+    let recorded = evaluation
+        .get("cases")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| EvalError::Fixture("首轮报告缺少逐例模型归因，拒绝诊断".to_owned()))?;
+    for case in recorded {
+        let attribution = case
+            .get("attribution")
+            .ok_or_else(|| EvalError::Fixture("首轮 case 缺少模型归因".to_owned()))?;
+        let backend = attribution
+            .get("backendId")
+            .and_then(serde_json::Value::as_str);
+        let mode = attribution
+            .get("requestedModelMode")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EvalError::Fixture("首轮请求模型未知，不能推断为自动模式后运行诊断".to_owned())
+            })?;
+        let model_id = attribution
+            .get("requestedModelId")
+            .and_then(serde_json::Value::as_str);
+        let same_model = match &selection.model_selection {
+            ModelSelection::Auto => mode == "auto",
+            ModelSelection::Specific {
+                model_id: requested,
+            } => mode == "specific" && model_id == Some(requested.as_str()),
+        };
+        if backend != Some(selection.backend_id.as_str()) || !same_model {
+            return Err(EvalError::Usage(
+                "诊断的后端/模型选择必须与首轮记录一致".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// **真跑 agent 的 eval 轮次**（07 §3.1）。走生产同一条路径：起 MCP server、spawn 用户
 /// 自己的 CLI、落进临时数据目录、然后查表打分。
 ///
@@ -425,6 +488,7 @@ fn m0_diagnose(flags: &Flags) -> EvalResult<u8> {
 ///   变成回归夹具**——`daybook-eval export-fixture --data-dir <那一轮的目录> --session <id>`。
 ///   不给这个参数就跑完即删，因为那里面是真实解析产物。
 fn live_run(flags: &Flags) -> EvalResult<()> {
+    let selection = selection_from_flags(flags)?;
     let options = manifest_options(flags)?;
     let trials: usize = match flags.get("trials") {
         Some(value) => value
@@ -443,7 +507,7 @@ fn live_run(flags: &Flags) -> EvalResult<()> {
         .map_err(|error| EvalError::Fixture(format!("无法启动异步运行时：{error}")))?;
 
     async_runtime.block_on(async {
-        let agent = AgentRuntime::claude_default();
+        let agent = AgentRuntime::for_selection(selection);
 
         // **先探测，再跑任何一条用例**：检测不到可用 CLI 就非零退出（§6），
         // 顺带省得烧了一半额度才发现没登录。
@@ -572,7 +636,7 @@ fn attribution_of(
     Ok(database.read(|connection| {
         connection.query_row(
             "SELECT backend_id, backend_version, model_id, prompt_hash,
-                    tool_surface_version, app_version
+                    tool_surface_version, app_version, requested_model_mode, requested_model_id
              FROM parse_attempts WHERE id = ?1",
             [attempt_id],
             |row| {
@@ -580,6 +644,8 @@ fn attribution_of(
                     backend_id: row.get(0)?,
                     backend_version: row.get(1)?,
                     model_id: row.get(2)?,
+                    requested_model_mode: row.get(6)?,
+                    requested_model_id: row.get(7)?,
                     prompt_hash: row.get(3)?,
                     tool_surface_version: row.get(4)?,
                     app_version: row.get(5)?,
@@ -666,7 +732,7 @@ fn score_in_scratch(
     let attribution: Attribution = database.read(|connection| {
         connection.query_row(
             "SELECT backend_id, backend_version, model_id, prompt_hash,
-                    tool_surface_version, app_version
+                    tool_surface_version, app_version, requested_model_mode, requested_model_id
              FROM parse_attempts WHERE id = ?1",
             [&replayed.attempt_id],
             |row| {
@@ -674,6 +740,8 @@ fn score_in_scratch(
                     backend_id: row.get(0)?,
                     backend_version: row.get(1)?,
                     model_id: row.get(2)?,
+                    requested_model_mode: row.get(6)?,
+                    requested_model_id: row.get(7)?,
                     prompt_hash: row.get(3)?,
                     tool_surface_version: row.get(4)?,
                     app_version: row.get(5)?,
@@ -736,6 +804,20 @@ fn score_in_scratch(
 #[cfg(test)]
 mod eval {
     use super::*;
+
+    #[test]
+    fn diagnosis_rejects_unknown_or_changed_model_selection() {
+        let selected = AgentSelection::default();
+        let legacy = serde_json::json!({"cases":[{"attribution":{"backendId":"claude-code"}}]});
+        assert!(ensure_diagnosis_selection(&legacy, &selected).is_err());
+        let recorded = serde_json::json!({"cases":[{"attribution":{"backendId":"claude-code","requestedModelMode":"auto"}}]});
+        assert!(ensure_diagnosis_selection(&recorded, &selected).is_ok());
+        let changed = AgentSelection {
+            backend_id: "codex".to_owned(),
+            model_selection: ModelSelection::Auto,
+        };
+        assert!(ensure_diagnosis_selection(&recorded, &changed).is_err());
+    }
 
     #[test]
     fn synthetic_eligible_decoy_correct_claim_is_exact() {

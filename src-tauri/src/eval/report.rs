@@ -30,6 +30,10 @@ pub struct Attribution {
     pub backend_id: String,
     pub backend_version: Option<String>,
     pub model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_model_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_model_id: Option<String>,
     pub prompt_hash: String,
     pub tool_surface_version: String,
     pub app_version: String,

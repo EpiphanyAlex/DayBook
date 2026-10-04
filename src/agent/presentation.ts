@@ -1,4 +1,5 @@
 export interface BackendState {
+  backendId?: 'claude-code' | 'codex'
   available: boolean
   availabilityReason: string | null
   authenticated: boolean | null
@@ -55,6 +56,12 @@ const CHECKING: BackendPresentation = {
  */
 export function backendPresentation(status: BackendState | null): BackendPresentation {
   if (!status) return CHECKING
+  if (status.backendId === 'codex') {
+    if (!status.available) return { ready: false, label: 'Codex 不可用', title: '检查 Codex 安装', instruction: '请在终端检查 codex --version；原件与草稿仍留在本机。' }
+    if (status.errorCode === 'agent.tool_surface_unsealed') return { ready: false, label: 'Codex 安全检查未通过', title: 'Codex 解析已暂停', instruction: '当前版本尚不能证明完整有效能力面，无法向 Codex 下发来源。' }
+    if (!status.ready) return { ready: false, label: '正在检查 Codex', title: null, instruction: null }
+    return { ready: true, label: 'Codex 已就绪', title: null, instruction: null }
+  }
   if (!status.available) {
     const guidance =
       AVAILABILITY_GUIDANCE[status.availabilityReason ?? 'not_found'] ??

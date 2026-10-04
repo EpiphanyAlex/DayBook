@@ -1,9 +1,9 @@
 ---
 title: 02 导入 Ingest — 截图导入、来源落库与解析编排
-status: review
+status: in-progress
 owner: "@maintainer"
-date: 2026-08-30
-version: v0.17
+date: 2026-10-04
+version: v0.19
 ---
 
 # 02 · 导入 Ingest
@@ -145,6 +145,8 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 - **失败不静默**：`failed` 的来源在 UI 上显式列出，附失败原因（`parse_error_code`），可一键重试
 - **v1 不做自动重试**（2026-08-07 评审，[01 Agent 运行时 §5](./01-agent-runtime.md) R2 关闭）：重试由用户在 UI 上显式触发。自动重试会在用户不知情时二次消耗 AI 额度，而额度是真实约束（[`docs/PRD.md` §12](../PRD.md)）
 
+**统一选择切片（零额度实现已落地）**：每个来源进入队列时只保留待处理身份；真正开始解析前从 [01 Agent 运行时 §3.5](./01-agent-runtime.md#codex-model-selection) 的 Rust 权威设置取得后端与模型选择、核对相应 readiness，并将选择与 attempt 同时冻结。排队期间改设置影响尚未 spawn 的来源，不改已启动 attempt；已失败的来源只能由用户显式重试，新建 attempt。就绪检查已知所选模型不可用或能力面不可证时不创建 attempt、不改变来源状态；spawn 后才发现模型不可用、模型身份不符/不可证或 RPC 断流时只失败该来源，不用另一账号/后端/模型继续。错误码取 [00 地基 §3.7](./00-foundation.md)；任何失败都不新增事实交易，已持久化的本次草稿按 attempt 作废。
+
 #### 什么时候允许自动开始解析（**M1**，2026-08-24 产品决定）
 
 这一节存在的理由是本文里有两条看起来矛盾的决定：**自动重试被否决、文件夹监听被否决，而「丢进来就自动整理」被批准。** 三条用的是同一条判据，不是三次拍脑袋：
@@ -179,6 +181,8 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 | CLI 合格但 readiness probe 尚未完成 | 主动就绪探测（[01 §3.5](./01-agent-runtime.md)） | 状态本身非错误；`ready = false`。**用户在这个窗口里显式点解析，命令层返回 `agent.not_ready`** | 显示「正在检查」，**不创建尝试、不下发解析** |
 | CLI 装了但没登录 | readiness probe | `agent.not_authenticated` | 应用照常启动，但指引是**去登录**而不是去安装；不下发解析 |
 | capability manifest 无法证明与预期严格相等 | readiness probe 的密封比较（[01 §3.7](./01-agent-runtime.md)） | `agent.tool_surface_unsealed` | `ready = false`，**拒绝下发任务**，不降级运行 |
+| 已选模型不可用、实报另一模型或实际模型不可证 | 所选 CLI 的结构化结果（[01 §3.5](./01-agent-runtime.md#codex-model-selection)） | `agent.model_unavailable` / `agent.model_mismatch` / `agent.model_identity_unverified` | 预先发现则不建 attempt；任务期发现只失败本来源，不切换模型/后端，保留请求与实报身份 |
+| RPC 协议错、断流或必需消息超限 | 运行时通信与有界收尾（[01 §3.5](./01-agent-runtime.md#runtime-harness)） | `agent.backend_protocol_error` / `agent.transport_closed` / `agent.output_limit_exceeded` | 不判 `parsed`；本 attempt 草稿作废、审计保留，下一来源可继续排队 |
 | readiness probe 的其他失败（helper 无法启动、探测超时、额度或网络暂不可用） | readiness probe（[01 §3.5](./01-agent-runtime.md)） | 对应 `agent.spawn_failed` / `agent.timeout` / `agent.quota_exhausted` 等 | 保留安装事实，`ready = false`；**不创建尝试、不改变来源状态、不下发解析**，UI 给对应动作并允许用户显式重探测 |
 | 解析任务下发后额度耗尽 | 后端报告（[01 §3.4](./01-agent-runtime.md)） | `agent.quota_exhausted` | 来源转 `failed`，**不自动重试** |
 | 解析任务超时 | 硬超时（[01 §5](./01-agent-runtime.md) R1） | `agent.timeout` | 来源转 `failed`，草稿作废，UI 可一键重试 |
@@ -313,6 +317,8 @@ imported ──▶ parsing ──▶ parsed ──▶ reviewed
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.19 | 2026-10-04 | 解析服务在取得执行权时读取当前选择，attempt 冻结后端与模型；设置变化只影响后续任务，失败不自动换后端/模型。零额度切片 `in-progress`，真实 Codex 仍阻塞 |
+| v0.18 | 2026-10-02 | 统一选择切片明确队列在 spawn 前取权威设置、attempt 固定选择、失败不换模型/后端及新错误映射；依据 [01 §3.5](./01-agent-runtime.md#codex-model-selection)，尚未实施 |
 | v0.17 | 2026-08-30 | **第一次 no-go 后跨文档同步，`status` 仍为 `review`。** 口述只有 current-source 全覆盖 claim 才报告；月度外部范围、按日、单笔 / 子组合计与关键词本身均不够，同三元组 decoy 也拒报。降级矩阵补 kind 限定，明确 file / utterance 的既有确认策略不因 `failed` 改变。导入格式、落盘、幂等、状态机与编排实现不变 |
 | v0.16 | 2026-08-24 | **参考设计稿评审的两项产品决定回流，`status` 仍为 `review`（新增两节都是 **M1** 范围，不改任何 M0 结论）。** ① §3.5 新增「什么时候允许自动开始解析」——批准「丢进来就自动整理」（默认开），并把本文里三条看似矛盾的决定统一到**一条判据**：消耗 agent 额度必须由一个明确的、用户当场知道自己做了的动作触发。拖入符合，自动重试与文件夹监听不符合，**所以不是三次拍脑袋**。批量拖入（≥ 2 个来源）不自动开始，因为一个动作要花掉 N 次额度时用户在动作发生的瞬间不知道 N 是多少。② 新增 §3.8「整理记录」——取**不需要新表**的定义（一个来源 + 它当前受审的那次尝试），显式否掉「一次坐下来那一批」的读法（需要跨来源分组 ID，而没有任何规则以「这一批」为单位）；同时登记四个导航名与**「设置」屏无规格归属**这个缺口 |
 | v0.15 | 2026-08-22 | **补 `agent.not_ready`，`status` 仍为 `review`。** §3.5.1「readiness probe 尚未完成」一行明确：状态是非错误的中间态，但用户在这个窗口里显式发起解析时命令层返回 `agent.not_ready`；不创建尝试、不下发解析的行为不变 |

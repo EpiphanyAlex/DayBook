@@ -2,8 +2,8 @@
 title: sub-PRD 索引与状态总览
 status: ready
 owner: "@maintainer"
-date: 2026-10-02
-version: v0.50
+date: 2026-10-04
+version: v0.53
 ---
 
 # sub-PRD 索引
@@ -14,20 +14,20 @@ version: v0.50
 
 ## 状态总览
 
-**当前切片边界（有限三项已完成）**：维护者于 2026-09-06 只开放 [03 审核](./03-review.md) 的 design token、TanStack Query + reducer 与完整原件证据三个有限 M1 并行项；独立新样本正式复测改为 M1 整体验收门槛，不再阻止这三个项目开工。[01 Agent 运行时](./01-agent-runtime.md) §3.4/§6.2 的实时事件、有界输出与收尾不在有限范围，仍未开放。01 的 `review` 只覆盖 M0 已启动切片；03 的 `done` 只覆盖已验收的有限 M1 三项，真实复测仍待另行明确授权。
+**当前切片边界（有限三项已完成）**：维护者于 2026-09-06 只开放 [03 审核](./03-review.md) 的 design token、TanStack Query + reducer 与完整原件证据三个有限 M1 并行项；独立新样本正式复测改为 M1 整体验收门槛，不再阻止这三个项目开工。[01 Agent 运行时](./01-agent-runtime.md) §3.4/§6.2 的 M1 实时事件仍未开放；其中有界输出与进程收尾只在当前零额度后端切片实现，不等于事件/UI 订阅已验收。01 的 `in-progress` 覆盖已授权的零额度后端选择切片；03 的 `done` 只覆盖已验收的有限 M1 三项，真实复测仍待另行明确授权。
 
-**近期范围**：[Codex 适配与统一模型选择](./01-agent-runtime.md#codex-model-selection)优先，Gemini、Grok、DeepSeek 等延期。[总 PRD](../PRD.md#codex-model-priority)规定交付顺序：[多后端执行与通信](./01-agent-runtime.md#runtime-harness)、统一选择、[9 图/56 笔截图专项](./07-eval.md#backend-screenshot-comparison)。01/07 的 R10 契约待完善，新切片尚未实施；当前 `review` 仍只覆盖 M0，第一次 `no_go` 与真实复测授权边界不变。
+**近期范围**：[Codex 适配与统一模型选择](./01-agent-runtime.md#codex-model-selection)优先，Gemini、Grok、DeepSeek 等延期。[总 PRD](../PRD.md#codex-model-priority)规定交付顺序：[多后端执行与通信](./01-agent-runtime.md#runtime-harness)、统一选择、[9 图/56 笔截图专项](./07-eval.md#backend-screenshot-comparison)。[零额度 spike](../spikes/2026-10-02-codex-app-server-feasibility.md)已确认部分协议与设置契约，同时发现 Codex 0.154.0 的完整有效能力面尚无法证实；R10 权限阻塞未解除。统一选择、只读 Codex 发现、共用进程/RPC 与评测归因已进入零额度实现，截图专项零额度结构已落地但运行器未接线，真实 Codex 解析尚未执行。00/01/02/07 的 `in-progress` 覆盖该零额度切片，第一次 `no_go` 与真实复测授权边界不变。
 
 | # | sub-PRD | 覆盖 | status | version |
 |---|---|---|---|---|
-| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`review`** | v0.23 |
-| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端与统一模型选择 | **`review`** | v0.35 |
-| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`review`** | v0.17 |
+| 00 | [地基 Foundation](./00-foundation.md) | 数据层、SQLite schema、迁移、错误契约、金额类型与 IPC 表示 | **`in-progress`** | v0.25 |
+| 01 | [Agent 运行时](./01-agent-runtime.md) | MCP server（`rmcp`）、agent 启动器、安装资格与解析就绪度、密封启动配置、完成协议、可插拔后端与统一模型选择 | **`in-progress`** | v0.37 |
+| 02 | [导入 Ingest](./02-ingest.md) | 截图与口述导入、`sources` 落库、解析编排（含自动开始解析的判据）、整理记录、降级与失败态矩阵 | **`in-progress`** | v0.19 |
 | 03 | [审核与草稿区](./03-review.md) | 草稿区、证据链、按尝试对账、确认策略、审核界面、「40 笔 30 秒」测量协议 | **`done`** | v0.24 |
 | 04 | [交易 Transactions](./04-transactions.md) | 交易实体、多币种三元组、账户与渠道、分类、回顾 | `draft` | v0.9 |
 | 05 | [事项 Items](./05-items.md) | 事项实体（计划/结果、截止、周视图与回溯修改） | `draft` | v0.9 |
 | 06 | [记忆 Memory](./06-memory.md) | 记忆规则（商户映射、纠正、语境词表） | `draft` | v0.8 |
-| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放、双后端截图专项 | **`review`** | v0.20 |
+| 07 | [评测 Eval](./07-eval.md) | 评测集、评分器、回归门槛、夹具与重放、双后端截图专项 | **`in-progress`** | v0.23 |
 
 **第一次 M0 正式 go/no-go 已于 2026-08-29/30 完成，结果为 `no_go`、exit 3。** final 是被 Git 忽略的 `output/m0-eval/2026-08-29T122443-349Z-first.final.json`；截图池指标 1–3 全过，口述金额准确率 `60/62` 触发硬性 no-go，声明合计可获得率 `4/20`、假警报率 `6/7`。月度 viewport 外、分页、按日、单笔 / 子组合计被误报为来源级合计，证伪了 [00 地基](./00-foundation.md) / [01 Agent 运行时](./01-agent-runtime.md) / [03 审核](./03-review.md) 的 claim 范围契约；正式报告证据、fixture-set 指纹与真值 ordinal 门禁的缺口同时证伪 [07 评测](./07-eval.md)。四份依生命周期退回 `draft`，并在 PR #27 的规格独立 review 通过与维护者批准实施后，于 2026-09-02 依次转为 `ready → in-progress → review`，2026-09-05 收口复审与运行时后续设计回流后当日版本分别为 v0.23 / v0.31 / v0.21 / v0.17；[02 导入](./02-ingest.md) 未被这次结果证伪，只做共享 scope 语义同步到 v0.17，保持 `review`。2026-09-06 的维护者决定只允许 03 的有限 M1 三项并行，第一次 `no_go` 与上述状态不因此改写。
 
@@ -49,7 +49,7 @@ version: v0.50
 
 > **2026-08-10 文档审查同步**（[`docs/PRD.md` v0.10](../PRD.md)）：**八份 sub-PRD 全部有实质改动**，其中三条会产生错误行为、不只是措辞——① [01 §3.7](./01-agent-runtime.md)：`agent` 的**有效工具集**远大于我们注册的工具面，一条 `sqlite3` 命令即绕过四道闸门；② [03 §3.3](./03-review.md)：总额校验对**未消费**草稿求和，逐条确认一条后该来源再也回不到 `passed`；③ [00 §3.4](./00-foundation.md)：金额与汇率写死两位小数，JPY/KWD 会差 100 倍。三条产品决定已拍：**口述来源独立信任策略**（[03 §3.3](./03-review.md) 的 `user_attested_batch`）、**M0 扩到六表五工具**（[`docs/PRD.md` §9.2](../PRD.md)）、**账户维度现在留字段 M2 实现**（[04 §3.4](./04-transactions.md)）。逐条见各份「回流记录」。
 
-**当前实施**（2026-09-06 有限 M1 收尾）：第一次 M0 `no_go` 的代码修正已测试先行完成，00/01/07 保持 `review`，03 为有限 M1 `done`。关键词候选、current-source 全覆盖、formal v2 scope-invalid=0、完整 fixture-set 指纹、bounded 对账证据、四硬字段两侧值、口述 span-order 门禁与纯合成 CI scope fixture 均已落地。维护者批准的有限 M1 三项已实现并通过零额度验收；没有运行 live / 真实 agent / 新 formal，也没有修改第一次报告、旧 fixtures、冻结阈值 / 分母 / join / 四硬字段。正式复测须再次明确授权并使用**独立新样本**；它不再阻止有限切片开工，但仍阻止 M1 整体进入 `review`。
+**2026-09-06 的 M0/有限 M1 实施记录**：第一次 M0 `no_go` 的代码修正已测试先行完成，00/01/07 保持 `review`，03 为有限 M1 `done`。关键词候选、current-source 全覆盖、formal v2 scope-invalid=0、完整 fixture-set 指纹、bounded 对账证据、四硬字段两侧值、口述 span-order 门禁与纯合成 CI scope fixture 均已落地。维护者批准的有限 M1 三项已实现并通过零额度验收；没有运行 live / 真实 agent / 新 formal，也没有修改第一次报告、旧 fixtures、冻结阈值 / 分母 / join / 四硬字段。正式复测须再次明确授权并使用**独立新样本**；它不再阻止有限切片开工，但仍阻止 M1 整体进入 `review`。
 
 [04 交易](./04-transactions.md)、[05 事项](./05-items.md)、[06 记忆](./06-memory.md) 仍为 `draft`，各自在 M2/M3 开工前评审。
 
@@ -134,6 +134,9 @@ version: v0.50
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.53 | 2026-10-04 | 07→v0.23；截图专项零额度指纹与报告结构落地，真实双后端运行仍未实施 |
+| v0.52 | 2026-10-04 | 00→v0.25、01→v0.37、02→v0.19、07→v0.22 / `in-progress`；同步零额度统一选择、只读 Codex 发现及评测归因的切片状态，真实权限与正式复测门槛不变 |
+| v0.51 | 2026-10-02 | 同步 00→v0.24、01→v0.36、02→v0.18、07→v0.21 的 Codex 零额度规格与权限阻塞；当时尚未开始实现 |
 | v0.50 | 2026-10-02 | 01→v0.35、07→v0.20；索引采用产品范围与状态表述，源码调研从运行时规格分离 |
 | v0.49 | 2026-10-02 | 01→v0.34、07→v0.19，同步 运行时边界与三步交付顺序；新增截图专项入口，状态仍只覆盖原切片 |
 | v0.48 | 2026-10-02 | 01→v0.33，登记 Codex 与统一模型选择近期优先、其他模型延期；新增契约待决入口，现有实现状态与复测门槛不变 |

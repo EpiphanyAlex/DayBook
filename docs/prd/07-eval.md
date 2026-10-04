@@ -1,9 +1,9 @@
 ---
 title: 07 评测 Eval — 解析质量的评测集、评分器、回归门槛与夹具
-status: review
+status: in-progress
 owner: "@maintainer"
-date: 2026-10-02
-version: v0.20
+date: 2026-10-04
+version: v0.23
 ---
 
 # 07 · 评测 Eval
@@ -13,7 +13,7 @@ version: v0.20
 
 > **当前门槛作用域**（2026-09-06）：第一次正式 `no_go`、冻结阈值与独立新样本要求全部不变。维护者只把正式复测从 design token、Query + reducer 与完整原件证据这个[有限 M1 并行切片](../PRD.md)的开工门槛移到 M1 整体验收门槛；formal final 仍须另获授权并按既有规则得到退出码 0、`verdict = go | conditional_go`，才能满足整体门槛。
 
-> **状态作用域（2026-10-02）**：`review` 仍表示已启动的 M0 实现切片。新增 [§3.8 截图专项](#backend-screenshot-comparison) 是 Codex 接入后的比较协议，未实施、未执行，不改正式 M0 门槛；后端/模型选择与权限前置由 [01 Agent 运行时](./01-agent-runtime.md#runtime-harness) 负责。
+> **状态作用域（2026-10-04）**：`in-progress` 指已授权的零额度后端/模型选择、报告归因及截图专项结构切片。[§3.8 截图专项](#backend-screenshot-comparison) 的真实运行仍未实施或执行；Codex 真实解析被 [01 Agent 运行时](./01-agent-runtime.md#runtime-harness) 的权限门槛阻塞。第一次 M0 `no_go` 与正式复测授权边界不变。
 
 ## 1. 问题
 
@@ -43,7 +43,7 @@ version: v0.20
 
 ### 3.1 eval 走生产同一条路径
 
-**决定：eval 调用生产 Rust 路径**——起 MCP server、经 `AgentBackend` 启动所选外部 CLI、落进临时数据目录、然后查表打分。当前只实现 Claude Code；Codex 的生产/eval 统一选择待 [01 的 R10](./01-agent-runtime.md#codex-model-selection) 落实。**不直接调模型 API。**
+**决定：eval 调用生产 Rust 路径**——起 MCP server、经 `AgentBackend` 启动所选外部 CLI、落进临时数据目录、然后查表打分。生产/eval 共用 [01 的选择契约](./01-agent-runtime.md#codex-model-selection)；Codex 只读查询已实现，解析保持 `ready=false`。**不直接调模型 API。**
 
 理由：直接调 API 测的是**另一个系统**——没有产品工具面、没有提示词模板、没有闸门。跑绿了不能说明产品是对的。而 `PRD §9.1` 真正要验的不是「模型能不能认出数字」，是**整条链路能不能产出可信的草稿**。
 
@@ -399,7 +399,7 @@ fixtures/local/<date>-<slug>/
 `/samples/` 同理已挡。**判据**：`git status` 里永远不该出现 `fixtures/local/` 下的任何文件；出现了就是 `.gitignore` 被改坏了。
 
 <a id="backend-screenshot-comparison"></a>
-### 3.8 Claude Code / Codex 截图专项对比（未实施）
+### 3.8 Claude Code / Codex 截图专项对比（零额度结构已落地，真实运行未实施）
 
 依据[总 PRD 的交付门槛](../PRD.md#codex-model-priority)。专项仅比较接入后的两个后端在同一批截图上的表现，不是 M0 正式 go/no-go，不包含口述样本，不改变 §3.4/§3.5 的正式样本构成、评分与退出码。权限前置见 [01 Agent 运行时 §3.5/§6.3](./01-agent-runtime.md#runtime-harness)。
 
@@ -417,7 +417,11 @@ fixtures/local/<date>-<slug>/
 
 **可解释性与留存**：逐次记录 backend ID、CLI 版本、请求模型选择（包括「自动」）、实际返回模型 ID、应用/提示词/工具面版本或指纹、冻结样本集指纹、时间与失败原因。无法取得的实际模型或用量明确记为未知，不能用默认模型标签补造；旧 fixture 的环境占位值不能冒充实际运行元数据。完整调用与私有报告只留本机 ignored 路径，原始首轮及两端对照报告分别保留。
 
-**结论边界**：该样本全部为 AUD，不能推出多币种覆盖；无口述/正式对照池，不能推出完整 M0 结论；单轮的耗时、失败率仅为这批运行的观察。模型表现比较也不能代替密封权限验收。具体报告格式、冻结算法复用范围与运行命令由本文 R10 联同 01 的 R10 在实施前定案；当前 eval 尚无双后端选择入口。
+**专项报告契约（零额度结构已落地，完整运行器待实施）**：新建独立 `kind = backend_screenshot_comparison` 的报告，不修改、不覆盖既有 ad-hoc、formal v1/v2 或夹具格式。每端 9 条结果按冻结 manifest 顺序一一对应，逐条包含 `sourceId`、`attemptId`（若 spawn 前失败则为空）、`backendId`、`backendVersion`、`requestedModelMode`、`requestedModelId`、`actualModelId`、`effectiveCapabilityHash`、`outcome`、`errorCode` 与耗时；可空字段保持未知，不从当前设置回填旧报告。模型身份来自 [00 地基 `parse_attempts`](./00-foundation.md) 与 [01 的统一选择](./01-agent-runtime.md#codex-model-selection)，`audit_log` 通过会话关联 attempt。冻结指纹覆盖 `manifest.json`、`selection.json`、9 个原件、9 份 expected 与合计真值/人工裁定依据的内容哈希和有序路径；每端开跑前、每例开跑前与保存报告前复核，任何变化整轮中止并保留已写首轮证据，不以另一集替代。报告里的 `fixtureSetSha256` 与正式 M0 同名字段只能在字节契约相同时复用；否则专项使用独立字段与算法版本，不能让两种指纹同名异义。
+
+**耗时与失败口径**：每例从准备创建解析 attempt 之前计时，到 attempt 终态、补偿作废与日志收尾完成后停止；预先进行的安装/readiness 检查另列，不计入识别耗时。预检权限未通过时整轮不开跑；开跑后超时、取消、断流、协议错或模型不可用仍占 9 例分母，在 spawn 前被拒时 `attemptId = null` 并保留拒绝原因。运行中若权限证据失效，立即停止余下任务、保留部分报告并标为比较未完成，不补造未运行项。成功项耗时单独统计，失败项逐例列时长与原因，不以零代替、也不从准确率分母里悄悄删除。该口径与 [01 的有界收尾](./01-agent-runtime.md#runtime-harness)共用同一终态定义。
+
+**结论边界**：该样本全部为 AUD，不能推出多币种覆盖；无口述/正式对照池，不能推出完整 M0 结论；单轮的耗时、失败率仅为这批运行的观察。模型表现比较也不能代替密封权限验收。独立冻结算法与报告字段已由 `src-tauri/src/eval/comparison.rs` 定义，使用不同于 formal v2 的算法标识；当前函数由调用方传入合计真值/人工裁定文件清单，尚无真实 `selection.json` 的全量解析与复核，因此不能宣称本机样本集已冻结。eval 已有 `--backend` / `--model-id` 选择入口；截图专项的完整运行命令、逐字段评分接线与真实双后端执行仍待实现，并受 [01 的真实密封权限门槛](./01-agent-runtime.md#runtime-harness)约束。
 
 ## 4. 否决的替代方案
 
@@ -447,7 +451,7 @@ fixtures/local/<date>-<slug>/
 | R9（**2026-08-30 第一次 formal 后部分关闭**） | **agent 与真值的 `source_ordinal` 是否可靠**——整套 join 建立在它上面。第一次样本的 `m0-utterance-017` 不是 agent 单侧问题：expected ordinal 自己就与口述中交易首次出现顺序冲突 | 本文 §3.2、[01 §3.2](./01-agent-runtime.md) | **真值侧已定案**：新 formal 口述项必须带第一处交易 span，ordinal 为 `1..N` 且随 span start 严格递增，backend 前校验；旧样本不改。**预测侧仍开放**：继续看「内容对得上而 ordinal join 不对」的诊断率；若高，再在提示词或工具形态处理，不改 full outer join |
 | ~~R8~~（2026-08-10 提出，**2026-08-16 已决**） | **来源类型的 beachhead 未定**——四类来源（交易列表截图 / 月结单 / 支付 App 账单 / 纸质小票）的**合计语义完全不同**（[00 地基 §5](./00-foundation.md) R7），eval 集按什么比例配无从谈起 | 本文 §3.4、[`docs/PRD.md` §9.4](../PRD.md) | **已决：beachhead = 交易列表类截图**，非 beachhead 来源采 3–5 张进对照栏、不参与判定。构成与理由见 §3.4「M0 go / no-go 的样本构成」，同步回流 [`docs/PRD.md` §9.4](../PRD.md)。月结单的多条合计仍推 M2 与 [00 地基 §5](./00-foundation.md) R7 一并 |
 
-| R10（新增 2026-10-02） | 双后端截图专项的选择入口、完整冻结指纹、实际运行元数据、报告格式与旧报告兼容；耗时口径和失败项呈现；可执行命令与验收选择器 | 本文 §3.1/§3.8/§6；[01 Agent 运行时 R10](./01-agent-runtime.md#codex-model-selection) | Codex / 统一选择实施前由维护者评审共同契约；只复用已有评分规则，不改变正式 M0 报告与阈值，不把现有 Claude-only eval 入口宣称为已支持双后端 |
+| R10（2026-10-04 零额度结构已落地） | 生产/eval 的双后端选择入口、截图专项独立指纹与报告字段已落地；完整运行命令、逐字段评分接线与真实双后端验收仍待实施 | 本文 §3.1/§3.8/§6；[01 Agent 运行时 R10](./01-agent-runtime.md#codex-model-selection) | Codex 权限阻塞解除后才可实施真实专项，评分规则与正式 M0 阈值不变 |
 
 ## 6. 验收标准
 
@@ -543,9 +547,9 @@ fixtures/local/<date>-<slug>/
 - [ ] 随便挑一条历史 bug，用导出器导出夹具，`cargo test` 能稳定复现（连跑三次结果一致）
 - [ ] **抽查 3 条用例的 `reported_total_evidence_text`，确认那段文字真的印在原件上**（§3.3 删掉的自动评分器的人工替代，§5 R7）
 
-### Codex 接入后的截图专项（待实施，非当前 M0 受审切片）
+### Codex 接入后的截图专项（零额度结构已落地，真实执行未实施）
 
-具体命令与选择器须在 R10 评审时补齐，不因本文 `review` 被视为已通过：
+现有零额度选择器：在仓库根执行 `node scripts/eval.mjs --dry-run`、`node scripts/eval.mjs --replay`；在 `src-tauri/` 执行 `cargo test eval::replay`、`cargo test eval::formal`。另运行 `cargo test eval::comparison` 验证独立指纹与报告完整性。完整运行器尚未接线，本文 `in-progress` 不表示真实专项已通过：
 
 - 零额度验证：同一冻结集分别选择两个假后端，生产/eval 选择一致；篡改任一原件/expected 或 manifest 使冻结校验失败；只有 8 例、缺真值或换成其他样本集时拒绝该轮专项。
 - 零额度验证：覆盖成功、漏读、多读、scope-invalid、零分母、超时与断流；报告始终保留 9 个来源结果，实际模型未知不猜测，首轮不会被重试覆盖，旧报告仍只读可用。
@@ -642,6 +646,9 @@ fixtures/local/<date>-<slug>/
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| v0.23 | 2026-10-04 | 截图专项的零额度指纹/报告结构与合成测试落地；真实运行器、逐字段评分和 18 次双后端执行仍未实施，Codex 权限门槛不变 |
+| v0.22 | 2026-10-04 | 生产/eval 统一 `--backend` / `--model-id`，尝试与新报告保留请求/实际模型身份，诊断先校验首轮归因；旧报告保持未知字段。截图专项独立报告仍待实现，真实 Codex 被权限门槛阻塞 |
+| v0.21 | 2026-10-02 | 定义截图专项独立报告、完整冻结材料、每例模型/失败身份与耗时起止；旧报告不迁移，真实评测仍受 [01 权限门槛](./01-agent-runtime.md#codex-model-selection)阻塞 |
 | v0.20 | 2026-10-02 | 截图专项改为自包含的评测协议，移除会话式依据与表述；样本范围和验收口径不变 |
 | v0.19 | 2026-10-02 | 登记 Claude Code / Codex 同集截图专项、冻结与报告边界、R10 及待实施验收；仅截图、不替代正式 M0，未执行真实调用 |
 | v0.18 | 2026-09-06 | 把独立新样本 formal 明确为 M1 整体验收门槛而非有限切片开工门槛；正式授权、冻结阈值与全部评测契约不变，第一次 `no_go` 永久保留 |

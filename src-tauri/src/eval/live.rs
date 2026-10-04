@@ -469,7 +469,7 @@ mod eval {
         let env: FixtureEnv = serde_json::from_value(json!({
             "toolSurfaceVersion": crate::agent::registry::tool_surface_version(),
             "appVersion": "0.1.0",
-            "schemaVersion": 1,
+            "schemaVersion": crate::db::LATEST_SCHEMA_VERSION,
             "baseCurrency": "AUD",
             "source": { "id": "11111111-1111-4111-8111-111111111111", "kind": "utterance", "input": "input.txt" },
             "attempt": {

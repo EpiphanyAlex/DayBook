@@ -4,10 +4,12 @@
 html, body, #root { margin: 0; width: 100%; min-height: 100%; }
 body { font: var(--type-body-md); }
 button, input, textarea { font: inherit; }
+select { font: inherit; color: var(--color-fg-primary); }
 button { cursor: pointer; white-space: nowrap; flex-shrink: 0; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); min-height: 32px; padding: 0 12px; background: var(--color-bg-surface-raised); color: var(--color-fg-primary); transition: background var(--motion-fast); }
 button:hover { background: var(--color-bg-hover); }
 button:active { background: var(--color-bg-pressed); }
 button:disabled, input:disabled { background: var(--color-bg-surface); border-color: transparent; color: var(--color-fg-muted); cursor: default; }
+select:disabled { color: var(--color-fg-muted); cursor: default; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, article:focus-visible, summary:focus-visible { outline: 2px solid var(--color-intent-action-accent); outline-offset: 2px; }
 input, textarea { min-width: 0; color: var(--color-fg-primary); }
 input::placeholder, textarea::placeholder { color: var(--color-fg-muted); }
@@ -34,6 +36,11 @@ code, input[type='date'] { font-family: var(--font-mono); }
 .drawer-heading > span { font: var(--type-money-md); color: var(--color-fg-numeral); }
 .agent-guidance { border-left: 2px solid var(--color-intent-pending-accent); padding: 12px; background: var(--color-intent-pending-surface); color: var(--color-intent-pending-text); }
 .agent-guidance p { margin-top: 8px; font: var(--type-body-sm); }
+.agent-settings { display: grid; gap: 8px; border-top: 1px solid var(--color-border-subtle); padding-top: 16px; }
+.agent-settings label { font: var(--type-label); }
+.agent-settings select { width: 100%; min-height: 32px; padding: 0 8px; border: 1px solid var(--color-border-default); border-radius: var(--radius-sm); background: var(--color-bg-field); }
+.agent-settings > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.agent-settings small { overflow-wrap: anywhere; }
 .base-currency-setting { display: grid; gap: 8px; }
 .base-currency-setting label { font: var(--type-label); }
 .base-currency-setting > div { display: flex; gap: 8px; }

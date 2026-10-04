@@ -8,14 +8,16 @@ use rusqlite::{Connection, OpenFlags, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    agent::selection::AgentSelection,
     error::{AppError, AppResult},
     money::currency_exponent,
 };
 
 /// 迁移号（`PRAGMA user_version`）。`pub` 是因为夹具的版本三元组要拿它比对——
 /// 夹具过期必须报得明白，而不是重放到一半报个别的错（`docs/prd/07-eval.md` §5 R4）。
-pub const LATEST_SCHEMA_VERSION: i64 = 1;
+pub const LATEST_SCHEMA_VERSION: i64 = 2;
 const M0_MIGRATION: &str = include_str!("../migrations/0001_m0.sql");
+const AGENT_SELECTION_MIGRATION: &str = include_str!("../migrations/0002_agent_selection.sql");
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +33,7 @@ pub struct FoundationStatus {
 struct Preferences {
     base_currency: Option<String>,
     debug_logging: Option<bool>,
+    agent: Option<AgentSelection>,
 }
 
 #[derive(Debug)]
@@ -121,6 +124,27 @@ impl Database {
         self.write_preferences(&preferences)
     }
 
+    pub fn agent_selection(&self) -> AppResult<AgentSelection> {
+        let _guard = self
+            .preference_lock
+            .lock()
+            .map_err(|_| AppError::storage("偏好设置锁已损坏"))?;
+        let selection = self.read_preferences()?.agent.unwrap_or_default();
+        selection.validate()?;
+        Ok(selection)
+    }
+
+    pub fn set_agent_selection(&self, selection: AgentSelection) -> AppResult<()> {
+        selection.validate()?;
+        let _guard = self
+            .preference_lock
+            .lock()
+            .map_err(|_| AppError::storage("偏好设置锁已损坏"))?;
+        let mut preferences = self.read_preferences()?;
+        preferences.agent = Some(selection);
+        self.write_preferences(&preferences)
+    }
+
     fn write_preferences(&self, preferences: &Preferences) -> AppResult<()> {
         let bytes = serde_json::to_vec_pretty(&preferences)
             .map_err(|error| AppError::storage(format!("偏好设置序列化失败：{error}")))?;
@@ -208,6 +232,9 @@ fn migrate(connection: &Connection) -> AppResult<()> {
     }
     if current == 0 {
         connection.execute_batch(M0_MIGRATION)?;
+    }
+    if current < 2 {
+        connection.execute_batch(AGENT_SELECTION_MIGRATION)?;
     }
     Ok(())
 }
@@ -322,7 +349,7 @@ mod foundation {
                 .status()
                 .unwrap()
                 .schema_version,
-            1
+            LATEST_SCHEMA_VERSION
         );
         assert_eq!(
             Database::open(directory.path())
@@ -330,8 +357,43 @@ mod foundation {
                 .status()
                 .unwrap()
                 .schema_version,
-            1
+            LATEST_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn agent_selection_preserves_old_preferences_and_legacy_attempt() {
+        use crate::agent::selection::{AgentSelection, ModelSelection};
+        let directory = tempdir().unwrap();
+        let old = Connection::open(directory.path().join("daybook.db")).unwrap();
+        old.execute_batch(M0_MIGRATION).unwrap();
+        insert_source(&old, "legacy-source");
+        old.execute("INSERT INTO parse_attempts (id, source_id, agent_session_id, backend_id, prompt_hash, tool_surface_version, effective_capability_hash, app_version, started_at)
+            VALUES ('legacy-attempt', 'legacy-source', 'legacy-session', 'claude-code', ?1, 'v1', ?1, '0.1.0', '2026-08-13T00:00:00Z')", ["0".repeat(64)]).unwrap();
+        drop(old);
+        std::fs::write(
+            directory.path().join("preferences.json"),
+            br#"{"baseCurrency":"AUD","debugLogging":true}"#,
+        )
+        .unwrap();
+        let database = Database::open(directory.path()).unwrap();
+        assert_eq!(
+            database.agent_selection().unwrap(),
+            AgentSelection::default()
+        );
+        assert_eq!(database.base_currency().unwrap().as_deref(), Some("AUD"));
+        assert!(database.debug_logging().unwrap());
+        let legacy: (Option<String>, Option<String>) = database.read(|connection| connection.query_row("SELECT requested_model_mode, requested_model_id FROM parse_attempts WHERE id = 'legacy-attempt'", [], |row| Ok((row.get(0)?, row.get(1)?)))).unwrap();
+        assert_eq!(legacy, (None, None));
+        let choice = AgentSelection {
+            backend_id: "codex".to_owned(),
+            model_selection: ModelSelection::Specific {
+                model_id: "gpt-test".to_owned(),
+            },
+        };
+        database.set_agent_selection(choice.clone()).unwrap();
+        assert_eq!(database.agent_selection().unwrap(), choice);
+        assert_eq!(database.base_currency().unwrap().as_deref(), Some("AUD"));
     }
 
     #[test]
@@ -368,7 +430,7 @@ mod foundation {
         let directory = tempdir().unwrap();
         let path = directory.path().join("daybook.db");
         let connection = Connection::open(path).unwrap();
-        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection.pragma_update(None, "user_version", 3).unwrap();
         drop(connection);
         assert_eq!(
             Database::open(directory.path()).unwrap_err().code,

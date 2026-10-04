@@ -19,7 +19,8 @@ const HELP = `用法：
   node scripts/eval.mjs --help                                  零额度
   node scripts/eval.mjs --dry-run [--manifest <path>]           零额度，只校验普通 manifest
   node scripts/eval.mjs --replay [--manifest <path>]            零额度，重放夹具
-  node scripts/eval.mjs [--manifest <path>] [--trials N]        烧额度，ad-hoc live；不是 M0 verdict
+  node scripts/eval.mjs [--manifest <path>] [--trials N] [--backend claude-code|codex] [--model-id <固定 ID>]
+                                                               烧额度，ad-hoc live；不是 M0 verdict
   node scripts/eval.mjs --m0-go-no-go --manifest <fixtures/local/.../manifest.json>
                                                                烧额度，正式首轮
   node scripts/eval.mjs --m0-finalize <first-report>            零额度，不重跑 agent
@@ -53,6 +54,8 @@ const valueFlags = new Set([
   '--m0-finalize',
   '--m0-diagnose',
   '--out',
+  '--backend',
+  '--model-id',
 ])
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index]
@@ -72,6 +75,10 @@ const selectedModes = [formalFirst, finalizeReport !== undefined, diagnoseReport
   .filter(Boolean).length
 if (selectedModes > 1) failUsage('模式参数互斥')
 const hasAdHocTuning = process.argv.includes('--trials') || process.argv.includes('--keep-runs')
+const hasAgentSelection = process.argv.includes('--backend') || process.argv.includes('--model-id')
+if ((dryRun || replay || finalizeReport !== undefined) && hasAgentSelection) {
+  failUsage('--backend / --model-id 只属于会运行解析器的 live / 正式首轮 / 诊断')
+}
 if (formalFirst && hasAdHocTuning) {
   failUsage('M0 正式首轮每 case 恰好 1 轮；三轮只经 --m0-diagnose')
 }
@@ -87,6 +94,11 @@ if (process.argv.includes('--m0-diagnose') && !diagnoseReport) failUsage('--m0-d
 const manifest = optionalArgument('manifest')
   ? resolve(root, optionalArgument('manifest'))
   : defaultManifest
+const selectionArgs = []
+for (const name of ['backend', 'model-id']) {
+  const value = optionalArgument(name)
+  if (value !== undefined) selectionArgs.push(`--${name}`, value)
+}
 
 // 优先用已经构建好的二进制（verify-m0.mjs 在 cargo build --bins 之后调用）；单独运行时
 // 退回 cargo run。所有 cargo 调用都 offline。
@@ -147,7 +159,7 @@ if (replay) {
     ? resolve(root, optionalArgument('out'))
     : localReportPath('first')
   const result = runEval(
-    ['m0-go-no-go', '--manifest', manifest, '--root', root, '--out', reportPath],
+    ['m0-go-no-go', '--manifest', manifest, '--root', root, '--out', reportPath, ...selectionArgs],
     { allowedStatuses: [0, 2, 3] },
   )
   commandStatus = result.status
@@ -166,12 +178,12 @@ if (replay) {
   reportPath = optionalArgument('out')
     ? resolve(root, optionalArgument('out'))
     : siblingWithSuffix(first, `.diagnosis.${new Date().toISOString().replaceAll(':', '').replaceAll('.', '-')}.json`)
-  runEval(['m0-diagnose', '--report', first, '--root', root, '--out', reportPath])
+  runEval(['m0-diagnose', '--report', first, '--root', root, '--out', reportPath, ...selectionArgs])
   reportKind = 'diagnosis'
 } else {
   // **兼容的 ad-hoc live，会烧额度**。它真起用户自己的 agent CLI，但不产正式 M0 verdict。
   reportPath = join(rust, 'target', 'eval-report.json')
-  const passthrough = ['run', '--manifest', manifest, '--root', root, '--out', reportPath]
+  const passthrough = ['run', '--manifest', manifest, '--root', root, '--out', reportPath, ...selectionArgs]
   for (const name of ['trials', 'keep-runs']) {
     const value = optionalArgument(name)
     if (value !== undefined) passthrough.push(`--${name}`, value)

@@ -19,7 +19,9 @@ use crate::{
 use super::{
     backend::{AgentBackend, AgentTask, BackendStatus, ProbeResult},
     claude::ClaudeCodeBackend,
+    codex::CodexBackend,
     registry::tool_surface_version,
+    selection::{AgentSelection, ModelSelection},
 };
 
 const PARSE_PROMPT: &str = include_str!("../../prompts/m0-parse.md");
@@ -48,6 +50,7 @@ enum Readiness {
 
 pub struct AgentRuntime {
     backend: Arc<dyn AgentBackend>,
+    selection: AgentSelection,
     probe_cache: Mutex<Option<(String, ProbeResult)>>,
     readiness: StdMutex<Readiness>,
     task_gate: Mutex<()>,
@@ -71,14 +74,31 @@ impl std::fmt::Debug for AgentRuntime {
 }
 
 impl AgentRuntime {
-    pub fn claude_default() -> Self {
+    pub fn for_selection(selection: AgentSelection) -> Self {
+        if selection.backend_id == "codex" {
+            return Self::with_selection(
+                Arc::new(CodexBackend::discover(selection.model_selection.clone())),
+                selection,
+            );
+        }
         let helper_path = resolve_helper_path();
-        Self::new(Arc::new(ClaudeCodeBackend::discover(helper_path)))
+        let backend = ClaudeCodeBackend::discover(helper_path)
+            .with_model_selection(selection.model_selection.clone());
+        Self::with_selection(Arc::new(backend), selection)
+    }
+
+    pub fn claude_default() -> Self {
+        Self::for_selection(AgentSelection::default())
     }
 
     pub fn new(backend: Arc<dyn AgentBackend>) -> Self {
+        Self::with_selection(backend, AgentSelection::default())
+    }
+
+    pub fn with_selection(backend: Arc<dyn AgentBackend>, selection: AgentSelection) -> Self {
         Self {
             backend,
+            selection,
             probe_cache: Mutex::new(None),
             readiness: StdMutex::new(Readiness::NotProbed),
             task_gate: Mutex::new(()),
@@ -91,6 +111,18 @@ impl AgentRuntime {
     /// 前端不再拼装，也不再反推。
     pub async fn status(&self) -> BackendStatus {
         let mut status = self.backend.status().await;
+        if matches!(self.readiness(), Readiness::Ready) {
+            let current_key = self.current_cache_key().await.ok();
+            let cached_key = self
+                .probe_cache
+                .lock()
+                .await
+                .as_ref()
+                .map(|(key, _)| key.clone());
+            if current_key != cached_key {
+                self.set_readiness(Readiness::NotProbed);
+            }
+        }
         if !status.available {
             status.ready = false;
             status.authenticated = None;
@@ -100,12 +132,16 @@ impl AgentRuntime {
         match self.readiness() {
             Readiness::NotProbed | Readiness::Probing => {
                 status.ready = false;
-                status.authenticated = None;
+                if self.backend.id() == "claude-code" {
+                    status.authenticated = None;
+                }
                 status.error_code = None;
             }
             Readiness::Failed(error) => {
                 status.ready = false;
-                status.authenticated = (error.code == "agent.not_authenticated").then_some(false);
+                if error.code == "agent.not_authenticated" {
+                    status.authenticated = Some(false);
+                }
                 status.error_code = Some(error.code);
             }
             Readiness::Ready => {
@@ -131,11 +167,22 @@ impl AgentRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
     }
 
+    async fn current_cache_key(&self) -> AppResult<String> {
+        let backend_key = self.backend.probe_cache_key().await?;
+        Ok(format!(
+            "{backend_key}:{}:{}:{}",
+            self.selection.backend_id,
+            serde_json::to_string(&self.selection.model_selection).unwrap_or_default(),
+            tool_surface_version()
+        ))
+    }
+
     pub async fn probe(&self, database: Arc<Database>) -> AppResult<ProbeResult> {
         let started = Instant::now();
-        let cache_key = match self.backend.probe_cache_key().await {
+        let cache_key = match self.current_cache_key().await {
             Ok(cache_key) => cache_key,
             Err(error) => {
+                self.set_readiness(Readiness::Failed(error.clone()));
                 write_probe_log(
                     &database,
                     self.backend.id(),
@@ -185,12 +232,15 @@ impl AgentRuntime {
             Readiness::NotProbed | Readiness::Probing => return Err(not_ready()),
             Readiness::Ready => {}
         }
-        self.probe_cache
-            .lock()
-            .await
-            .as_ref()
-            .map(|(_, result)| result.clone())
-            .ok_or_else(not_ready)
+        let current_key = self.current_cache_key().await?;
+        let cached = self.probe_cache.lock().await.as_ref().cloned();
+        match cached {
+            Some((key, result)) if key == current_key => Ok(result),
+            _ => {
+                self.set_readiness(Readiness::NotProbed);
+                Err(not_ready())
+            }
+        }
     }
 
     pub async fn parse_source(
@@ -223,8 +273,8 @@ impl AgentRuntime {
                 "INSERT INTO parse_attempts (
                     id, source_id, agent_session_id, backend_id, backend_version,
                     prompt_hash, tool_surface_version, effective_capability_hash,
-                    app_version, started_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    app_version, started_at, requested_model_mode, requested_model_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 rusqlite::params![
                     attempt_id,
                     source_id,
@@ -236,6 +286,14 @@ impl AgentRuntime {
                     probe.effective_capability_hash,
                     env!("CARGO_PKG_VERSION"),
                     started_at,
+                    match &self.selection.model_selection {
+                        ModelSelection::Auto => "auto",
+                        ModelSelection::Specific { .. } => "specific",
+                    },
+                    match &self.selection.model_selection {
+                        ModelSelection::Auto => None,
+                        ModelSelection::Specific { model_id } => Some(model_id.as_str()),
+                    },
                 ],
             )?;
             transaction.execute(
@@ -353,6 +411,14 @@ impl AgentRuntime {
                 return Err(error);
             }
         };
+        // 即使完成协议或指定模型校验失败，也保留 CLI 本次实际报告的身份。
+        database.write(|transaction| {
+            transaction.execute(
+                "UPDATE parse_attempts SET model_id = ?1 WHERE id = ?2 AND ended_at IS NULL",
+                rusqlite::params![result.model_id, attempt_id],
+            )?;
+            Ok(())
+        })?;
         if !result.success {
             void_attempt(
                 &database,
@@ -364,6 +430,17 @@ impl AgentRuntime {
                 "agent.protocol_violation",
                 "agent 正常退出但没有成功调用 complete_source",
             ));
+        }
+        if let ModelSelection::Specific { model_id } = &self.selection.model_selection {
+            let error_code = match result.model_id.as_deref() {
+                Some(actual) if actual == model_id => None,
+                Some(_) => Some("agent.model_mismatch"),
+                None => Some("agent.model_identity_unverified"),
+            };
+            if let Some(error_code) = error_code {
+                void_attempt(&database, &assignment, "failed", error_code)?;
+                return Err(AppError::new(error_code, "所选模型的实际执行身份无法确认"));
+            }
         }
         let (item_count, unparsed_note) = database.read(|connection| {
             connection.query_row(
@@ -1044,6 +1121,82 @@ mod agent {
             "闸门开了之后失败的是任务本身，不是就绪度"
         );
         assert_eq!(attempt_count(&database), 1);
+    }
+
+    struct WrongModelBackend;
+
+    #[async_trait]
+    impl AgentBackend for WrongModelBackend {
+        fn id(&self) -> &'static str {
+            "scripted"
+        }
+        async fn status(&self) -> BackendStatus {
+            BackendStatus::qualified("scripted", PathBuf::from("/fake/claude"), "1".to_owned())
+        }
+        async fn probe(&self, _database: Arc<Database>) -> AppResult<ProbeResult> {
+            Ok(probe_result("1"))
+        }
+        async fn run_task(
+            &self,
+            _database: Arc<Database>,
+            _task: AgentTask,
+            _cancel: watch::Receiver<bool>,
+        ) -> AppResult<AgentTaskResult> {
+            Ok(AgentTaskResult {
+                success: true,
+                model_id: Some("other-model".to_owned()),
+                agent_session_id: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                trace_events: Vec::new(),
+                debug_events: Vec::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn specific_model_is_frozen_and_mismatch_voids_attempt() {
+        let source_id = "00000000-0000-4000-8000-000000000091";
+        let directory = tempdir().unwrap();
+        let database = parse_ready_database(directory.path(), source_id);
+        let selection = AgentSelection {
+            backend_id: "claude-code".to_owned(),
+            model_selection: ModelSelection::Specific {
+                model_id: "claude-test-model".to_owned(),
+            },
+        };
+        let runtime = AgentRuntime::with_selection(Arc::new(WrongModelBackend), selection);
+        runtime.probe(Arc::clone(&database)).await.unwrap();
+        assert_eq!(
+            runtime
+                .parse_source(Arc::clone(&database), source_id.to_owned())
+                .await
+                .unwrap_err()
+                .code,
+            "agent.model_mismatch"
+        );
+        let row: (String, String, String, String) = database.read(|connection| connection.query_row(
+            "SELECT requested_model_mode, requested_model_id, outcome, error_code FROM parse_attempts WHERE source_id = ?1", [source_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        )).unwrap();
+        assert_eq!(
+            row,
+            (
+                "specific".to_owned(),
+                "claude-test-model".to_owned(),
+                "failed".to_owned(),
+                "agent.model_mismatch".to_owned()
+            )
+        );
+        let actual: Option<String> = database
+            .read(|connection| {
+                connection.query_row(
+                    "SELECT model_id FROM parse_attempts WHERE source_id = ?1",
+                    [source_id],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(actual.as_deref(), Some("other-model"));
     }
 
     /// 最近一次探测结论由 Rust 运行时持有：**再读一次拿到的还是它**，
@@ -1957,7 +2110,10 @@ mod agent {
     fn backend_absent_app_still_starts() {
         let directory = tempdir().unwrap();
         let database = Database::open(directory.path()).unwrap();
-        assert_eq!(database.status().unwrap().schema_version, 1);
+        assert_eq!(
+            database.status().unwrap().schema_version,
+            crate::db::LATEST_SCHEMA_VERSION
+        );
         let runtime = AgentRuntime::claude_default();
         let _status = runtime.status();
     }

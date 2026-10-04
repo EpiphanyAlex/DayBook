@@ -11,12 +11,7 @@ use std::{
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::{
-    io::AsyncReadExt,
-    process::Command,
-    sync::watch,
-    time::{sleep, timeout},
-};
+use tokio::{process::Command, sync::watch, time::timeout};
 
 use crate::{
     db::Database,
@@ -26,11 +21,14 @@ use crate::{
 
 use super::{
     backend::{
-        AgentBackend, AgentTask, AgentTaskResult, AvailabilityReason, BackendStatus, ProbeResult,
+        installation_cache_key, AgentBackend, AgentTask, AgentTaskResult, AvailabilityReason,
+        BackendStatus, ProbeResult,
     },
+    process::run_bounded,
     registry::{
         effective_capability_hash, expected_capabilities, m0_tool_registry, CapabilityEntry,
     },
+    selection::ModelSelection,
     session::{AgentSession, SessionMode},
 };
 
@@ -55,6 +53,7 @@ pub struct ClaudeCodeBackend {
     helper_path: PathBuf,
     version_timeout: Duration,
     qualification: tokio::sync::OnceCell<Qualification>,
+    model_selection: ModelSelection,
 }
 
 impl ClaudeCodeBackend {
@@ -72,7 +71,13 @@ impl ClaudeCodeBackend {
             helper_path,
             version_timeout: VERSION_TIMEOUT,
             qualification: tokio::sync::OnceCell::new(),
+            model_selection: ModelSelection::Auto,
         }
+    }
+
+    pub fn with_model_selection(mut self, model_selection: ModelSelection) -> Self {
+        self.model_selection = model_selection;
+        self
     }
 
     #[cfg(test)]
@@ -160,10 +165,11 @@ impl ClaudeCodeBackend {
     }
 
     async fn version(&self) -> AppResult<String> {
-        self.qualify().await.version.clone().ok_or_else(|| {
+        let executable = self.executable().await?;
+        self.qualify_candidate(&executable).await.map_err(|_| {
             AppError::new(
                 "agent.backend_unavailable",
-                "未检测到合格的 Claude Code CLI，请先安装或修复后再解析",
+                "Claude Code CLI 版本已变化或当前不可执行，请重新检查解析器",
             )
         })
     }
@@ -211,6 +217,9 @@ impl ClaudeCodeBackend {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let ModelSelection::Specific { model_id } = &self.model_selection {
+            command.arg("--model").arg(model_id);
+        }
         command.kill_on_drop(true);
         if let Some(session_id) = agent_session_id {
             command.arg("--session-id").arg(session_id);
@@ -226,59 +235,12 @@ impl ClaudeCodeBackend {
         prompt: &str,
         duration: Duration,
         agent_session_id: Option<&str>,
-        mut cancel: watch::Receiver<bool>,
+        cancel: watch::Receiver<bool>,
     ) -> AppResult<std::process::Output> {
-        let mut command = self
+        let command = self
             .sealed_command(session, prompt, agent_session_id)
             .await?;
-        let mut child = command
-            .spawn()
-            .map_err(|error| AppError::new("agent.spawn_failed", error.to_string()))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| AppError::new("agent.spawn_failed", "无法读取 agent stdout"))?;
-        let mut stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| AppError::new("agent.spawn_failed", "无法读取 agent stderr"))?;
-        let stdout_task = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            stdout.read_to_end(&mut bytes).await.map(|_| bytes)
-        });
-        let stderr_task = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            stderr.read_to_end(&mut bytes).await.map(|_| bytes)
-        });
-        let status = tokio::select! {
-            status = child.wait() => status
-                .map_err(|error| AppError::new("agent.spawn_failed", error.to_string()))?,
-            changed = cancel.changed() => {
-                if changed.is_ok() && *cancel.borrow() {
-                    terminate_child_tree(&mut child).await;
-                    let (stdout, stderr) = collect_reader_output(stdout_task, stderr_task).await;
-                    return Err(AppError::new("agent.cancelled", "解析已由用户停止")
-                        .with_detail(json!({ "stdout": stdout, "stderr": stderr })));
-                }
-                child.wait().await
-                    .map_err(|error| AppError::new("agent.spawn_failed", error.to_string()))?
-            }
-            _ = sleep(duration) => {
-                terminate_child_tree(&mut child).await;
-                let (stdout, stderr) = collect_reader_output(stdout_task, stderr_task).await;
-                return Err(AppError::new("agent.timeout", "agent 子进程超过硬超时")
-                    .with_detail(json!({ "stdout": stdout, "stderr": stderr })));
-            }
-        };
-        let output = std::process::Output {
-            status,
-            stdout: stdout_task
-                .await
-                .map_err(|error| AppError::storage(format!("stdout 采集任务失败：{error}")))??,
-            stderr: stderr_task
-                .await
-                .map_err(|error| AppError::storage(format!("stderr 采集任务失败：{error}")))??,
-        };
+        let output = run_bounded(command, duration, cancel).await?;
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -319,6 +281,9 @@ impl ClaudeCodeBackend {
             )
             .arg("--allowedTools")
             .arg(allowed_tool_names().join(","));
+        if let ModelSelection::Specific { model_id } = &self.model_selection {
+            command.arg("--model").arg(model_id);
+        }
         let standard = command.as_std();
         let args = standard
             .get_args()
@@ -378,75 +343,59 @@ fn allowed_tool_names() -> Vec<String> {
         .collect()
 }
 
-async fn collect_reader_output(
-    stdout_task: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
-    stderr_task: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
-) -> (String, String) {
-    let stdout = stdout_task
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .unwrap_or_default();
-    let stderr = stderr_task
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .unwrap_or_default();
-    (
-        String::from_utf8_lossy(&stdout).into_owned(),
-        String::from_utf8_lossy(&stderr).into_owned(),
-    )
-}
-
-async fn terminate_child_tree(child: &mut tokio::process::Child) {
-    let process_group_id = child.id();
-    #[cfg(unix)]
-    if let Some(process_group_id) = process_group_id {
-        // SAFETY: `sealed_command` creates a fresh process group whose id is the child pid.
-        // A negative pid targets that group only. SIGTERM gives the CLI and helper a short
-        // opportunity to flush their log sinks before the hard-kill fallback below.
-        unsafe {
-            libc::kill(-(process_group_id as i32), libc::SIGTERM);
-        }
-    }
-
-    if timeout(Duration::from_secs(2), child.wait()).await.is_ok() {
-        return;
-    }
-
-    #[cfg(unix)]
-    if let Some(process_group_id) = process_group_id {
-        // SAFETY: this is the same dedicated process group targeted above. If the child exited
-        // during the grace period, ESRCH is harmless and the direct-child fallback remains safe.
-        unsafe {
-            libc::kill(-(process_group_id as i32), libc::SIGKILL);
-        }
-    }
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-}
-
 #[async_trait]
 impl AgentBackend for ClaudeCodeBackend {
     fn id(&self) -> &'static str {
         "claude-code"
     }
 
+    async fn probe_cache_key(&self) -> AppResult<String> {
+        let executable = self.executable().await?;
+        let mut command = Command::new(&executable);
+        command
+            .arg("auth")
+            .arg("status")
+            .arg("--json")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command.as_std_mut().process_group(0);
+        let auth = run_bounded(command, VERSION_TIMEOUT, watch::channel(false).1).await?;
+        let auth_fingerprint = format!(
+            "{:x}",
+            Sha256::digest(
+                [
+                    &[auth.status.success() as u8][..],
+                    &auth.stdout,
+                    &auth.stderr
+                ]
+                .concat()
+            )
+        );
+        Ok(format!(
+            "{}:{}:{}",
+            installation_cache_key(&self.status().await),
+            self.sealed_config_fingerprint(),
+            auth_fingerprint
+        ))
+    }
+
     async fn status(&self) -> BackendStatus {
         let qualification = self.qualify().await;
         match (&qualification.executable, &qualification.version) {
-            (Some(executable), Some(version)) => {
-                BackendStatus::qualified(self.id(), executable.clone(), version.clone())
-            }
+            (Some(executable), Some(_version)) => match self.qualify_candidate(executable).await {
+                Ok(current_version) => {
+                    BackendStatus::qualified(self.id(), executable.clone(), current_version)
+                }
+                Err(reason) => BackendStatus::unqualified(self.id(), reason),
+            },
             _ => BackendStatus::unqualified(
                 self.id(),
                 qualification.reason.unwrap_or(AvailabilityReason::NotFound),
             ),
         }
-    }
-
-    async fn probe_cache_key(&self) -> AppResult<String> {
-        Ok(format!("{}:{}", self.id(), self.version().await?))
     }
 
     async fn probe(&self, database: Arc<Database>) -> AppResult<ProbeResult> {
@@ -531,9 +480,16 @@ fn parse_result_metadata(stream: &str) -> ResultMetadata {
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
     {
-        if result.model_id.is_none() {
+        if string_at(&value, &["type"]).as_deref() == Some("result") {
             result.model_id =
-                string_at(&value, &["model"]).or_else(|| string_at(&value, &["message", "model"]));
+                value
+                    .get("modelUsage")
+                    .and_then(Value::as_object)
+                    .and_then(|usage| {
+                        (usage.len() == 1)
+                            .then(|| usage.keys().next().cloned())
+                            .flatten()
+                    });
         }
         if result.session_id.is_none() {
             result.session_id =
@@ -541,6 +497,22 @@ fn parse_result_metadata(stream: &str) -> ResultMetadata {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod model_identity_tests {
+    use super::*;
+
+    #[test]
+    fn result_model_usage_is_authoritative() {
+        let stream = "{\"type\":\"system\",\"model\":\"default\"}\n{\"type\":\"result\",\"modelUsage\":{\"claude-opus-5-5\":{}}}\n";
+        assert_eq!(
+            parse_result_metadata(stream).model_id.as_deref(),
+            Some("claude-opus-5-5")
+        );
+        let mixed = "{\"type\":\"result\",\"modelUsage\":{\"one\":{},\"two\":{}}}\n";
+        assert!(parse_result_metadata(mixed).model_id.is_none());
+    }
 }
 
 fn parse_capability_manifest(stream: &str) -> AppResult<BTreeSet<CapabilityEntry>> {
@@ -730,6 +702,15 @@ fn classify_process_error(signal: &str) -> AppError {
         || normalized.contains("rate limit")
     {
         return AppError::new("agent.quota_exhausted", "Claude Code 当前额度不足")
+            .with_detail(json!({ "failure_signal": signal.trim() }));
+    }
+    if normalized.contains("model")
+        && (normalized.contains("unavailable")
+            || normalized.contains("not found")
+            || normalized.contains("does not exist")
+            || normalized.contains("invalid model"))
+    {
+        return AppError::new("agent.model_unavailable", "所选 Claude 模型不可用")
             .with_detail(json!({ "failure_signal": signal.trim() }));
     }
     AppError::new(

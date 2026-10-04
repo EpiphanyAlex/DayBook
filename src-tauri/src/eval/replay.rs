@@ -72,6 +72,10 @@ pub struct FixtureAttempt {
     pub backend_id: String,
     pub backend_version: String,
     pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model_id: Option<String>,
     pub prompt_hash: String,
     pub effective_capability_hash: String,
 }
@@ -179,8 +183,8 @@ pub fn replay_fixture(case_dir: &Path, data_root: &Path) -> EvalResult<ReplayOut
             "INSERT INTO parse_attempts (
                 id, source_id, agent_session_id, backend_id, backend_version, model_id,
                 prompt_hash, tool_surface_version, effective_capability_hash,
-                app_version, started_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                app_version, started_at, requested_model_mode, requested_model_id
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 attempt_id,
                 source_id,
@@ -193,6 +197,8 @@ pub fn replay_fixture(case_dir: &Path, data_root: &Path) -> EvalResult<ReplayOut
                 env.attempt.effective_capability_hash,
                 env.app_version,
                 started_at,
+                env.attempt.requested_model_mode,
+                env.attempt.requested_model_id,
             ],
         )?;
         transaction.execute(

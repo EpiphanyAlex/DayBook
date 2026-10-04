@@ -1,7 +1,7 @@
 import { queryOptions, skipToken, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { call } from '../lib/bridge'
-import type { BackendStatus, EvidenceContent, FoundationStatus, ReviewDraft, ReviewSource, TotalCheck } from './types'
+import type { AgentSelection, BackendStatus, EvidenceContent, FoundationStatus, ReviewDraft, ReviewSource, TotalCheck } from './types'
 
 export const keys = {
   sources: ['review-sources'] as const,
@@ -9,10 +9,12 @@ export const keys = {
   evidence: (id: string) => ['review-evidence', id] as const,
   total: (id: string, attempt: string | null) => ['review-total', id, attempt] as const,
   agent: ['agent-status'] as const, logs: ['agent-logs'] as const, foundation: ['foundation-status'] as const,
+  agentSelection: ['agent-selection'] as const,
 }
 export const sourcesOptions = queryOptions({ queryKey: keys.sources, queryFn: () => call<ReviewSource[]>('list_review_sources') })
 export const foundationOptions = queryOptions({ queryKey: keys.foundation, queryFn: () => call<FoundationStatus>('foundation_status') })
 export const agentOptions = queryOptions({ queryKey: keys.agent, queryFn: () => call<BackendStatus>('agent_status') })
+export const agentSelectionOptions = queryOptions({ queryKey: keys.agentSelection, queryFn: () => call<AgentSelection>('agent_selection') })
 export const logsOptions = queryOptions({ queryKey: keys.logs, queryFn: () => call<string[]>('recent_agent_logs') })
 
 interface DraftProjection { sourceId: string; attemptId: string | null; drafts: ReviewDraft[] }
@@ -99,8 +101,9 @@ const probes = new WeakMap<QueryClient, Promise<void>>()
 export function probeOnce(client: QueryClient) {
   let promise = probes.get(client)
   if (!promise) {
-    promise = call<BackendStatus>('probe_agent').then(async status => {
+    promise = call<BackendStatus>('probe_agent').then(async () => {
       await client.cancelQueries({ queryKey: keys.agent, exact: true })
+      const status = await call<BackendStatus>('agent_status')
       client.setQueryData(keys.agent, status)
       await client.invalidateQueries({ queryKey: keys.logs })
     })

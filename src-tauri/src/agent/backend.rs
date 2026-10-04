@@ -64,6 +64,16 @@ pub struct BackendStatus {
     pub authenticated: Option<bool>,
     pub ready: bool,
     pub error_code: Option<String>,
+    pub quota: String,
+    pub models: Option<Vec<ModelCandidate>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCandidate {
+    pub model_id: String,
+    pub display_name: String,
+    pub supports_images: Option<bool>,
 }
 
 impl BackendStatus {
@@ -78,6 +88,8 @@ impl BackendStatus {
             authenticated: None,
             ready: false,
             error_code: Some("agent.backend_unavailable".to_owned()),
+            quota: "unknown".to_owned(),
+            models: None,
         }
     }
 
@@ -92,6 +104,8 @@ impl BackendStatus {
             authenticated: None,
             ready: false,
             error_code: None,
+            quota: "unknown".to_owned(),
+            models: None,
         }
     }
 }
@@ -135,11 +149,7 @@ pub trait AgentBackend: Send + Sync {
     async fn status(&self) -> BackendStatus;
     async fn probe_cache_key(&self) -> AppResult<String> {
         let status = self.status().await;
-        Ok(format!(
-            "{}:{}",
-            self.id(),
-            status.version.as_deref().unwrap_or("unknown")
-        ))
+        Ok(installation_cache_key(&status))
     }
     async fn probe(&self, database: Arc<Database>) -> AppResult<ProbeResult>;
     async fn run_task(
@@ -148,4 +158,40 @@ pub trait AgentBackend: Send + Sync {
         task: AgentTask,
         cancel: watch::Receiver<bool>,
     ) -> AppResult<AgentTaskResult>;
+}
+
+pub fn installation_cache_key(status: &BackendStatus) -> String {
+    let path = status
+        .executable
+        .as_ref()
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    let metadata = path.as_ref().and_then(|path| std::fs::metadata(path).ok());
+    #[cfg(unix)]
+    let identity = {
+        use std::os::unix::fs::MetadataExt;
+        metadata.as_ref().map(|value| {
+            format!(
+                "{}:{}:{}:{}:{}",
+                value.dev(),
+                value.ino(),
+                value.len(),
+                value.mtime(),
+                value.mtime_nsec()
+            )
+        })
+    };
+    #[cfg(not(unix))]
+    let identity = metadata
+        .as_ref()
+        .map(|value| format!("{}:{:?}", value.len(), value.modified().ok()));
+    format!(
+        "{}:{}:{}:{}",
+        status.backend_id,
+        status.version.as_deref().unwrap_or("unknown"),
+        path.map_or_else(
+            || "unknown".to_owned(),
+            |path| path.to_string_lossy().into_owned()
+        ),
+        identity.unwrap_or_else(|| "unknown".to_owned())
+    )
 }
